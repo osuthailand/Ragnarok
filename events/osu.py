@@ -1,3 +1,4 @@
+from constants.beatmap import Approved
 from objects.beatmap import Beatmap
 from objects.channel import Channel
 from constants.mods import Mods
@@ -144,12 +145,12 @@ async def save_beatmap_file(id: int) -> None:
                     await osu.write(await resp.text())
 
 
-@osu.add_endpoint("/web/bancho_connect.php")
-@check_auth("u", "h", cho_auth = True)
-async def bancho_connect(req: Request) -> bytes:
-    # TODO: make some verification (ch means client hash)
-    #       "error: verify" is a thing
-    return req.headers["CF-IPCountry"].lower().encode()
+# @osu.add_endpoint("/web/bancho_connect.php")
+# @check_auth("u", "h", cho_auth = True)
+# async def bancho_connect(req: Request) -> bytes:
+#     # TODO: make some verification (ch means client hash)
+#     #       "error: verify" is a thing
+#     return req.headers["CF-IPCountry"].lower().encode()
 
 
 @osu.add_endpoint("/web/osu-osz2-getscores.php")
@@ -169,17 +170,15 @@ async def get_scores(req: Request) -> bytes:
 
         return b"-1|true"
 
-    if not hash in glob.beatmaps:
-        b.approved += 1
-
-    if b.approved - 1 <= 0:
+    if b.approved <= Approved.UPDATE:
         if not hash in glob.beatmaps:
             glob.beatmaps[hash] = b
-
-        return b"0|false"
+        print(b.approved)
+        return f"{b.approved.value}|false".encode()
 
     # no need for check, as its in the decorator
-    p = glob.players.get_user(unquote(req.get_args["us"]))
+    if not (p := glob.players.get_user(unquote(req.get_args["us"]))):
+        return b"what"
 
     # pretty sus
     if not int(req.get_args["mods"]) & Mods.RELAX and p.relax:
@@ -191,7 +190,7 @@ async def get_scores(req: Request) -> bytes:
     ret = b.web_format
     order = ("score", "pp")[p.relax]
 
-    if b.approved >= 1:
+    if b.approved >= Approved.RANKED:
         if not (
             data := await glob.sql.fetch(
                 "SELECT id FROM scores WHERE user_id = %s "
@@ -230,7 +229,11 @@ async def get_scores(req: Request) -> bytes:
 
 @osu.add_endpoint("/web/osu-submit-modular-selector.php", methods=["POST"])
 async def score_submission(req: Request) -> bytes:
-    if (ver := req.post_args["osuver"])[:4] != "2021":
+    # The dict is empty for some reason... odd...
+    if not req.post_args:
+        return b"error: unknown"
+
+    if (ver := req.post_args["osuver"])[:4] != "2022":
         return b"error: oldver"
 
     submission_key = f"osu!-scoreburgr---------{ver}"
@@ -242,26 +245,22 @@ async def score_submission(req: Request) -> bytes:
         int(req.post_args["x"]),
     )
 
-    if (
-        not s or
-        not s.player or
-        not s.map
-    ):
+    if not s or not s.player or not s.map:
         return b"error: no"
 
     passed = s.status >= SubmitStatus.PASSED
 
     # i hate this
-    s.id = await glob.sql.fetch("SELECT id FROM scores ORDER BY id DESC LIMIT 1")
-    if not s.id:
+    sid = await glob.sql.fetch("SELECT id FROM scores ORDER BY id DESC LIMIT 1")
+    if not sid:
         s.id = 1
     else:
-        s.id = s.id["id"] + 1
+        s.id = sid["id"] + 1
 
     s.play_time = req.post_args["st" if passed else "ft"]
 
     # handle needed things, if the map is ranked.
-    if s.map.approved >= 1:
+    if s.map.approved >= Approved.RANKED:
         if not s.player.is_restricted:
             s.map.plays += 1
 
@@ -295,7 +294,7 @@ async def score_submission(req: Request) -> bytes:
             prev_stats = copy.copy(stats)
 
         # calculate new stats
-        if s.map.approved >= 1:
+        if s.map.approved >= Approved.RANKED:
 
             stats.playcount += 1
             stats.total_score += s.score
@@ -340,12 +339,9 @@ async def score_submission(req: Request) -> bytes:
                 await stats.update_stats(s.mode, s.relax)
 
                 if s.position == 1 and not stats.is_restricted:
-                    modes = {
-                        0: "osu!", 
-                        1: "osu!taiko", 
-                        2: "osu!catch", 
-                        3: "osu!mania"
-                    }[s.mode]
+                    modes = {0: "osu!", 1: "osu!taiko", 2: "osu!catch", 3: "osu!mania"}[
+                        s.mode
+                    ]
 
                     chan: Channel = glob.channels.get_channel("#announce")
 
@@ -374,24 +370,30 @@ async def score_submission(req: Request) -> bytes:
                     (
                         "chartId:beatmap",
                         f"chartUrl:{s.map.url}",
-                        "chartName:deez nuts",
+                        "chartName:Beatmap Ranking",
                         *(
                             (
-                                Beatmap.add_chart("rank", None, s.position),
-                                Beatmap.add_chart("accuracy", None, s.accuracy),
-                                Beatmap.add_chart("maxCombo", None, s.max_combo),
-                                Beatmap.add_chart("rankedScore", None, s.score),
-                                Beatmap.add_chart("totalScore", None, s.score),
-                                Beatmap.add_chart("pp", None, math.ceil(s.pp)),
+                                Beatmap.add_chart("rank", after=s.position),
+                                Beatmap.add_chart("accuracy", after=s.accuracy),
+                                Beatmap.add_chart("maxCombo", after=s.max_combo),
+                                Beatmap.add_chart("rankedScore", after=s.score),
+                                Beatmap.add_chart("totalScore", after=s.score),
+                                Beatmap.add_chart("pp", after=math.ceil(s.pp)),
                             )
                             if not s.pb
                             else (
                                 Beatmap.add_chart("rank", s.pb.position, s.position),
-                                Beatmap.add_chart("accuracy", s.pb.accuracy, s.accuracy),
-                                Beatmap.add_chart("maxCombo", s.pb.max_combo, s.max_combo),
+                                Beatmap.add_chart(
+                                    "accuracy", s.pb.accuracy, s.accuracy
+                                ),
+                                Beatmap.add_chart(
+                                    "maxCombo", s.pb.max_combo, s.max_combo
+                                ),
                                 Beatmap.add_chart("rankedScore", s.pb.score, s.score),
                                 Beatmap.add_chart("totalScore", s.pb.score, s.score),
-                                Beatmap.add_chart( "pp", math.ceil(s.pb.pp), math.ceil(s.pp)),
+                                Beatmap.add_chart(
+                                    "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
+                                ),
                             )
                         ),
                         f"onlineScoreId:{s.id}",
@@ -404,41 +406,55 @@ async def score_submission(req: Request) -> bytes:
                     (
                         "chartId:overall",
                         f"chartUrl:{s.player.url}",
-                        "chartName:penis",
+                        "chartName:Overall Ranking",
                         *(
                             (
-                                Beatmap.add_chart("rank", None, stats.rank),
-                                Beatmap.add_chart("accuracy", None, stats.accuracy),
-                                Beatmap.add_chart("maxCombo", None, 0),
-                                Beatmap.add_chart("rankedScore", None, stats.ranked_score),
-                                Beatmap.add_chart("totalScore", None, stats.total_score),
-                                Beatmap.add_chart("pp", None, stats.pp),
+                                Beatmap.add_chart("rank", after=stats.rank),
+                                Beatmap.add_chart("accuracy", after=stats.accuracy),
+                                Beatmap.add_chart("maxCombo", after=0),
+                                Beatmap.add_chart(
+                                    "rankedScore", prev=stats.ranked_score
+                                ),
+                                Beatmap.add_chart(
+                                    "totalScore", after=stats.total_score
+                                ),
+                                Beatmap.add_chart("pp", after=stats.pp),
                             )
                             if not prev_stats
                             else (
                                 Beatmap.add_chart("rank", prev_stats.rank, stats.rank),
-                                Beatmap.add_chart("accuracy", prev_stats.accuracy, stats.accuracy),
+                                Beatmap.add_chart(
+                                    "accuracy", prev_stats.accuracy, stats.accuracy
+                                ),
                                 Beatmap.add_chart("maxCombo", 0, 0),
-                                Beatmap.add_chart("rankedScore", prev_stats.ranked_score, stats.ranked_score,),
-                                Beatmap.add_chart("totalScore", prev_stats.total_score, stats.total_score,),
+                                Beatmap.add_chart(
+                                    "rankedScore",
+                                    prev_stats.ranked_score,
+                                    stats.ranked_score,
+                                ),
+                                Beatmap.add_chart(
+                                    "totalScore",
+                                    prev_stats.total_score,
+                                    stats.total_score,
+                                ),
                                 Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
                             )
                         ),
                         # achievements can wait
-                        f"achievements-new:osu-combo-500+deez+nuts",
+                        f"achievements-new:osu-combo-1000+deez+nuts",
                     )
                 )
             )
 
-            asyncio.create_task(
-                run.run_anticheat(
-                    s, f".data/replays/{s.id}.osr", f".data/beatmaps/{s.map.map_id}.osu"
-                )
-            )
+            # asyncio.create_task(
+            #     run.run_anticheat(
+            #         s, f".data/replays/{s.id}.osr", f".data/beatmaps/{s.map.map_id}.osu"
+            #     )
+            # )
 
             stats.last_score = s
         else:
-            return b"error: no"
+            return b"error: disabled"
     else:
         return b"error: no"
 
@@ -448,11 +464,15 @@ async def score_submission(req: Request) -> bytes:
 @osu.add_endpoint("/web/osu-getreplay.php")
 @check_auth("u", "h")
 async def get_replay(req: Request) -> bytes:
-    async with aiofiles.open(f".data/replays/{req.get_args['c']}.osr", "rb") as raw:
-        if replay := await raw.read():
-            return replay
+    try:
+        async with aiofiles.open(f".data/replays/{req.get_args['c']}.osr", "rb") as raw:
+            if replay := await raw.read():
+                return replay
+    except OSError as e:
+        log.info(f"Replay ID {req.get_args['c']} cannot be loaded! (File not found?)")
 
     return b""
+
 
 @osu.add_endpoint("/web/osu-getfriends.php")
 @check_auth("u", "h")
@@ -461,12 +481,12 @@ async def get_friends(req: Request) -> bytes:
 
     await p.get_friends()
 
-    return '\n'.join(map(str, p.friends)).encode()
+    return "\n".join(map(str, p.friends)).encode()
 
 
 @osu.add_endpoint("/web/osu-markasread.php")
 @check_auth("u", "h")
-async def lastfm(req: Request) -> bytes:
+async def markasread(req: Request) -> bytes:
     if not (chan := glob.channels.get_channel(req.get_args["channel"])):
         return b""
 
@@ -496,7 +516,7 @@ async def get_seasonal(req: Request) -> bytes:
 @osu.add_endpoint("/web/osu-error.php", methods=["POST"])
 async def get_osu_error(req: Request) -> bytes:
     # not really our problem though :trolley:
-    # not sending this to bancho, though.
+    # let's just send this empty thing
     return b""
 
 

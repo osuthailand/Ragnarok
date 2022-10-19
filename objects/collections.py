@@ -70,13 +70,13 @@ class Channels:
 
 class Matches:
     def __init__(self):
-        self.matches: "Match" = []
+        self.matches: list["Match"] = []
 
     async def remove_match(self, m: "Match"):
         if m in self.matches:
             self.matches.remove(m)
 
-    async def find_match(self, match_id: int):
+    async def find_match(self, match_id: int) -> "Match":
         for match in self.matches:
             if match_id == match.match_id:
                 return match

@@ -8,3 +8,4 @@ Pipfile
 Pipfile.lock
 
 .vscode
+.mypy_cache

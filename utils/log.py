@@ -1,4 +1,5 @@
 import colored
+from typing import Any
 
 
 class Asora:
@@ -11,25 +12,25 @@ class Asora:
     RESET = colored.attr("reset")
 
 
-def info(msg: str) -> str:
+def info(msg: Any) -> None:
     print(f"[{Asora.INFO}info{Asora.RESET}]\t  {msg}")
 
 
-def chat(msg: str) -> str:
+def chat(msg: Any) -> None:
     print(f"[{Asora.CHAT}chat{Asora.RESET}]\t  {msg}")
 
 
-def debug(msg: str) -> str:
+def debug(msg: Any) -> None:
     print(f"[{Asora.DEBUG}debug{Asora.RESET}]\t  {msg}")
 
 
-def warn(msg: str) -> str:
+def warn(msg: Any) -> None:
     print(f"[{Asora.WARNING}warn{Asora.RESET}]\t  {msg}")
 
 
-def error(msg: str) -> str:
+def error(msg: Any) -> None:
     print(f"[{Asora.ERROR}error{Asora.RESET}]\t  {msg}")
 
 
-def fail(msg: str) -> str:
+def fail(msg: Any) -> None:
     print(f"[{Asora.ERROR}fail{Asora.RESET}]\t  {msg}")

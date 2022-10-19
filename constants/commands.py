@@ -146,6 +146,7 @@ async def last_np(ctx: Context) -> str:
 
     return ctx.author.last_np.full_title
 
+
 @register_command("stats")
 async def user_stats(ctx: Context) -> str:
     """Display a users stats both vanilla or relax."""
@@ -207,6 +208,9 @@ async def verify_with_key(ctx: Context) -> str:
         await writer.Notification(
             "Welcome to Ragnarok. You've successfully verified your account and gained beta access! If you see any bugs or anything unusal, please report it to one of the developers, through Github issues or Discord."
         )
+        + await writer.Notification(
+            "Please login again to prevent any corruption to your user data!"
+        )
     )
 
     log.info(f"{ctx.author.username} successfully verified their account with a key")
@@ -230,8 +234,8 @@ async def start_match(ctx: Context) -> str:
     """Start the multiplayer when all players are ready or force start it."""
     if (
         not ctx.reciever.is_multi
-        (m := ctx.author.match) or
-        ctx.author.match.host != ctx.author.i
+        or not (m := ctx.author.match)
+        or ctx.author.match.host != ctx.author.id
     ):
         return
 
@@ -268,11 +272,12 @@ async def start_match(ctx: Context) -> str:
 @rmp_command("abort", aliases=("ab"))
 async def abort_match(ctx: Context) -> str:
     if (
-        not ctx.reciever.is_multi 
-        (m := ctx.author.match) or
-        not m.in_progress or
-        m.host != ctx.author.id
-    ): return
+        not ctx.reciever.is_multi
+        or not (m := ctx.author.match)
+        or not m.in_progress
+        or m.host != ctx.author.id
+    ):
+        return
 
     for s in m.slots:
         if s.status == SlotStatus.PLAYING:
@@ -292,9 +297,9 @@ async def abort_match(ctx: Context) -> str:
 async def win_condition(ctx: Context) -> str:
     """Change win condition in a multiplayer match."""
     if (
-        not ctx.reciever.is_multi or
-        not (m := ctx.author.match) or 
-        ctx.author.match.host != ctx.author.id
+        not ctx.reciever.is_multi
+        or not (m := ctx.author.match)
+        or ctx.author.match.host != ctx.author.id
     ):
         return
 
@@ -312,7 +317,9 @@ async def win_condition(ctx: Context) -> str:
         m.pp_win_condition = True
 
         await m.enqueue_state()
-        return "Changed win condition to pp. THIS IS IN BETA AND CAN BE REMOVED ANY TIME."
+        return (
+            "Changed win condition to pp. THIS IS IN BETA AND CAN BE REMOVED ANY TIME."
+        )
 
     return "Not a valid win condition"
 
@@ -320,15 +327,15 @@ async def win_condition(ctx: Context) -> str:
 @rmp_command("move")
 async def move_slot(ctx: Context) -> str:
     if (
-        not ctx.reciever.is_multi or 
-        not (m := ctx.author.match) or 
-        ctx.author.match.host != ctx.author.id
+        not ctx.reciever.is_multi
+        or not (m := ctx.author.match)
+        or ctx.author.match.host != ctx.author.id
     ):
         return
-    
+
     if len(ctx.args) < 2:
         return "Wrong usage: !multi move <player> <to_slot>"
-    
+
     ctx.args[1] = int(ctx.args[1]) - 1
 
     player = glob.players.get_user(ctx.args[0])
@@ -343,17 +350,17 @@ async def move_slot(ctx: Context) -> str:
     target.reset()
 
     await m.enqueue_state(lobby=True)
-    
+
     return f"Moved {to.p.username} to slot {ctx.args[1] + 1}"
 
 
 @rmp_command("size")
 async def change_size(ctx: Context) -> str:
     if (
-        not ctx.reciever.is_multi or
-        not  (m := ctx.author.match) or 
-        ctx.author.match.host != ctx.author.id or
-        m.in_progress
+        not ctx.reciever.is_multi
+        or not (m := ctx.author.match)
+        or ctx.author.match.host != ctx.author.id
+        or m.in_progress
     ):
         return
 
@@ -368,12 +375,10 @@ async def change_size(ctx: Context) -> str:
 
     return f"Changed size to {ctx.args[0]}"
 
+
 @rmp_command("get")
 async def get_beatmap(ctx: Context) -> str:
-    if (
-        not ctx.reciever.is_multi or 
-        not (m := ctx.author.match)
-    ):
+    if not ctx.reciever.is_multi or not (m := ctx.author.match):
         return
 
     if not ctx.args:
@@ -389,7 +394,7 @@ async def get_beatmap(ctx: Context) -> str:
 
     if ctx.args[0] == "chimu":
         url += f"download/{m.map_id}"
-        
+
     elif ctx.args[0] == "katsu":
         url += f"d/{m.map_id}"
 
@@ -398,10 +403,7 @@ async def get_beatmap(ctx: Context) -> str:
 
 @rmp_command("invite")
 async def invite_people(ctx: Context) -> str:
-    if (
-        not ctx.reciever.is_multi or 
-        not (m := ctx.author.match)
-    ):
+    if not ctx.reciever.is_multi or not (m := ctx.author.match):
         return
 
     if not ctx.args:
@@ -415,10 +417,11 @@ async def invite_people(ctx: Context) -> str:
 
     await ctx.author.send_message(
         f"Come join my multiplayer match: [osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
-        reciever=target
+        reciever=target,
     )
 
     return f"Invited {target.username}"
+
 
 #
 # Staff commands
@@ -441,6 +444,7 @@ async def announce(ctx: Context) -> str:
         target.enqueue(await writer.Notification(msg))
 
     return "ok"
+
 
 @register_command("kick", required_perms=Privileges.MODERATOR)
 async def kick_user(ctx: Context) -> str:
@@ -548,10 +552,7 @@ async def approve_map(ctx: Context) -> str:
     if not ctx.author.last_np:
         return "Please /np a map first."
 
-    if ctx.author.last_np.hash_md5 in glob.beatmaps:
-        _map = glob.beatmaps[ctx.author.last_np.hash_md5]
-    else:
-        _map = ctx.author.last_np
+    _map = ctx.author.last_np
 
     if len(ctx.args) != 2:
         return "Usage: !approve <set/map> <rank/love/unrank>"
@@ -581,8 +582,10 @@ async def approve_map(ctx: Context) -> str:
 
     resp = f"Successfully changed {_map.full_title}'s status, from {Approved(_map.approved).name} to {ranked_status.name}"
 
+    _map.approved = ranked_status
+
     if ctx.author.last_np.hash_md5 in glob.beatmaps:
-        _map.approved = ranked_status + 1
+        glob.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
 
     return resp
 

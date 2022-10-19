@@ -1,4 +1,4 @@
-from typing import Union, Any, Callable, Pattern, TYPE_CHECKING
+from typing import Any, Callable, Pattern, TYPE_CHECKING
 from lenhttp import Router, LenHTTP
 from lib.database import Database
 from config import conf
@@ -6,7 +6,6 @@ import re
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches
-    from constants.commands import Command
     from objects.beatmap import Beatmap
     from objects.player import Player
     from packets.reader import Packet
@@ -29,11 +28,11 @@ bot: "Player" = None
 
 prefix: str = "!"
 
-config: dict[str, Union[dict[str, Any], str, bool]] = conf
+config: dict[str, dict[str, Any]] = conf
 
 sql: Database = None
 
-bcrypt_cache: dict[str, str] = {}
+bcrypt_cache: dict[str, bytes] = {}
 
 title_card: str = '''
                 . . .o .. o

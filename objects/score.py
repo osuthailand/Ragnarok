@@ -50,8 +50,8 @@ class SubmitStatus(IntEnum):
 
 class Score:
     def __init__(self):
-        self.player: Player = None
-        self.map: Beatmap = None
+        self.player: Player = None  # type: ignore
+        self.map: Beatmap = None  # type: ignore
 
         self.id: int = 0
 
@@ -87,7 +87,7 @@ class Score:
         self.position: int = 0
 
         # previous_best
-        self.pb: "Score" = None
+        self.pb: "Score" = None  # type: ignore
 
     @property
     def web_format(self) -> str:
@@ -111,7 +111,9 @@ class Score:
 
         s = cls()
 
-        s.player = await glob.players.get_user_offline(data["user_id"])
+        s.id = data["id"]
+
+        s.player = await glob.players.get_user_offline(data["user_id"])  # type: ignore
         s.map = await Beatmap.get_beatmap(data["hash_md5"])
 
         s.score = data["score"]
@@ -153,7 +155,7 @@ class Score:
         iv_latin = b64decode(iv).decode("latin_1")
 
         data = (
-            RijndaelCbc(key, iv_latin, ZeroPadding(32), 32)
+            RijndaelCbc(key, iv_latin, ZeroPadding(32), 32)  # type: ignore
             .decrypt(score_latin)
             .decode()
             .split(":")
@@ -161,10 +163,10 @@ class Score:
 
         s = cls()
 
-        s.player = glob.players.get_user(data[1].rstrip())
-
-        if not s.player:
+        if not (player := glob.players.get_user(data[1].rstrip())):
             return
+
+        s.player = player
 
         if data[0] in glob.beatmaps:
             s.map = glob.beatmaps[data[0]]
@@ -209,7 +211,7 @@ class Score:
         if passed:
             await s.calculate_position()
 
-            if Approved(s.map.approved - 1) not in (
+            if s.map.approved not in (
                 Approved.LOVED,
                 Approved.PENDING,
                 Approved.WIP,

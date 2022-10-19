@@ -6,7 +6,8 @@ class Approved(IntEnum):
     WIP = -1
     PENDING = 0
 
-    RANKED = 1
-    APPROVED = 2
-    QUALIFIED = 3
-    LOVED = 4
+    UPDATE = 1
+    RANKED = 2
+    APPROVED = 3
+    QUALIFIED = 4
+    LOVED = 5

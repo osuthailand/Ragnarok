@@ -87,7 +87,7 @@ class Player:
         self.login_time: float = time.time()
         self.last_update: float = 0.0
 
-        self.bot: "Player" = False
+        self.bot: bool = False
 
         self.is_restricted: bool = not (self.privileges & Privileges.VERIFIED) and (
             not self.privileges & Privileges.PENDING
@@ -168,11 +168,7 @@ class Player:
         p.spectating = None
 
     async def join_match(self, m: Match, pwd: Optional[str] = "") -> None:
-        if (
-            self.match or
-            pwd != m.match_pass or
-            not m in glob.matches.matches
-        ):
+        if self.match or pwd != m.match_pass or not m in glob.matches.matches:
             self.enqueue(await writer.MatchFail())
             return  # user is already in a match
 
@@ -193,7 +189,13 @@ class Player:
             slot.host = True
 
         if not self.match.chat:
-            mc = Channel(**{"raw": f"#multi_{self.match.match_id}", "name": "#multiplayer", "description": self.match.match_name})
+            mc = Channel(
+                **{
+                    "raw": f"#multi_{self.match.match_id}",
+                    "name": "#multiplayer",
+                    "description": self.match.match_name,
+                }
+            )
             self.match.chat = mc
 
         await self.join_channel(self.match.chat)
@@ -206,10 +208,7 @@ class Player:
         await self.match.enqueue_state(lobby=True)
 
     async def leave_match(self) -> None:
-        if (
-            not self.match or
-            not (slot := self.match.find_user(self))
-        ):
+        if not self.match or not (slot := self.match.find_user(self)):
             return
 
         await self.leave_channel(self.match.chat)
@@ -244,11 +243,10 @@ class Player:
         await m.enqueue_state(immune={self.id}, lobby=True)
 
     async def join_channel(self, chan: Channel):
-        if (
-            chan in self.channels
-            or (chan.staff  # if the chan is already in the user lists chans
-            and not self.is_staff)  # if the user isnt staff and the chan is.
-        ):
+        if chan in self.channels or (
+            chan.staff  # if the chan is already in the user lists chans
+            and not self.is_staff
+        ):  # if the user isnt staff and the chan is.
             return
 
         self.channels.append(chan)

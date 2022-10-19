@@ -24,8 +24,12 @@ class Channel:
         self.connected: list[Player] = []
 
     @property
-    def is_multi(self):
+    def is_multi(self) -> bool:
         return self.name == "#multiplayer"
+
+    @property
+    def is_dm(self) -> bool:
+        return self.name[0] != "#"
 
     def enqueue(self, data: bytes, ignore: list[int] = []) -> None:
         for p in self.connected:
@@ -42,7 +46,7 @@ class Channel:
         p.channels.append(self)
         self.connected.append(p)
 
-        p.enqueue(await writer.ChanJoinSuccess(self._name))
+        p.enqueue(await writer.ChanJoin(self._name))
 
         await self.update_info()
 

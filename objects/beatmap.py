@@ -7,42 +7,41 @@ from constants.beatmap import Approved
 
 class Beatmap:
     def __init__(self):
-        self.set_id = 0
-        self.map_id = 0
-        self.hash_md5 = ""
+        self.set_id: int = 0
+        self.map_id: int = 0
+        self.hash_md5: str = ""
 
-        self.title = ""
-        self.title_unicode = ""  # added
-        self.version = ""
-        self.artist = ""
-        self.artist_unicode = ""  # added
-        self.creator = ""
-        self.creator_id = 0
+        self.title: str = ""
+        self.title_unicode: str = ""  # added
+        self.version: str = ""
+        self.artist: str = ""
+        self.artist_unicode: str = ""  # added
+        self.creator: str = ""
+        self.creator_id: int = 0
 
-        self.stars = 0.0
-        self.od = 0.0
-        self.ar = 0.0
-        self.hp = 0.0
-        self.cs = 0.0
-        self.mode = 0
-        self.bpm = 0.0
-        self.max_combo = 0
+        self.stars: float = 0.0
+        self.od: float = 0.0
+        self.ar: float = 0.0
+        self.hp: float = 0.0
+        self.cs: float = 0.0
+        self.mode: int = 0
+        self.bpm: float = 0.0
+        self.max_combo: int = 0
 
-        self.approved = Approved.PENDING
+        self.submit_date: str = ""
+        self.approved_date: str = ""
+        self.latest_update: str = ""
 
-        self.submit_date = ""
-        self.approved_date = ""
-        self.latest_update = ""
+        self.length_total: int = 0
+        self.drain: int = 0
 
-        self.length_total = 0
-        self.drain = 0
+        self.plays: int = 0
+        self.passes: int = 0
+        self.favorites: int = 0
 
-        self.plays = 0
-        self.passes = 0
-        self.favorites = 0
+        self.rating: float = 0.0  # added
 
-        self.rating = 0  # added
-
+        self.approved: Approved = Approved.PENDING
         self.scores: int = 0
 
     @property
@@ -74,21 +73,23 @@ class Beatmap:
         return f"{self.approved}|false|{self.map_id}|{self.set_id}|{self.scores}\n0\n{self.display_title}\n{self.rating}"
 
     @staticmethod
-    def add_chart(name: str, prev=None, after=None) -> str:
+    def add_chart(name: str, prev: str = "", after: str = "") -> str:
         return f"{name}Before:{prev if prev else ''}|{name}After:{after}"
 
     @classmethod
     async def _get_beatmap_from_sql(cls, hash: str, beatmap_id: int) -> "Beatmap":
         b = cls()
 
-        if not (ret := await glob.sql.fetch(
-            "SELECT set_id, map_id, hash, title, title_unicode, "
-            "version, artist, artist_unicode, creator, creator_id, stars, "
-            "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
-            "latest_update, length, drain, plays, passes, favorites, rating "
-            f"FROM beatmaps WHERE {'hash' if hash else 'map_id'} = %s",
-            (hash or beatmap_id),
-        )):
+        if not (
+            ret := await glob.sql.fetch(
+                "SELECT set_id, map_id, hash, title, title_unicode, "
+                "version, artist, artist_unicode, creator, creator_id, stars, "
+                "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
+                "latest_update, length, drain, plays, passes, favorites, rating "
+                f"FROM beatmaps WHERE {'hash' if hash else 'map_id'} = %s",
+                (hash or beatmap_id),
+            )
+        ):
             return
 
         b.set_id = ret["set_id"]
@@ -111,7 +112,7 @@ class Beatmap:
         b.mode = ret["mode"]
         b.bpm = ret["bpm"]
 
-        b.approved = ret["approved"]
+        b.approved = Approved(ret["approved"])
 
         b.submit_date = ret["submit_date"]
         b.approved_date = ret["approved_date"]
@@ -134,30 +135,29 @@ class Beatmap:
         ):
             return  # ignore beatmaps there are already in db
 
+        values = [*self.__dict__.values()][:-2]
+        values.append(self.approved.value)
+
         await glob.sql.execute(
             "INSERT INTO beatmaps (set_id, map_id, hash, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
-            "od, ar, hp, cs, mode, bpm, max_combo, approved, submit_date, approved_date, "
-            "latest_update, length, drain, plays, passes, favorites, rating) "
+            "od, ar, hp, cs, mode, bpm, max_combo, submit_date, approved_date, "
+            "latest_update, length, drain, plays, passes, favorites, rating, approved) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
             "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            [*self.__dict__.values()][:-1],
+            values,
         )
 
         log.info(f"Saved {self.full_title} ({self.hash_md5}) into database")
 
     @classmethod
-    async def _get_beatmap_from_osuapi(cls, hash: str, beatmap_id)  -> "Beatmap":
+    async def _get_beatmap_from_osuapi(cls, hash: str, beatmap_id: int) -> "Beatmap":
         b = cls()
 
         async with aiohttp.ClientSession() as session:
             # get the beatmap with its hash
             async with session.get(
-                "https://osu.ppy.sh/api/get_beatmaps?k="
-                + glob.osu_key
-                + f"&{'h' if hash else 'b'}="
-                + hash
-                or beatmap_id
+                f"https://osu.ppy.sh/api/get_beatmaps?k={glob.osu_key}&{'h' if hash else 'b'}={hash or beatmap_id}"
             ) as resp:
                 if not resp or resp.status != 200:
                     return
@@ -190,7 +190,11 @@ class Beatmap:
             0 if ret["max_combo"] is None else int(ret["max_combo"])
         )  # fix taiko and mania "null" combo
 
-        b.approved = Approved(int(ret["approved"])).value
+        # for some reason, the api shows approved as one behind?
+        if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:
+            b.approved = ranked_status
+        else:
+            b.approved = Approved(ranked_status + 1)
 
         b.submit_date = ret["submit_date"]
 
@@ -215,7 +219,7 @@ class Beatmap:
         return b
 
     @classmethod
-    async def get_beatmap(cls, hash: str = "", beatmap_id=0) -> "Beatmap":
+    async def get_beatmap(cls, hash: str = "", beatmap_id: int = 0) -> "Beatmap":
         self = cls()  # trollface
 
         if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id)):

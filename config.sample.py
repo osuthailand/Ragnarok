@@ -1,5 +1,5 @@
 conf = {
-    "server": {"debug": False, "domain": "mitsuha.pw", "port": 8000},
+    "server": {"debug": False, "domain": "YOUR.DOMAIN", "port": 8000},
     "mysql": {
         "host": "localhost",
         "user": "CHANGE THIS",
@@ -11,7 +11,7 @@ conf = {
         "osu_api_key": "CHANGE THIS",
         "mirrors": {
             "chimu": "https://api.chimu.moe/v1/",
-            "katsu": "https://katsu.moe/"
-        }
-    }
+            "katsu": "https://katsu.moe/",
+        },
+    },
 }

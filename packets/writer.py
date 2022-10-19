@@ -196,8 +196,11 @@ async def Notification(msg: str) -> bytes:
 
 
 async def UserPriv(privileges: int) -> bytes:
-    rank = Ranks.NORMAL
+    rank = Ranks.NONE
     rank |= Ranks.SUPPORTER
+
+    if privileges & Privileges.VERIFIED:
+        rank |= Ranks.NORMAL
 
     if privileges & Privileges.BAT:
         rank |= Ranks.BAT
@@ -244,11 +247,14 @@ async def UpdateStats(p: "Player") -> bytes:
     )
 
 
-async def UserPresence(p: "Player") -> bytes:
+async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
     if p not in glob.players.players:
         return b""
 
     rank = Ranks.NONE
+
+    if spoof:
+        rank |= Ranks.SUPPORTER
 
     if p.privileges & Privileges.VERIFIED:
         rank |= Ranks.NORMAL
@@ -335,7 +341,7 @@ async def Logout(id: int) -> bytes:
     )
 
 
-async def FriendsList(*ids: list[int]) -> bytes:
+async def FriendsList(*ids: set[int]) -> bytes:
     return await write(BanchoPackets.CHO_FRIENDS_LIST, (ids, Types.int32_list))
 
 

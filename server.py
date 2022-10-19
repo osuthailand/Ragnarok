@@ -13,7 +13,7 @@ kwargs = {
     "logging": False,
 }
 
-glob.server = LenHTTP(("127.0.0.1", 8000), **kwargs)
+glob.server = LenHTTP(("127.0.0.1", glob.port), **kwargs)
 
 
 @glob.server.before_serving()
@@ -80,5 +80,6 @@ async def fivehundred(req: Request, tb: str):
     return b""
 
 
-glob.server.add_routers({bancho.bancho, avatar.avatar, osu.osu})
-glob.server.start()
+if __name__ == "__main__":
+    glob.server.add_routers({bancho.bancho, avatar.avatar, osu.osu})
+    glob.server.start()

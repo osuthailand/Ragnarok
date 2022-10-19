@@ -164,52 +164,6 @@ class Reader:
         return ret
 
     def read_match(self) -> Match:
-        # m = Match()
-
-        # m.match_id = len(glob.matches.matches)
-
-        # # self.offset += 2
-        # self.read_uint16()
-
-        # m.in_progress = bool(self.read_int8())
-
-        # self.read_byte()  # ignore match type; 0 = normal osu!, 1 = osu! arcade
-
-        # m.mods = Mods(self.read_uint32())
-
-        # m.match_name = self.read_str()
-        # m.match_pass = self.read_str()
-
-        # m.map_title = self.read_str()
-        # m.map_id = self.read_int32()
-        # m.map_md5 = self.read_str()
-
-        # for slot in m.slots:
-        #     slot.status = SlotStatus(self.read_int8())
-
-        # for slot in m.slots:
-        #     slot.team = SlotTeams(self.read_int8())
-
-        # for slot in m.slots:
-        #     if slot.status & SlotStatus.OCCUPIED:
-        #         # self.offset += 4
-        #         self.read_int32()
-
-        # m.host = self.read_int32()
-
-        # m.mode = Mode(self.read_byte())
-        # m.scoring_type = ScoringType(self.read_byte())
-        # m.team_type = TeamType(self.read_byte())
-
-        # m.freemods = self.read_byte() == 1
-
-        # if m.freemods:
-        #     for slot in m.slots:
-        #         slot.mods = Mods(self.read_int32())
-
-        # m.seed = self.read_int32()
-
-        # return m
         m = Match()
 
         m.match_id = len(glob.matches.matches)
@@ -279,5 +233,9 @@ class Reader:
         s.tag_byte = self.read_byte()
 
         s.score_v2 = self.read_int8()
+
+        if s.score_v2:
+            self.read_float64()
+            self.read_float64()
 
         return s

@@ -24,10 +24,30 @@ if TYPE_CHECKING:
 @dataclass
 class Context:
     author: "Player"
-    reciever: Union["Channel", "Player"]
+    reciever: Union["Channel", "Player"]  # can't use | operator because str and str
 
     cmd: str
     args: list[str]
+
+    # there is probably a better solution to this
+    # but this is just what i quickly came up with
+    async def await_response(self) -> str:
+        glob.await_response[self.author.token] = ""
+
+        # they will have 60 seconds to respond.
+        for i in range(0, 60):
+            if glob.await_response[self.author.token]:
+                msg = glob.await_response[self.author.token]
+                glob.await_response.pop(self.author.token)
+
+                if msg[0] == "!":
+                    pass
+
+                return msg
+
+            await asyncio.sleep(1)
+        else:
+            return ""
 
 
 @dataclass
@@ -48,10 +68,10 @@ mp_commands: list["Command"] = []
 def rmp_command(
     trigger: str,
     required_perms: Privileges = Privileges.USER,
-    hidden: str = False,
+    hidden: bool = False,
     aliases: list[str] = [],
 ):
-    def decorator(cb: Callable) -> Callable:
+    def decorator(cb: Callable) -> None:
         cmd = Command(
             trigger=cb,
             cmd=trigger,
@@ -69,10 +89,10 @@ def rmp_command(
 def register_command(
     trigger: str,
     required_perms: Privileges = Privileges.USER,
-    hidden: str = False,
-    aliases: tuple[str] = (),
+    hidden: bool = False,
+    aliases: list[str] = (),
 ):
-    def decorator(cb: Callable) -> Callable:
+    def decorator(cb: Callable) -> None:
         cmd = Command(
             trigger=cb,
             cmd=trigger,
@@ -229,6 +249,31 @@ async def multi_help(ctx: Context) -> str:
     return "Not done yet."
 
 
+@rmp_command("make")
+async def make_multi(ctx: Context) -> str:
+    ...
+
+
+@rmp_command("makeprivate")
+async def make_private_multi(ctx: Context) -> str:
+    ...
+
+
+@rmp_command("name")
+async def change_multi_name(ctx: Context) -> str:
+    ...
+
+
+@rmp_command("lock")
+async def lock_slot(ctx: Context) -> str:
+    ...
+
+
+@rmp_command("unlock")
+async def unlock_slot(ctx: Context) -> str:
+    ...
+
+
 @rmp_command("start")
 async def start_match(ctx: Context) -> str:
     """Start the multiplayer when all players are ready or force start it."""
@@ -257,7 +302,13 @@ async def start_match(ctx: Context) -> str:
         for slot in m.slots
         if slot.status & SlotStatus.OCCUPIED
     ):
-        return "All players aren't ready. The command for force starting a match is !mp start force"
+        await ctx.reciever.send(
+            message="All players aren't ready, would you like to force start? (y/n)",
+            sender=glob.bot,
+        )
+        response = await ctx.await_response()
+        if response == "n":
+            return
 
     for slot in m.slots:
         if slot.status & SlotStatus.OCCUPIED:
@@ -267,6 +318,7 @@ async def start_match(ctx: Context) -> str:
 
     m.enqueue(await writer.MatchStart(m))
     await m.enqueue_state()
+    return "Starting match... Good luck!"
 
 
 @rmp_command("abort", aliases=("ab"))
@@ -407,7 +459,8 @@ async def invite_people(ctx: Context) -> str:
         return
 
     if not ctx.args:
-        return "Wrong usage: !multi invite <username>"
+        await ctx.reciever.send(message="Who do you want to invite?", sender=glob.bot)
+        response = await ctx.await_response()
 
     if not (target := glob.players.get_user(ctx.args[0])):
         return "The user is not online."
@@ -513,7 +566,7 @@ async def unrestrict_user(ctx: Context) -> str:
         return "Usage: !unrestrict <username>"
 
     if not (t := await glob.players.get_user_offline(" ".join(ctx.args))):
-        return "Player isn't online or couldn't be found in the database"
+        return "Player couldn't be found in the database"
 
     if not t.is_restricted:
         return "Player isn't even restricted?"
@@ -522,9 +575,10 @@ async def unrestrict_user(ctx: Context) -> str:
         "UPDATE users SET privileges = privileges + 4 WHERE id = %s", (t.id)
     )
 
-    t.privileges += Privileges.VERIFIED
+    t.privileges |= Privileges.VERIFIED
 
-    t.enqueue(await writer.Notification("An admin has unrestricted your account!"))
+    if t.token:  # if user is online
+        t.enqueue(await writer.Notification("An admin has unrestricted your account!"))
 
     return f"Successfully unrestricted {t.username}"
 
@@ -588,6 +642,16 @@ async def approve_map(ctx: Context) -> str:
         glob.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
 
     return resp
+
+
+@register_command("test_awaited_response")
+async def await_response_test(ctx: Context) -> str:
+    response = await ctx.await_response()
+
+    if not response:
+        return "timeout"
+
+    return response
 
 
 @register_command("key", required_perms=Privileges.ADMIN)

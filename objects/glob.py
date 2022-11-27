@@ -63,3 +63,6 @@ regex: dict[str, Pattern[str]] = {
         rf"\x01ACTION is (?:listening|editing|playing|watching) to \[https://osu.{domain}/beatmapsets/[0-9].*#/(\d*)"
     )
 }
+
+# {token: "message"}
+await_response: dict[str, str] = {}

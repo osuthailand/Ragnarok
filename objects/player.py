@@ -172,7 +172,7 @@ class Player:
             self.enqueue(await writer.MatchFail())
             return  # user is already in a match
 
-        if (free_slot := m.get_free_slot()) is None:
+        if (free_slot := m.get_free_slot()) == -1:
             self.enqueue(await writer.MatchFail())
             log.warn(f"{self.username} tried to join a full match ({m!r})")
             return
@@ -182,7 +182,7 @@ class Player:
         slot = m.slots[free_slot]
 
         slot.p = self
-        slot.mods = 0
+        slot.mods = Mods.NONE
         slot.status = SlotStatus.NOTREADY
 
         if m.host == self.id:

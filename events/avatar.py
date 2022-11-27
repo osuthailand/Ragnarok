@@ -10,7 +10,7 @@ a_path = ".data/avatars/"
 @avatar.add_endpoint("/<uid>")
 async def handle(req: Request, uid: str) -> bytes:
     if not uid or not uid.isnumeric():
-        return 0
+        return b""
 
     if not os.path.exists(a_path + f"{uid}.png"):
         async with aiofiles.open(a_path + "0.png", "rb") as ava:

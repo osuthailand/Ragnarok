@@ -1,5 +1,5 @@
 from objects.collections import Tokens, Channels, Matches
-from events import bancho, osu, avatar  # dont remove
+from events import bancho, osu, avatar
 from lenhttp import LenHTTP, Request
 from lib.database import Database
 from objects.bot import Louise

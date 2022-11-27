@@ -1,5 +1,6 @@
 from constants.player import bStatus, Privileges
 from constants.packets import BanchoPackets
+from objects.channel import Channel
 from packets.reader import Reader, Packet
 from constants import commands as cmd
 from objects.beatmap import Beatmap
@@ -25,7 +26,7 @@ import re
 
 
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
-    def decorator(cb: Callable) -> Callable:
+    def decorator(cb: Callable) -> None:
         glob.packets |= {
             packet.value: Packet(packet=packet, callback=cb, restricted=restricted)
         }
@@ -264,6 +265,11 @@ async def change_action(p: Player, sr: Reader) -> None:
         glob.players.enqueue(await writer.UpdateStats(p))
 
 
+async def _handle_command(chan: Channel, msg: str, p: Player):
+    if resp := await cmd.handle_commands(message=msg, sender=p, reciever=chan):
+        await chan.send(resp, sender=glob.bot)
+
+
 # id: 1
 @register_event(BanchoPackets.OSU_SEND_PUBLIC_MESSAGE)
 async def send_public_message(p: Player, sr: Reader) -> None:
@@ -305,9 +311,11 @@ async def send_public_message(p: Player, sr: Reader) -> None:
 
     await chan.send(msg, p)
 
+    if p.token in glob.await_response and not glob.await_response[p.token]:
+        glob.await_response[p.token] = msg
+
     if msg[0] == glob.prefix:
-        if resp := await cmd.handle_commands(message=msg, sender=p, reciever=chan):
-            await chan.send(resp, sender=glob.bot)
+        asyncio.create_task(_handle_command(chan, msg, p))
 
 
 # id: 2

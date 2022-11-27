@@ -77,6 +77,8 @@ class Match:
             if slot.status == SlotStatus.OPEN:
                 return id
 
+        return -1
+
     def find_host(self) -> Players:
         for slot in self.slots:
             if slot.p.id == self.host:
@@ -106,7 +108,9 @@ class Match:
 
         await self.enqueue_state()
 
-    async def enqueue_state(self, immune: set[int] = set(), lobby: bool = False) -> None:
+    async def enqueue_state(
+        self, immune: set[int] = set(), lobby: bool = False
+    ) -> None:
         for p in self.connected:
             if p.id not in immune:
                 p.enqueue(await writer.MatchUpdate(self))

@@ -7,6 +7,12 @@ conf = {
         "db": "CHANGE THIS",
         "autocommit": True,
     },
+    "redis": {
+        "host": "localhost",
+        "username": "CHANGE THIS IF ANYTHING",
+        "password": "CHANGE THIS IF ANYTHING",
+        "port": 6379,
+    },
     "api_conf": {
         "osu_api_key": "CHANGE THIS",
         "mirrors": {

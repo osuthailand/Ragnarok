@@ -3,7 +3,7 @@ from objects.channel import Channel
 from constants.playmode import Mode
 from constants.mods import Mods
 from packets import writer
-from objects import glob
+from objects import services
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -116,7 +116,7 @@ class Match:
                 p.enqueue(await writer.MatchUpdate(self))
 
         if lobby:
-            chan = glob.channels.get_channel("#lobby")
+            chan = services.channels.get("#lobby")
             chan.enqueue(await writer.MatchUpdate(self))
 
     def enqueue(self, data, lobby: bool = False) -> None:
@@ -124,5 +124,5 @@ class Match:
             p.enqueue(data)
 
         if lobby:
-            chan = glob.channels.get_channel("#lobby")
+            chan = services.channels.get("#lobby")
             chan.enqueue(data)

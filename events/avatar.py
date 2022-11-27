@@ -1,9 +1,11 @@
-from lenhttp import Request, Router
-from objects import glob
-import aiofiles
 import os
 
-avatar = Router({f"a.{glob.domain}", f"127.0.0.1:{glob.port}"})
+import aiofiles
+from lenhttp import Request, Router
+
+from objects import services
+
+avatar = Router({f"a.{services.domain}", f"127.0.0.1:{services.port}"})
 a_path = ".data/avatars/"
 
 

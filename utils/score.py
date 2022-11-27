@@ -1,35 +1,41 @@
-from objects import glob
+from objects import services
 from constants.playmode import Mode
 from utils import log
 
 
 def calculate_accuracy(
-    mode: Mode, count_300: int, count_100: int, count_50: int, count_geki: int, count_katu: int, count_miss: int
+    mode: Mode,
+    count_300: int,
+    count_100: int,
+    count_50: int,
+    count_geki: int,
+    count_katu: int,
+    count_miss: int,
 ) -> float:
+    if mode not in (Mode.OSU, Mode.TAIKO, Mode.CATCH, Mode.MANIA):
+        return 0.0
+
     if mode == Mode.OSU:
-        if glob.debug:
+        if services.debug:
             log.debug("Calculating accuracy for standard")
 
         acc = (50 * count_50 + 100 * count_100 + 300 * count_300) / (
             300 * (count_miss + count_50 + count_100 + count_300)
         )
-
-    if mode == Mode.TAIKO:
-        if glob.debug:
+    elif mode == Mode.TAIKO:
+        if services.debug:
             log.debug("Calculating accuracy for taiko")
 
         acc = (0.5 * count_100 + count_300) / (count_miss + count_100 + count_300)
-
-    if mode == Mode.CATCH:
-        if glob.debug:
+    elif mode == Mode.CATCH:
+        if services.debug:
             log.debug("Calculating accuracy for catch the beat")
 
         acc = (count_50 + count_100 + count_300) / (
             count_katu + count_miss + count_50 + count_100 + count_300
         )
-
-    if mode == Mode.MANIA:
-        if glob.debug:
+    else:
+        if services.debug:
             log.debug("Calculating accuracy for mania")
 
         acc = (

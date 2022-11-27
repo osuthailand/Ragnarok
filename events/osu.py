@@ -2,7 +2,7 @@ from constants.beatmap import Approved
 from objects.beatmap import Beatmap
 from objects.channel import Channel
 from constants.mods import Mods
-from objects import glob
+from objects import services
 from utils import log
 from objects.score import Score, SubmitStatus
 from collections import defaultdict
@@ -37,7 +37,7 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
 
             if cho_auth:
                 if not (
-                    user_info := await glob.sql.fetch(
+                    user_info := await services.sql.fetch(
                         "SELECT username, id, privileges, "
                         "passhash, lon, lat, country, cc FROM users "
                         "WHERE safe_username = %s",
@@ -49,8 +49,8 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
                 phash = user_info["passhash"].encode("utf-8")
                 pmd5 = password.encode("utf-8")
 
-                if phash in glob.bcrypt_cache:
-                    if pmd5 != glob.bcrypt_cache[phash]:
+                if phash in services.bcrypt_cache:
+                    if pmd5 != services.bcrypt_cache[phash]:
                         log.warn(
                             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
                         )
@@ -64,13 +64,13 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
 
                         return b""
 
-                    glob.bcrypt_cache[phash] = pmd5
+                    services.bcrypt_cache[phash] = pmd5
             else:
-                if not (p := glob.players.get_user(player)):
+                if not (p := services.players.get(player)):
                     return b""
 
-                if p.passhash in glob.bcrypt_cache:
-                    if password.encode("utf-8") != glob.bcrypt_cache[p.passhash]:
+                if p.passhash in services.bcrypt_cache:
+                    if password.encode("utf-8") != services.bcrypt_cache[p.passhash]:
                         return b""
 
             return await cb(req, *args, **kwargs)
@@ -80,7 +80,7 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
     return decorator
 
 
-osu = Router({f"osu.{glob.domain}", f"127.0.0.1:{glob.port}"})
+osu = Router({f"osu.{services.domain}", f"127.0.0.1:{services.port}"})
 
 
 @osu.add_endpoint("/users", methods=["POST"])
@@ -91,12 +91,12 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
 
     error_response = defaultdict(list)
 
-    if await glob.sql.fetch("SELECT 1 FROM users WHERE username = %s", [uname]):
+    if await services.sql.fetch("SELECT 1 FROM users WHERE username = %s", [uname]):
         error_response["username"].append(
             "A user with that name already exists in our database."
         )
 
-    if await glob.sql.fetch("SELECT 1 FROM users WHERE email = %s", [email]):
+    if await services.sql.fetch("SELECT 1 FROM users WHERE email = %s", [email]):
         error_response["user_email"].append(
             "A user with that name already exists in our database."
         )
@@ -108,7 +108,7 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
         pw_bcrypt = bcrypt.hashpw(pw_md5, bcrypt.gensalt())
 
-        id = await glob.sql.execute(
+        id = await services.sql.execute(
             "INSERT INTO users (id, username, safe_username, passhash, "
             "email, privileges, latest_activity_time, registered_time) "
             "VALUES (NULL, %s, %s, %s, %s, %s, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())",
@@ -121,8 +121,8 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
             ],
         )
 
-        await glob.sql.execute("INSERT INTO stats (id) VALUES (%s)", [id])
-        await glob.sql.execute("INSERT INTO stats_rx (id) VALUES (%s)", [id])
+        await services.sql.execute("INSERT INTO stats (id) VALUES (%s)", [id])
+        await services.sql.execute("INSERT INTO stats_rx (id) VALUES (%s)", [id])
 
     return b"ok"
 
@@ -159,25 +159,25 @@ async def get_scores(req: Request) -> bytes:
     hash = req.get_args["c"]
     mode = int(req.get_args["m"])
 
-    if not hash in glob.beatmaps:
+    if not hash in services.beatmaps:
         b = await Beatmap.get_beatmap(hash, req.get_args["i"])
     else:
-        b = glob.beatmaps[hash]
+        b = services.beatmaps[hash]
 
     if not b:
-        if not hash in glob.beatmaps:
-            glob.beatmaps[hash] = None
+        if not hash in services.beatmaps:
+            services.beatmaps[hash] = None
 
         return b"-1|true"
 
     if b.approved <= Approved.UPDATE:
-        if not hash in glob.beatmaps:
-            glob.beatmaps[hash] = b
-        print(b.approved)
+        if not hash in services.beatmaps:
+            services.beatmaps[hash] = b
+
         return f"{b.approved.value}|false".encode()
 
     # no need for check, as its in the decorator
-    if not (p := glob.players.get_user(unquote(req.get_args["us"]))):
+    if not (p := services.players.get(unquote(req.get_args["us"]))):
         return b"what"
 
     # pretty sus
@@ -192,7 +192,7 @@ async def get_scores(req: Request) -> bytes:
 
     if b.approved >= Approved.RANKED:
         if not (
-            data := await glob.sql.fetch(
+            data := await services.sql.fetch(
                 "SELECT id FROM scores WHERE user_id = %s "
                 "AND relax = %s AND hash_md5 = %s AND mode = %s "
                 f"AND status = 3 ORDER BY {order} DESC LIMIT 1",
@@ -205,7 +205,7 @@ async def get_scores(req: Request) -> bytes:
 
             ret += s.web_format
 
-        async for play in glob.sql.iterall(
+        async for play in services.sql.iterall(
             "SELECT s.id FROM scores s INNER JOIN users u ON u.id = s.user_id "
             "WHERE s.hash_md5 = %s AND s.mode = %s AND s.relax = %s AND s.status = 3 "
             f"AND u.privileges & 4 ORDER BY s.{order} DESC, s.submitted ASC LIMIT 50",
@@ -221,8 +221,8 @@ async def get_scores(req: Request) -> bytes:
 
     asyncio.create_task(save_beatmap_file(b.map_id))
 
-    if not hash in glob.beatmaps:
-        glob.beatmaps[hash] = b
+    if not hash in services.beatmaps:
+        services.beatmaps[hash] = b
 
     return ret.encode()  # placeholder
 
@@ -249,14 +249,6 @@ async def score_submission(req: Request) -> bytes:
         return b"error: no"
 
     passed = s.status >= SubmitStatus.PASSED
-
-    # i hate this
-    sid = await glob.sql.fetch("SELECT id FROM scores ORDER BY id DESC LIMIT 1")
-    if not sid:
-        s.id = 1
-    else:
-        s.id = sid["id"] + 1
-
     s.play_time = req.post_args["st" if passed else "ft"]
 
     # handle needed things, if the map is ranked.
@@ -277,12 +269,12 @@ async def score_submission(req: Request) -> bytes:
                 with open(f".data/replays/{s.id}.osr", "wb+") as file:
                     file.write(req.files["score"])
 
-                await glob.sql.execute(
+                await services.sql.execute(
                     "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
                     (s.map.plays, s.map.passes, s.map.hash_md5),
                 )
 
-    await s.save_to_db()
+    s.id = await s.save_to_db() + 1
 
     if passed:
         stats = s.player
@@ -302,16 +294,6 @@ async def score_submission(req: Request) -> bytes:
             if s.status == SubmitStatus.BEST:
                 table = ("stats", "stats_rx")[s.relax]
 
-                rank = await glob.sql.fetch(
-                    f"SELECT COUNT(*) AS rank FROM {table} t "
-                    "INNER JOIN users u ON u.id = t.id "
-                    "WHERE t.id != %s AND t.pp_std > %s "
-                    "ORDER BY t.pp_std DESC, t.total_score_std DESC LIMIT 1",
-                    (stats.id, stats.pp),
-                )
-
-                stats.rank = rank["rank"] + 1
-
                 sus = s.score
 
                 if s.pb:
@@ -319,7 +301,7 @@ async def score_submission(req: Request) -> bytes:
 
                 stats.ranked_score += sus
 
-                scores = await glob.sql.fetchall(
+                scores = await services.sql.fetchall(
                     "SELECT pp, accuracy FROM scores "
                     "WHERE user_id = %s AND mode = %s "
                     "AND status = 3 AND relax = %s",
@@ -336,18 +318,19 @@ async def score_submission(req: Request) -> bytes:
                 weighted += 416.6667 * (1 - 0.9994 ** len(scores))
                 stats.pp = math.ceil(weighted)
 
+                s.rank = await stats.update_rank(s.relax, s.mode) + 1
                 await stats.update_stats(s.mode, s.relax)
 
                 if s.position == 1 and not stats.is_restricted:
                     modes = {0: "osu!", 1: "osu!taiko", 2: "osu!catch", 3: "osu!mania"}[
-                        s.mode
+                        s.mode.value
                     ]
 
-                    chan: Channel = glob.channels.get_channel("#announce")
+                    chan: Channel = services.channels.get("#announce")
 
                     await chan.send(
                         f"{s.player.embed} achieved #1 on {s.map.embed} ({modes}) [{'RX' if s.relax else 'VN'}]",
-                        sender=glob.bot,
+                        sender=services.bot,
                     )
 
         if not s.relax:
@@ -477,7 +460,7 @@ async def get_replay(req: Request) -> bytes:
 @osu.add_endpoint("/web/osu-getfriends.php")
 @check_auth("u", "h")
 async def get_friends(req: Request) -> bytes:
-    p = await glob.players.get_user_offline(unquote(req.get_args["u"]))
+    p = await services.players.get_offline(unquote(req.get_args["u"]))
 
     await p.get_friends()
 
@@ -487,7 +470,7 @@ async def get_friends(req: Request) -> bytes:
 @osu.add_endpoint("/web/osu-markasread.php")
 @check_auth("u", "h")
 async def markasread(req: Request) -> bytes:
-    if not (chan := glob.channels.get_channel(req.get_args["channel"])):
+    if not (chan := services.channels.get(req.get_args["channel"])):
         return b""
 
     # TODO: maybe make a mail system???
@@ -548,3 +531,50 @@ async def get_screenshot(req: Request, ssid: int) -> bytes:
             return await ss.read()
 
     return b"no screenshot with that id."
+
+
+@osu.add_endpoint("/web/osu-search.php")
+@check_auth("u", "h")
+async def osu_direct(req: Request) -> bytes:
+    # man im way too lazy to do this man
+    args = req.get_args
+
+    if (query := args["q"]) in ("Newest", "Top+Rated", "Most+Played"):
+        query = ""
+
+    url = f"https://nasuya.xyz/api/v1/search?osu_direct=true&mode={args['m']}"
+
+    if query:
+        url += f"&query={query}"
+
+    log.debug(url)
+
+    async with aiohttp.ClientSession() as sess:
+        async with sess.get(url) as resp:
+            a = await resp.text()
+            return a.encode()
+
+
+@osu.add_endpoint("/web/osu-search-set.php")
+@check_auth("u", "h")
+async def osu_search_set(req: Request) -> bytes:
+    log.debug(req.get_args)
+    map = await services.sql.fetch(
+        "SELECT set_id, artist, title, rating, "
+        "creator, approved, latest_update "
+        "FROM beatmaps WHERE map_id = %s",
+        (req.get_args["b"]),
+    )
+
+    return (
+        "{set_id}.osz|{artist}|{title}|"
+        "{creator}|{approved}|{rating}|"
+        "{latest_update}|{set_id}|"
+        "0|0|0|0|0".format(**map).encode()
+    )
+
+
+@osu.add_endpoint("/d/<map_id>")
+async def download_osz(req: Request, map_id: int) -> bytes:
+    # redirect to osu.ppy.sh/d/<id>
+    return b""

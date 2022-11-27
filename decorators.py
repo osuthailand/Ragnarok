@@ -1,9 +1,9 @@
 from typing import Callable
-from objects import glob
+from objects import services
 
 
 def register_task() -> Callable:
     def wrapper(cb: Callable) -> None:
-        glob.registered_tasks.append({"func": cb})
+        services.registered_tasks.append({"func": cb})
 
     return wrapper

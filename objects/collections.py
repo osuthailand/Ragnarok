@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Any, Union
 
-from objects import glob
+from objects import services
 from objects.channel import Channel
 from objects.match import Match
 from objects.player import Player
@@ -10,13 +10,13 @@ class Tokens:
     def __init__(self):
         self.players: list[Player] = []
 
-    def add_user(self, p: Player) -> None:
+    def add(self, p: Player) -> None:
         self.players.append(p)
 
-    def remove_user(self, p: Player) -> None:
+    def remove(self, p: Player) -> None:
         self.players.remove(p)
 
-    def get_user(self, value: Union[str, int]) -> Player:
+    def get(self, value: Union[str, int]) -> Player:
         for p in self.players:
             if (
                 p.id == value
@@ -26,15 +26,15 @@ class Tokens:
             ):
                 return p
 
-    async def get_user_offline(self, value: Union[str, int]) -> Player:
-        if p := self.get_user(value):
+    async def get_offline(self, value: Union[str, int]) -> Player:
+        if p := self.get(value):
             return p
 
         if p := await self.from_sql(value):
             return p
 
     async def from_sql(self, value: Union[str, int]) -> Player:
-        data = await glob.sql.fetch(
+        data = await services.sql.fetch(
             "SELECT username, id, privileges, passhash FROM users "
             "WHERE (id = %s OR username = %s OR safe_username = %s)",
             (value, value, value),
@@ -56,15 +56,15 @@ class Channels:
     def __init__(self):
         self.channels: list[Channel] = []
 
-    def add_channel(self, data: dict[str, Any]) -> None:
+    def add(self, data: dict[str, Any]) -> None:
         self.channels.append(Channel(**data))
 
-    def remove_channel(self, c: Channel) -> None:
+    def remove(self, c: Channel) -> None:
         self.channels.remove(c)
 
-    def get_channel(self, name: str) -> Channel:
+    def get(self, name: str) -> Channel:
         for chan in self.channels:
-            if chan._name == name:
+            if chan._name == name or chan.name == name:
                 return chan
 
 
@@ -72,14 +72,14 @@ class Matches:
     def __init__(self):
         self.matches: list["Match"] = []
 
-    async def remove_match(self, m: "Match"):
+    async def remove(self, m: "Match"):
         if m in self.matches:
             self.matches.remove(m)
 
-    async def find_match(self, match_id: int) -> "Match":
+    async def find(self, match_id: int) -> "Match":
         for match in self.matches:
             if match_id == match.match_id:
                 return match
 
-    async def add_match(self, m: "Match"):
+    async def add(self, m: "Match"):
         self.matches.append(m)

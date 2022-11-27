@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from objects.match import Match
 from constants.mods import Mods
 from constants.match import *
-from objects import glob
+from objects import services
 from utils import log
 import struct
 
@@ -34,8 +34,8 @@ class Reader:
         while self.data:
             self.packet, self.plen = self.read_headers()
 
-            if self.packet not in glob.packets and (not self.packet > 109):
-                if glob.debug and self.packet not in IGNORED_PACKETS:
+            if self.packet not in services.packets and (not self.packet > 109):
+                if services.debug and self.packet not in IGNORED_PACKETS:
                     log.warn(
                         f"Packet <{BanchoPackets(self.packet)} | {BanchoPackets(self.packet).name}> has been requested although it's an unregistered packet."
                     )
@@ -49,7 +49,7 @@ class Reader:
 
         self.packet = BanchoPackets(self.packet)
 
-        return glob.packets[self.packet.value]
+        return services.packets[self.packet.value]
 
     def read_headers(self) -> tuple[BanchoPackets, int]:
         if len(self.data) < 7:
@@ -153,12 +153,12 @@ class Reader:
         self.offset += result
         return ret
 
-    def _read_raw(self, length: int) -> AnyStr:
+    def _read_raw(self, length: int) -> memoryview:
         ret = self.data[:length]
         self.offset += length
         return ret
 
-    def read_raw(self) -> AnyStr:
+    def read_raw(self) -> memoryview:
         ret = self.data[: self.plen]
         self.offset += self.plen
         return ret
@@ -166,11 +166,11 @@ class Reader:
     def read_match(self) -> Match:
         m = Match()
 
-        m.match_id = len(glob.matches.matches)
+        m.match_id = len(services.matches.matches)
 
         self.offset += 2
 
-        m.in_progress = self.read_int8()
+        m.in_progress = self.read_int8() == 1
 
         self.read_int8()  # ignore match type; 0 = normal osu!, 1 = osu! arcade
 
@@ -227,12 +227,12 @@ class Reader:
         s.max_combo = self.read_uint16()
         s.combo = self.read_uint16()
 
-        s.perfect = self.read_int8()
+        s.perfect = self.read_int8() == 1
 
         s.current_hp = self.read_byte()
         s.tag_byte = self.read_byte()
 
-        s.score_v2 = self.read_int8()
+        s.score_v2 = self.read_int8() == 1
 
         if s.score_v2:
             self.read_float64()

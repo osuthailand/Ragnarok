@@ -9,7 +9,7 @@ from objects.player import Player
 from constants.mods import Mods
 from base64 import b64decode
 from enum import IntEnum
-from objects import glob
+from objects import services
 from utils import score
 import oppai as pp
 import math
@@ -100,7 +100,7 @@ class Score:
 
     @classmethod
     async def set_data_from_sql(cls, score_id: int) -> "Score":
-        data = await glob.sql.fetch(
+        data = await services.sql.fetch(
             "SELECT id, user_id, hash_md5, score, pp, count_300, count_100, "
             "count_50, count_geki, count_katu, count_miss, "
             "max_combo, accuracy, perfect, rank, mods, status, "
@@ -113,7 +113,7 @@ class Score:
 
         s.id = data["id"]
 
-        s.player = await glob.players.get_user_offline(data["user_id"])  # type: ignore
+        s.player = await services.players.get_offline(data["user_id"])  # type: ignore
         s.map = await Beatmap.get_beatmap(data["hash_md5"])
 
         s.score = data["score"]
@@ -163,13 +163,13 @@ class Score:
 
         s = cls()
 
-        if not (player := glob.players.get_user(data[1].rstrip())):
+        if not (player := services.players.get(data[1].rstrip())):
             return
 
         s.player = player
 
-        if data[0] in glob.beatmaps:
-            s.map = glob.beatmaps[data[0]]
+        if data[0] in services.beatmaps:
+            s.map = services.beatmaps[data[0]]
         else:
             s.map = await Beatmap.get_beatmap(data[0])
 
@@ -232,7 +232,7 @@ class Score:
                 pp.ezpp_free(ez)
 
             # find our previous best score on the map
-            if prev_best := await glob.sql.fetch(
+            if prev_best := await services.sql.fetch(
                 "SELECT id FROM scores WHERE user_id = %s "
                 "AND relax = %s AND hash_md5 = %s "
                 "AND mode = %s AND status = 3 LIMIT 1",
@@ -247,7 +247,7 @@ class Score:
                     s.status = SubmitStatus.BEST
                     s.pb.status = SubmitStatus.PASSED
 
-                    await glob.sql.execute(
+                    await services.sql.execute(
                         "UPDATE scores SET status = 2 WHERE user_id = %s AND relax = %s "
                         "AND hash_md5 = %s AND mode = %s AND status = 3",
                         (s.player.id, s.relax, s.map.hash_md5, s.mode.value),
@@ -285,7 +285,7 @@ class Score:
         return s
 
     async def calculate_position(self) -> None:
-        ret = await glob.sql.fetch(
+        ret = await services.sql.fetch(
             "SELECT COUNT(*) AS rank FROM scores s "
             "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
@@ -298,8 +298,8 @@ class Score:
 
         self.position = ret["rank"] + 1
 
-    async def save_to_db(self) -> None:
-        await glob.sql.execute(
+    async def save_to_db(self) -> int:
+        return await services.sql.execute(
             "INSERT INTO scores (hash_md5, user_id, score, pp, "
             "count_300, count_100, count_50, count_geki, "
             "count_katu, count_miss, max_combo, accuracy, "

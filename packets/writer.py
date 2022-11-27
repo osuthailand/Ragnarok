@@ -3,7 +3,7 @@ from constants.packets import BanchoPackets
 from constants.match import SlotStatus
 from typing import Any, TYPE_CHECKING
 from enum import unique, IntEnum
-from objects import glob
+from objects import services
 import struct
 import math
 
@@ -226,7 +226,7 @@ async def UpdateFriends(friends_id: tuple[int]):
 
 
 async def UpdateStats(p: "Player") -> bytes:
-    if p not in glob.players.players:
+    if p not in services.players.players:
         return b""
 
     return await write(
@@ -248,7 +248,7 @@ async def UpdateStats(p: "Player") -> bytes:
 
 
 async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
-    if p not in glob.players.players:
+    if p not in services.players.players:
         return b""
 
     rank = Ranks.NONE
@@ -307,7 +307,7 @@ async def ChanAutoJoin(chan: str) -> bytes:
 
 
 async def ChanInfo(name: str) -> bytes:
-    if not (c := glob.channels.get_channel(name)):
+    if not (c := services.channels.get(name)):
         return bytes()
 
     return await write(

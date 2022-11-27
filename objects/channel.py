@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING
+
+from objects import services
 from packets import writer
-from objects import glob
-from typing import Any
 from utils import log
 
 if TYPE_CHECKING:
@@ -23,13 +23,23 @@ class Channel:
 
         self.connected: list[Player] = []
 
+    def __repr__(self) -> str:
+        return (
+            "Channel("
+            f'display="{self.name}", '
+            f'name="{self._name}", '
+            f'description="{self.description}", '
+            f"connected={self.connected[0:3]}..."
+            ")"
+        )
+
     @property
     def is_multi(self) -> bool:
         return self.name == "#multiplayer"
 
     @property
     def is_dm(self) -> bool:
-        return self.name[0] != "#"
+        return self._name[0] != "#"
 
     def enqueue(self, data: bytes, ignore: list[int] = []) -> None:
         for p in self.connected:
@@ -37,7 +47,7 @@ class Channel:
                 p.enqueue(data)
 
     async def update_info(self) -> None:
-        glob.players.enqueue(await writer.ChanInfo(self._name))
+        services.players.enqueue(await writer.ChanInfo(self._name))
 
     async def force_join(self, p: "Player") -> None:
         if self in p.channels:

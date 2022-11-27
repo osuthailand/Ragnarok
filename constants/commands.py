@@ -6,9 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from objects.bot import Louise
 from typing import Callable
+from objects.group import Group
 from packets import writer
 from typing import Union
-from objects import glob
+from objects import services
 from utils import log
 import asyncio
 import random
@@ -32,13 +33,13 @@ class Context:
     # there is probably a better solution to this
     # but this is just what i quickly came up with
     async def await_response(self) -> str:
-        glob.await_response[self.author.token] = ""
+        services.await_response[self.author.token] = ""
 
         # they will have 60 seconds to respond.
         for i in range(0, 60):
-            if glob.await_response[self.author.token]:
-                msg = glob.await_response[self.author.token]
-                glob.await_response.pop(self.author.token)
+            if services.await_response[self.author.token]:
+                msg = services.await_response[self.author.token]
+                services.await_response.pop(self.author.token)
 
                 if msg[0] == "!":
                     pass
@@ -129,7 +130,7 @@ async def help(ctx: Context) -> str:
             if not key.perms & ctx.author.privileges:
                 continue
 
-            return f"{glob.prefix}{key.cmd} | Needed privileges ~> {key.perms.name}\nDescription: {key.doc}"
+            return f"{services.prefix}{key.cmd} | Needed privileges ~> {key.perms.name}\nDescription: {key.doc}"
 
     visible_cmds = [
         cmd.cmd
@@ -174,7 +175,7 @@ async def user_stats(ctx: Context) -> str:
     if len(ctx.args) < 1:
         return "Usage: !stats <username>"
 
-    if not (t := await glob.players.get_user_offline(ctx.args[0])):
+    if not (t := await services.players.get_offline(ctx.args[0])):
         return "Player isn't online or couldn't be found in the database"
 
     relax = 0
@@ -197,7 +198,7 @@ async def user_stats(ctx: Context) -> str:
 async def verify_with_key(ctx: Context) -> str:
     """Verify your account with our key system!"""
 
-    if type(ctx.reciever) is not type(glob.bot):
+    if type(ctx.reciever) is not type(services.bot):
         return "This command only works in BanchoBot's PMs."
 
     if not ctx.args:
@@ -206,21 +207,21 @@ async def verify_with_key(ctx: Context) -> str:
     key = ctx.args[0]
 
     if not (
-        key_info := await glob.sql.fetch(
+        key_info := await services.sql.fetch(
             "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (key)
         )
     ):
         return "Invalid key"
 
     asyncio.create_task(
-        glob.sql.execute(
+        services.sql.execute(
             "UPDATE users SET privileges = %s WHERE id = %s",
             (Privileges.USER.value + Privileges.VERIFIED.value, ctx.author.id),
         )
     )
 
     asyncio.create_task(
-        glob.sql.execute("DELETE FROM beta_keys WHERE id = %s", key_info["id"])
+        services.sql.execute("DELETE FROM beta_keys WHERE id = %s", key_info["id"])
     )
 
     ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
@@ -304,7 +305,7 @@ async def start_match(ctx: Context) -> str:
     ):
         await ctx.reciever.send(
             message="All players aren't ready, would you like to force start? (y/n)",
-            sender=glob.bot,
+            sender=services.bot,
         )
         response = await ctx.await_response()
         if response == "n":
@@ -390,7 +391,7 @@ async def move_slot(ctx: Context) -> str:
 
     ctx.args[1] = int(ctx.args[1]) - 1
 
-    player = glob.players.get_user(ctx.args[0])
+    player = services.players.get(ctx.args[0])
 
     if not (target := m.find_user(player)):
         return "Slot is not occupied."
@@ -439,7 +440,7 @@ async def get_beatmap(ctx: Context) -> str:
     if m.map_id == 0:
         return "The host has probably choosen a map that needs to be updated! Tell them to do so!"
 
-    if ctx.args[0] not in (mirrors := glob.config["api_conf"]["mirrors"]):
+    if ctx.args[0] not in (mirrors := services.config["api_conf"]["mirrors"]):
         return "Mirror doesn't exist in our database"
 
     url = mirrors[ctx.args[0]]
@@ -459,10 +460,12 @@ async def invite_people(ctx: Context) -> str:
         return
 
     if not ctx.args:
-        await ctx.reciever.send(message="Who do you want to invite?", sender=glob.bot)
+        await ctx.reciever.send(
+            message="Who do you want to invite?", sender=services.bot
+        )
         response = await ctx.await_response()
 
-    if not (target := glob.players.get_user(ctx.args[0])):
+    if not (target := services.players.get(ctx.args[0])):
         return "The user is not online."
 
     if target is ctx.author:
@@ -489,9 +492,9 @@ async def announce(ctx: Context) -> str:
     msg = " ".join(ctx.args[1:])
 
     if ctx.args[0] == "all":
-        glob.players.enqueue(await writer.Notification(msg))
+        services.players.enqueue(await writer.Notification(msg))
     else:
-        if not (target := glob.players.get_user(ctx.args[0])):
+        if not (target := services.players.get(ctx.args[0])):
             return "Player is not online."
 
         target.enqueue(await writer.Notification(msg))
@@ -507,7 +510,7 @@ async def kick_user(ctx: Context) -> str:
         return "Usage: !kick <username>"
 
     if ctx.args[0].lower() == "all":
-        for p in glob.players.players[:]:
+        for p in services.players.players[:]:
             if (p == ctx.author) or p.bot:
                 continue
 
@@ -515,7 +518,7 @@ async def kick_user(ctx: Context) -> str:
 
         return "Kicked every. single. user online."
 
-    if not (t := await glob.players.get_user_offline(" ".join(ctx.args))):
+    if not (t := await services.players.get_offline(" ".join(ctx.args))):
         return "Player isn't online or couldn't be found in the database"
 
     await t.logout()
@@ -528,20 +531,20 @@ async def kick_user(ctx: Context) -> str:
 async def restrict_user(ctx: Context) -> str:
     """Restrict users from the server"""
 
-    if (not ctx.reciever == glob.bot) and ctx.reciever.name != "#staff":
+    if (not ctx.reciever == services.bot) and ctx.reciever.name != "#staff":
         return "You can't do that here."
 
     if len(ctx.args) < 1:
         return "Usage: !restrict <username>"
 
-    if not (t := await glob.players.get_user_offline(" ".join(ctx.args))):
+    if not (t := await services.players.get_offline(" ".join(ctx.args))):
         return "Player isn't online or couldn't be found in the database"
 
     if t.is_restricted:
         return "Player is already restricted? Did you mean to unrestrict them?"
 
     asyncio.create_task(
-        glob.sql.execute(
+        services.sql.execute(
             "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (t.id)
         )
     )
@@ -565,13 +568,13 @@ async def unrestrict_user(ctx: Context) -> str:
     if len(ctx.args) < 1:
         return "Usage: !unrestrict <username>"
 
-    if not (t := await glob.players.get_user_offline(" ".join(ctx.args))):
+    if not (t := await services.players.get_offline(" ".join(ctx.args))):
         return "Player couldn't be found in the database"
 
     if not t.is_restricted:
         return "Player isn't even restricted?"
 
-    await glob.sql.execute(
+    await services.sql.execute(
         "UPDATE users SET privileges = privileges + 4 WHERE id = %s", (t.id)
     )
 
@@ -588,15 +591,15 @@ async def bot_commands(ctx: Context) -> str:
     """Handle our bot ingame"""
 
     if not ctx.args:
-        return f"{glob.bot.username.lower()}."
+        return f"{services.bot.username.lower()}."
 
     if ctx.args[0] == "reconnect":
-        if glob.players.get_user(1):
-            return f"{glob.bot.username} is already connected."
+        if services.players.get(1):
+            return f"{services.bot.username} is already connected."
 
         await Louise.init()
 
-        return f"Successfully connected {glob.bot.username}."
+        return f"Successfully connected {services.bot.username}."
 
 
 @register_command("approve")
@@ -628,7 +631,7 @@ async def approve_map(ctx: Context) -> str:
 
     set_or_map = ctx.args[0] == "map"
 
-    await glob.sql.execute(
+    await services.sql.execute(
         "UPDATE beatmaps SET approved = %s "
         f"WHERE {'map_id' if set_or_map else 'set_id'} = %s LIMIT 1",
         (ranked_status.value, _map.map_id if set_or_map else _map.set_id),
@@ -638,8 +641,8 @@ async def approve_map(ctx: Context) -> str:
 
     _map.approved = ranked_status
 
-    if ctx.author.last_np.hash_md5 in glob.beatmaps:
-        glob.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
+    if ctx.author.last_np.hash_md5 in services.beatmaps:
+        services.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
 
     return resp
 
@@ -666,7 +669,7 @@ async def beta_keys(ctx: Context) -> str:
             key = uuid.uuid4().hex
 
             asyncio.create_task(
-                glob.sql.execute(
+                services.sql.execute(
                     "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
                     (key, time.time() + 432000),
                 )
@@ -677,7 +680,7 @@ async def beta_keys(ctx: Context) -> str:
         key = ctx.args[1]
 
         asyncio.create_task(
-            glob.sql.execute(
+            services.sql.execute(
                 "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
                 (key, time.time() + 432000),
             )
@@ -691,16 +694,32 @@ async def beta_keys(ctx: Context) -> str:
 
         key_id = ctx.args[1]
 
-        if not await glob.sql.fetch("SELECT 1 FROM beta_keys WHERE id = %s", (key_id)):
+        if not await services.sql.fetch(
+            "SELECT 1 FROM beta_keys WHERE id = %s", (key_id)
+        ):
             return "Key doesn't exist"
 
         asyncio.create_task(
-            glob.sql.execute("DELETE FROM beta_keys WHERE id = %s", (key_id))
+            services.sql.execute("DELETE FROM beta_keys WHERE id = %s", (key_id))
         )
 
         return f"Deleted key {key_id}"
 
     return "Usage: !key <create/delete> <name if create (OPTIONAL) / id if delete>"
+
+
+# group commands
+@register_command("creategroup", required_perms=Privileges.DEV)
+async def creategroup(ctx: Context) -> str:
+    if len(ctx.args) != 1:
+        return "Usage: !creategroup <name>"
+
+    if services.channels.get(name := ctx.args[0]):
+        return "Group name already created (fix)"
+
+    await Group.create(ctx.author, name)
+
+    return f"Created group `{name}`"
 
 
 async def handle_commands(

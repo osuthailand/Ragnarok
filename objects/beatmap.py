@@ -1,5 +1,5 @@
 import aiohttp
-from objects import glob
+from objects import services
 from utils import log
 from constants.playmode import Mode
 from constants.beatmap import Approved
@@ -73,7 +73,7 @@ class Beatmap:
         return f"{self.approved}|false|{self.map_id}|{self.set_id}|{self.scores}\n0\n{self.display_title}\n{self.rating}"
 
     @staticmethod
-    def add_chart(name: str, prev: str = "", after: str = "") -> str:
+    def add_chart(name: str, prev: int | float = 0.0, after: int | float = 0.0) -> str:
         return f"{name}Before:{prev if prev else ''}|{name}After:{after}"
 
     @classmethod
@@ -81,7 +81,7 @@ class Beatmap:
         b = cls()
 
         if not (
-            ret := await glob.sql.fetch(
+            ret := await services.sql.fetch(
                 "SELECT set_id, map_id, hash, title, title_unicode, "
                 "version, artist, artist_unicode, creator, creator_id, stars, "
                 "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
@@ -130,7 +130,7 @@ class Beatmap:
         return b
 
     async def add_to_db(self) -> None:
-        if await glob.sql.fetch(
+        if await services.sql.fetch(
             "SELECT 1 FROM beatmaps WHERE hash = %s LIMIT 1", (self.hash_md5)
         ):
             return  # ignore beatmaps there are already in db
@@ -138,7 +138,7 @@ class Beatmap:
         values = [*self.__dict__.values()][:-2]
         values.append(self.approved.value)
 
-        await glob.sql.execute(
+        await services.sql.execute(
             "INSERT INTO beatmaps (set_id, map_id, hash, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
             "od, ar, hp, cs, mode, bpm, max_combo, submit_date, approved_date, "
@@ -157,7 +157,7 @@ class Beatmap:
         async with aiohttp.ClientSession() as session:
             # get the beatmap with its hash
             async with session.get(
-                f"https://osu.ppy.sh/api/get_beatmaps?k={glob.osu_key}&{'h' if hash else 'b'}={hash or beatmap_id}"
+                f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{'h' if hash else 'b'}={hash or beatmap_id}"
             ) as resp:
                 if not resp or resp.status != 200:
                     return

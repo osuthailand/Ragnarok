@@ -1,3 +1,4 @@
+import math
 from constants.player import PresenceFilter, bStatus, Privileges, country_codes
 from constants.match import SlotStatus
 from objects.channel import Channel
@@ -8,7 +9,7 @@ from constants.mods import Mods
 from objects.match import Match
 from typing import Optional
 from packets import writer
-from objects import glob
+from objects import services
 from utils import log
 from copy import copy
 import asyncio
@@ -97,6 +98,15 @@ class Player:
         self.last_np: "Beatmap" = None
         self.last_score: "Score" = None
 
+    def __repr__(self) -> str:
+        return (
+            "Player("
+            f"id={self.id}, "
+            f'name="{self.username}", '
+            f'token="{self.token}"'
+            ")"
+        )
+
     @property
     def embed(self) -> str:
         return f"[https://osu.mitsuha.pw/users/{self.id} {self.username}]"
@@ -136,9 +146,9 @@ class Player:
             # leave spectating code and stuff idk
             ...
 
-        glob.players.remove_user(self)
+        services.players.remove(self)
 
-        for player in glob.players.players:
+        for player in services.players.players:
             if player != self:
                 player.enqueue(await writer.Logout(self.id))
 
@@ -168,7 +178,7 @@ class Player:
         p.spectating = None
 
     async def join_match(self, m: Match, pwd: Optional[str] = "") -> None:
-        if self.match or pwd != m.match_pass or not m in glob.matches.matches:
+        if self.match or pwd != m.match_pass or not m in services.matches.matches:
             self.enqueue(await writer.MatchFail())
             return  # user is already in a match
 
@@ -229,7 +239,7 @@ class Player:
 
             m.enqueue(await writer.MatchDispose(m.match_id), lobby=True)
 
-            await glob.matches.remove_match(m)
+            await services.matches.remove(m)
             return
 
         if m.host == self.id:
@@ -279,21 +289,21 @@ class Player:
         )
 
     async def get_friends(self) -> None:
-        async for player in glob.sql.iterall(
+        async for player in services.sql.iterall(
             "SELECT user_id2 as id FROM friends WHERE user_id1 = %s", (self.id)
         ):
             self.friends.add(player["id"])
 
     async def handle_friend(self, user: int) -> None:
-        if not (t := glob.players.get_user(user)):
+        if not (t := services.players.get(user)):
             return  # user isn't online; ignore
 
         # remove friend
-        if await glob.sql.fetch(
+        if await services.sql.fetch(
             "SELECT 1 FROM friends WHERE user_id1 = %s AND user_id2 = %s",
             (self.id, user),
         ):
-            await glob.sql.execute(
+            await services.sql.execute(
                 "DELETE FROM friends WHERE user_id1 = %s AND user_id2 = %s",
                 (self.id, user),
             )
@@ -303,7 +313,7 @@ class Player:
             return
 
         # add friend
-        await glob.sql.execute(
+        await services.sql.execute(
             "INSERT INTO friends (user_id1, user_id2) VALUES (%s, %s)", (self.id, user)
         )
         self.friends.add(user)
@@ -318,7 +328,9 @@ class Player:
         self.privileges -= Privileges.VERIFIED
 
         asyncio.create_task(
-            glob.db.execute("UPDATE users SET privileges -= 4 WHERE id = %s", (self.id))
+            services.db.execute(
+                "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
+            )
         )
 
         # notify user
@@ -326,11 +338,11 @@ class Player:
 
         log.info(f"{self.username} has been put in restricted mode!")
 
-    async def update_stats(self, mode=None, relax=None) -> None:
-        if (m := mode) is None:
+    async def update_stats(self, mode: Mode = Mode.NONE, relax: int = -1) -> None:
+        if (m := mode) == Mode.NONE:
             m = self.play_mode
 
-        if (rx := relax) is None:
+        if (rx := relax) == -1:
             rx = self.relax
 
         spec_tables = ("stats", "stats_rx")[rx]
@@ -338,7 +350,7 @@ class Player:
 
         self.get_level()
 
-        await glob.sql.execute(
+        await services.sql.execute(
             f"UPDATE {spec_tables} SET pp_{se} = %s, playcount_{se} = %s, "
             f"accuracy_{se} = %s, total_score_{se} = %s, "
             f"ranked_score_{se} = %s, level_{se} = %s WHERE id = %s",
@@ -406,16 +418,16 @@ class Player:
                 )
 
     async def save_location(self):
-        await glob.sql.execute(
+        await services.sql.execute(
             "UPDATE users SET lon = %s, lat = %s, country = %s, cc = %s WHERE id = %s",
             (self.longitude, self.latitude, self.country_code, self.country, self.id),
         )
 
-    async def get_stats(self, relax: int = 0, mode: int = 0) -> dict:
+    async def get_stats(self, relax: int = 0, mode: Mode = Mode.OSU) -> dict:
         table = ("stats", "stats_rx")[relax]
         se = ("std", "taiko", "catch", "mania")[mode]
 
-        ret = await glob.sql.fetch(
+        ret = await services.sql.fetch(
             f"SELECT ranked_score_{se} AS ranked_score, "
             f"total_score_{se} AS total_score, accuracy_{se} AS accuracy, "
             f"playcount_{se} AS playcount, pp_{se} AS pp, "
@@ -424,25 +436,25 @@ class Player:
             (self.id),
         )
 
-        if ret["pp"] >= 1:
-            # if the users pp is
-            # higher or equal to
-            # one, add rank to the user
-            rank = await glob.sql.fetch(
-                f"SELECT COUNT(*) AS rank FROM {table} t "
-                "INNER JOIN users u ON u.id = t.id "
-                f"WHERE t.id != %s AND t.pp_{se} > %s "
-                f"ORDER BY t.pp_{se} DESC, t.total_score_{se} DESC LIMIT 1",
-                (self.id, self.pp),
-            )
-
-            ret["rank"] = rank["rank"] + 1
-        else:
-            # if not, make the user
-            # not display any rank. (0)
-            ret["rank"] = 0
+        ret["rank"] = await self.get_rank(relax, mode)
 
         return ret
+
+    async def get_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
+        _rank = await services.redis.zrevrank(
+            f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode.value}",
+            str(self.id),
+        )
+        return _rank + 1 if _rank is not None else 0
+
+    async def update_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
+        if not self.is_restricted:
+            await services.redis.zadd(
+                f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode}",
+                {str(self.id): self.pp},
+            )
+
+        return await self.get_rank(relax, mode)
 
     async def update_stats_cache(self) -> bool:
         ret = await self.get_stats(self.relax, self.play_mode)
@@ -453,6 +465,6 @@ class Player:
         self.total_score = ret["total_score"]
         self.level = ret["level"]
         self.rank = ret["rank"]
-        self.pp = int(ret["pp"])
+        self.pp = math.ceil(ret["pp"])
 
         return True

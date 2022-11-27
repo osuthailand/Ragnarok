@@ -2,6 +2,7 @@ from typing import Any, Callable, Pattern, TYPE_CHECKING
 from lenhttp import Router, LenHTTP
 from lib.database import Database
 from config import conf
+import aioredis
 import re
 
 if TYPE_CHECKING:
@@ -11,26 +12,27 @@ if TYPE_CHECKING:
     from packets.reader import Packet
 
 
-server: LenHTTP = None
+server: LenHTTP
 
 debug: bool = conf["server"]["debug"]
 domain: str = conf["server"]["domain"]
 port: int = conf["server"]["port"]
 
-bancho: Router = None
-avatar: Router = None
-osu: Router = None
+bancho: Router
+avatar: Router
+osu: Router
 
 packets: dict[int, "Packet"] = {}
 tasks: list[dict[str, Callable]] = []
 
-bot: "Player" = None
+bot: "Player"
 
 prefix: str = "!"
 
 config: dict[str, dict[str, Any]] = conf
 
-sql: Database = None
+sql: Database
+redis: aioredis.Redis
 
 bcrypt_cache: dict[str, bytes] = {}
 
@@ -48,11 +50,9 @@ Simon & Aoba
 '''
 
 
-players: "Tokens" = None
-
-channels: "Channels" = None
-
-matches: "Matches" = None
+players: "Tokens"
+channels: "Channels"
+matches: "Matches"
 
 osu_key: str = config["api_conf"]["osu_api_key"]
 

@@ -1,14 +1,14 @@
 from objects.player import Player
 from constants.player import bStatus
 from packets import writer
-from objects import glob
+from objects import services
 
 
 class Louise:
     @staticmethod
     async def init() -> bool:
         if not (
-            bot := await glob.sql.fetch(
+            bot := await services.sql.fetch(
                 "SELECT id, username, privileges, passhash FROM users WHERE id = 1"
             )
         ):
@@ -21,11 +21,11 @@ class Louise:
 
         p.bot = True
 
-        glob.bot = p
+        services.bot = p
 
-        glob.players.add_user(p)
+        services.players.add(p)
 
-        for player in glob.players.players:
+        for player in services.players.players:
             player.enqueue(await writer.UserPresence(p) + await writer.UpdateStats(p))
 
         return True

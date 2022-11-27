@@ -1,4 +1,4 @@
-Ragnarok is both a bancho and /web/ server, written in python3.9!
+Ragnarok is both a bancho and /web/ server, written in python3.10!
 
 Ragnarok will provide more stablibilty:tm: and way faster performance than Ripple's bancho emulator (Second login takes about 4-5ms).
 
@@ -9,10 +9,10 @@ We will not help setting up the whole server (nginx, mysql and those stuff), but
 
 We suggest making an environment before doing anything. You can create one by installing pipenv.
 ```
-$ python3.9 -m pip install pipenv
+$ python3.10 -m pip install pipenv
 ...
 
-$ python3.9 -m pipenv install
+$ python3.10 -m pipenv install
 Creating a virtualenv for this project...
 ...
 

@@ -1,0 +1,13 @@
+aiofiles==23.2.1
+aiohttp==3.8.5
+aiomysql==0.2.0
+colored==2.2.3
+LenHTTP==2.2.6
+numpy==1.25.2
+oppai==4.1.0
+py3rijndael==0.3.3
+python_bcrypt==0.3.2
+redis==5.0.0
+rina_pp_pyb
+starlette==0.31.1
+uvicorn==0.23.2

@@ -559,7 +559,7 @@ async def osu_direct(req: Request) -> Response:
         case "3":
             ranking = "qualified"
         case "4":
-            ranking = "-2,-1,0,1,2,3,4" # all
+            ranking = "all"
         case "5":
             ranking = "graveyard"
         case "8":

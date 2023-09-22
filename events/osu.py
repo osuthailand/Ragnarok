@@ -633,8 +633,11 @@ async def osu_search_set(req: Request) -> Response:
 
 
 @osu.route("/d/{map_id:int}")
+@osu.route("/d/{map_id:int}n") # no video
 async def download_osz(req: Request) -> Response:
+    if req.url.path[-1] == "n":
+        noVideo = "?noVideo=true"
     return RedirectResponse(
-        url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}",
+        url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{noVideo}",
         status_code=301
     )

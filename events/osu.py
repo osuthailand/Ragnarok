@@ -573,7 +573,7 @@ async def osu_direct(req: Request) -> Response:
     if (mode := args["m"]) == "-1":
         mode = "all"
 
-    url = f"https://api.nerinyan.moe/search?q={query}&m={mode}&ps=100&s={ranking}&p={args['p']}"
+    url = f"https://api.nerinyan.moe/search?q={query}&m={mode}&ps=100&s={ranking}&p={args['p']}&sort=updated_desc"
     bmCount = 0
     directList = ""
 

@@ -4,6 +4,7 @@ from constants.mods import Mods
 from constants.packets import BanchoPackets
 from constants.player import Privileges
 from constants.beatmap import Approved
+from constants.playmode import Mode
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from objects.bot import Bot
@@ -308,8 +309,16 @@ async def calc_pp_for_map(ctx: Context) -> str:
     mods = Mods.from_str(ctx.args[0])
     bmap = BMap(path=f".data/beatmaps/{_map.file}")
 
+    # if the original map mode is standard, but
+    # the user is on another mode, it should convert pp
+    mode = _map.mode
+
+    if mode == Mode.OSU and mode != ctx.author.play_mode:
+        mode = ctx.author.play_mode
+
     calc = Calculator(
         mods=mods,
+        mode=mode,
     )
 
     pp_100p = calc.performance(bmap).pp

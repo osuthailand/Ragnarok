@@ -1,12 +1,15 @@
+import math
 from constants.match import SlotStatus, ScoringType
+from constants.mods import Mods
 from constants.packets import BanchoPackets
 from constants.player import Privileges
 from constants.beatmap import Approved
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
-from objects.bot import Louise
+from objects.bot import Bot
 from typing import Callable
 from objects.group import Group
+from objects.score import SubmitStatus
 from packets import writer
 from typing import Union
 from objects import services
@@ -16,6 +19,8 @@ import random
 import copy
 import uuid
 import time
+
+from rina_pp_pyb import Beatmap as BMap, Calculator
 
 if TYPE_CHECKING:
     from objects.channel import Channel
@@ -239,6 +244,102 @@ async def verify_with_key(ctx: Context) -> str:
     return "Successfully verified your account."
 
 
+@register_command("recalc", required_perms=Privileges.ADMIN)
+async def recalc_scores(ctx: Context) -> str:
+    if not ctx.args:
+        return "Usage: !recalc <relax/vanilla>"
+
+    if ctx.args[0].lower() not in ("relax", "vanilla"):
+        return "Usage: !recalc <relax/vanilla>"
+
+    async for score in services.sql.iterall(
+        "SELECT s.id, s.mods, s.count_300, s.count_100, s.count_50, "
+        "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
+        "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
+        "b.version, b.artist FROM scores s "
+        "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+        "WHERE s.relax = %s AND s.mode = 0 AND s.status >= %s",
+        (True if ctx.args[0].lower() == "relax" else False, SubmitStatus.PASSED),
+    ):
+        bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
+
+        calc = Calculator(
+            mode=score["mode"],
+            n300=score["count_300"],
+            n100=score["count_100"],
+            n50=score["count_50"],
+            n_misses=score["count_miss"],
+            n_geki=score["count_geki"],
+            n_katu=score["count_katu"],
+            combo=score["max_combo"],
+            acc=score["accuracy"],
+            mods=score["mods"],
+        )
+
+        pp = min(calc.performance(bmap).pp, 2000)
+
+        if math.isnan(pp):
+            await ctx.reciever.send(
+                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
+                sender=services.bot,
+            )
+            pp = 0
+
+        await services.sql.execute(
+            "UPDATE scores SET pp = %s WHERE id = %s", (pp, score["id"])
+        )
+
+        await ctx.reciever.send(
+            message=f"Finished recalculating score {score['id']} (before: {round(score['pp'],4)}, after: {round(pp,4)})",
+            sender=services.bot,
+        )
+
+    return f"Finished recalculating all scores for {ctx.args[0]}"
+
+
+@register_command("pp")
+async def calc_pp_for_map(ctx: Context) -> str:
+    if not (_map := ctx.author.last_np):
+        return "Please /np a map first."
+
+    if not ctx.args:
+        return "Usage: !pp <mods>"
+
+    mods = Mods.from_str(ctx.args[0])
+    bmap = BMap(path=f".data/beatmaps/{_map.file}")
+
+    calc = Calculator(
+        mods=mods,
+    )
+
+    pp_100p = calc.performance(bmap).pp
+
+    calc.set_acc(99)
+    pp_99p = calc.performance(bmap).pp
+
+    calc.set_acc(98)
+    pp_98p = calc.performance(bmap).pp
+
+    calc.set_acc(97)
+    pp_97p = calc.performance(bmap).pp
+
+    calc.set_acc(96)
+    pp_96p = calc.performance(bmap).pp
+
+    calc.set_acc(95)
+    pp_95p = calc.performance(bmap).pp
+
+    return (
+        f"{_map.full_title} >> "
+        f"95%: {round(pp_95p, 2)}pp | "
+        f"96%: {round(pp_96p, 2)}pp | "
+        f"97%: {round(pp_97p, 2)}pp | "
+        f"98%: {round(pp_98p, 2)}pp | "
+        f"99%: {round(pp_99p, 2)}pp | "
+        f"100%: {round(pp_100p, 2)}pp "
+    )
+
+
 #
 # Multiplayer commands
 #
@@ -294,6 +395,8 @@ async def start_match(ctx: Context) -> str:
                     if slot.status != SlotStatus.NOMAP:
                         slot.status = SlotStatus.PLAYING
                         slot.p.enqueue(await writer.MatchStart(m))
+
+            m.in_progress = True
 
             await m.enqueue_state(lobby=True)
             return "Starting match... Good luck!"
@@ -465,8 +568,11 @@ async def invite_people(ctx: Context) -> str:
         )
         response = await ctx.await_response()
 
-    if not (target := services.players.get(ctx.args[0])):
-        return "The user is not online."
+        if not (target := services.players.get(response)):
+            return "The user is not online."
+    else:
+        if not (target := services.players.get(ctx.args[0])):
+            return "The user is not online."
 
     if target is ctx.author:
         return "You can't invite yourself."
@@ -520,6 +626,9 @@ async def kick_user(ctx: Context) -> str:
 
     if not (t := await services.players.get_offline(" ".join(ctx.args))):
         return "Player isn't online or couldn't be found in the database"
+
+    if t.bot:
+        return "You can't kick me from the server!"
 
     await t.logout()
     t.enqueue(await writer.Notification("You've been kicked!"))
@@ -597,7 +706,7 @@ async def bot_commands(ctx: Context) -> str:
         if services.players.get(1):
             return f"{services.bot.username} is already connected."
 
-        await Louise.init()
+        await Bot.init()
 
         return f"Successfully connected {services.bot.username}."
 
@@ -609,7 +718,7 @@ async def approve_map(ctx: Context) -> str:
     if not ctx.author.last_np:
         return "Please /np a map first."
 
-    _map = ctx.author.last_np
+    bmap = ctx.author.last_np
 
     if len(ctx.args) != 2:
         return "Usage: !approve <set/map> <rank/love/unrank>"
@@ -626,23 +735,34 @@ async def approve_map(ctx: Context) -> str:
         "unrank": Approved.PENDING,
     }[ctx.args[1]]
 
-    if _map.approved == ranked_status.value:
+    if bmap.approved == ranked_status.value:
         return f"Map is already {ranked_status.name}"
 
-    set_or_map = ctx.args[0] == "map"
+    condition = {"map": "map_id", "set": "set_id"}[ctx.args[0]]
 
     await services.sql.execute(
-        "UPDATE beatmaps SET approved = %s "
-        f"WHERE {'map_id' if set_or_map else 'set_id'} = %s LIMIT 1",
-        (ranked_status.value, _map.map_id if set_or_map else _map.set_id),
+        "UPDATE beatmaps SET approved = %s " f"WHERE {condition} = %s",
+        (ranked_status.value, bmap.map_id if condition == "map_id" else bmap.set_id),
     )
 
-    resp = f"Successfully changed {_map.full_title}'s status, from {Approved(_map.approved).name} to {ranked_status.name}"
+    if condition == "set_id":
+        title = f"{bmap.artist} - {bmap.title}"
+    else:
+        title = bmap.full_title
 
-    _map.approved = ranked_status
+    resp = f"Successfully changed {title}'s status, from {Approved(bmap.approved).name} to {ranked_status.name}"
 
-    if ctx.author.last_np.hash_md5 in services.beatmaps:
-        services.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
+    bmap.approved = ranked_status
+
+    if condition == "set_id":
+        set = services.get_beatmap_hashes_by_set_id(bmap.set_id)
+
+        for hash in set:
+            services.beatmaps[hash].approved = ranked_status
+    else:
+        # do i even need this check?
+        if ctx.author.last_np.hash_md5 in services.beatmaps:
+            services.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
 
     return resp
 

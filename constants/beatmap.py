@@ -1,6 +1,5 @@
 from enum import IntEnum
 
-
 class Approved(IntEnum):
     GRAVEYARD = -2
     WIP = -1
@@ -11,3 +10,15 @@ class Approved(IntEnum):
     APPROVED = 3
     QUALIFIED = 4
     LOVED = 5
+
+    @property
+    def to_osu(self) -> int:
+        return {
+            self.GRAVEYARD: 0,
+            self.PENDING: 0,
+            self.UPDATE: 1,
+            self.RANKED: 2,
+            self.APPROVED: 3,
+            self.QUALIFIED: 4,
+            self.LOVED: 5
+        }[self]

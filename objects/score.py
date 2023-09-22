@@ -11,7 +11,7 @@ from base64 import b64decode
 from enum import IntEnum
 from objects import services
 from utils import score
-import oppai as pp
+from rina_pp_pyb import Calculator, Beatmap as BMap
 import math
 import time
 
@@ -113,7 +113,7 @@ class Score:
 
         s.id = data["id"]
 
-        s.player = await services.players.get_offline(data["user_id"])  # type: ignore
+        s.player = await services.players.get_offline(int(data["user_id"]))
         s.map = await Beatmap.get_beatmap(data["hash_md5"])
 
         s.score = data["score"]
@@ -182,7 +182,7 @@ class Score:
             s.count_miss,
             s.score,
             s.max_combo,
-        ) = map(int, data[3:-7])
+        ) = map(int, data[3:-8])
 
         s.mode = Mode(int(data[15]))
 
@@ -217,19 +217,22 @@ class Score:
                 Approved.WIP,
                 Approved.GRAVEYARD,
             ):
-                ez = pp.ezpp_new()
+                bmap = BMap(path=f".data/beatmaps/{s.map.file}")
 
-                if s.mods:
-                    pp.ezpp_set_mods(ez, s.mods)
+                calc = Calculator(
+                    mode=s.mode,
+                    n300=s.count_300,
+                    n100=s.count_100,
+                    n50=s.count_50,
+                    n_misses=s.count_miss,
+                    n_geki=s.count_geki,
+                    n_katu=s.count_katu,
+                    combo=s.max_combo,
+                    mods=s.mods,
+                )
 
-                pp.ezpp_set_combo(ez, s.max_combo)
-                pp.ezpp_set_nmiss(ez, s.count_miss)
-                pp.ezpp_set_accuracy_percent(ez, s.accuracy)
 
-                pp.ezpp(ez, f".data/beatmaps/{s.map.file}")
-                s.pp = pp.ezpp_pp(ez)
-
-                pp.ezpp_free(ez)
+                s.pp = calc.performance(bmap).pp
 
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(

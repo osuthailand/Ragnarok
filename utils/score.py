@@ -15,37 +15,41 @@ def calculate_accuracy(
     if mode not in (Mode.OSU, Mode.TAIKO, Mode.CATCH, Mode.MANIA):
         return 0.0
 
-    if mode == Mode.OSU:
-        if services.debug:
-            log.debug("Calculating accuracy for standard")
+    match mode:
+        case Mode.OSU:
+            if services.debug:
+                log.debug("Calculating accuracy for standard")
 
-        acc = (50 * count_50 + 100 * count_100 + 300 * count_300) / (
-            300 * (count_miss + count_50 + count_100 + count_300)
-        )
-    elif mode == Mode.TAIKO:
-        if services.debug:
-            log.debug("Calculating accuracy for taiko")
+            acc = (50 * count_50 + 100 * count_100 + 300 * count_300) / (
+                300 * (count_miss + count_50 + count_100 + count_300)
+            )
+        case Mode.TAIKO:
+            if services.debug:
+                log.debug("Calculating accuracy for taiko")
 
-        acc = (0.5 * count_100 + count_300) / (count_miss + count_100 + count_300)
-    elif mode == Mode.CATCH:
-        if services.debug:
-            log.debug("Calculating accuracy for catch the beat")
+            acc = (0.5 * count_100 + count_300) / (count_miss + count_100 + count_300)
+        case Mode.CATCH:
+            if services.debug:
+                log.debug("Calculating accuracy for catch the beat")
 
-        acc = (count_50 + count_100 + count_300) / (
-            count_katu + count_miss + count_50 + count_100 + count_300
-        )
-    else:
-        if services.debug:
-            log.debug("Calculating accuracy for mania")
+            acc = (count_50 + count_100 + count_300) / (
+                count_katu + count_miss + count_50 + count_100 + count_300
+            )
+        case Mode.MANIA:
+            if services.debug:
+                log.debug("Calculating accuracy for mania")
 
-        acc = (
-            50 * count_50
-            + 100 * count_100
-            + 200 * count_katu
-            + 300 * (count_300 + count_geki)
-        ) / (
-            300
-            * (count_miss + count_50 + count_100 + count_katu + count_300 + count_geki)
-        )
-
+            acc = (
+                50 * count_50
+                + 100 * count_100
+                + 200 * count_katu
+                + 300 * (count_300 + count_geki)
+            ) / (
+                300
+                * (count_miss + count_50 + count_100 + count_katu + count_300 + count_geki)
+            )
+        case _:
+            log.error(f"mode {mode} doesn't exist.")
+            return 0
+        
     return acc * 100

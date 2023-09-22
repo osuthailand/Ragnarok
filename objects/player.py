@@ -1,6 +1,7 @@
 import math
 from constants.player import PresenceFilter, bStatus, Privileges, country_codes
 from constants.match import SlotStatus
+from objects.achievement import Achievement
 from objects.channel import Channel
 from constants.levels import levels
 from constants.playmode import Mode
@@ -65,6 +66,7 @@ class Player:
         self.play_mode: Mode = Mode.OSU
         self.beatmap_id: int = -1
 
+        self.achievements: set[Achievement] = set()
         self.friends: set[int] = set()
         self.channels: list[Channel] = []
         self.spectators: list[Player] = []
@@ -125,11 +127,13 @@ class Player:
     def enqueue(self, packet: bytes) -> None:
         self.queue += packet
 
-    def dequeue(self) -> None:
+    def dequeue(self) -> bytes:
         if self.queue:
             ret = bytes(self.queue)
             self.queue.clear()
             return ret
+
+        return b""
 
     async def shout(self, text: str):
         self.enqueue(await writer.Notification(text))
@@ -152,8 +156,9 @@ class Player:
             if player != self:
                 player.enqueue(await writer.Logout(self.id))
 
-    async def add_spectator(self, p) -> None:
+    async def add_spectator(self, p: "Player") -> None:
         # TODO: Create temp spec channel
+
         joined = await writer.FellasJoinSpec(p.id)
 
         for s in self.spectators:
@@ -161,6 +166,7 @@ class Player:
             p.enqueue(await writer.FellasJoinSpec(s.id))
 
         self.enqueue(await writer.UsrJoinSpec(p.id))
+
         self.spectators.append(p)
 
         p.spectating = self
@@ -288,6 +294,15 @@ class Player:
             )
         )
 
+    async def get_achievements(self) -> None:
+        async for achievement in services.sql.iterall(
+            "SELECT a.* FROM users_achievements ua "
+            "INNER JOIN achievements a ON ua.achievement_id = a.id "
+            "WHERE ua.user_id = %s",
+            (self.id)
+        ):
+            self.achievements.add(Achievement(**achievement))
+
     async def get_friends(self) -> None:
         async for player in services.sql.iterall(
             "SELECT user_id2 as id FROM friends WHERE user_id1 = %s", (self.id)
@@ -328,7 +343,7 @@ class Player:
         self.privileges -= Privileges.VERIFIED
 
         asyncio.create_task(
-            services.db.execute(
+            services.sql.execute(
                 "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
             )
         )

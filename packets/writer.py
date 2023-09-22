@@ -226,7 +226,7 @@ async def UpdateFriends(friends_id: tuple[int]):
 
 
 async def UpdateStats(p: "Player") -> bytes:
-    if p not in services.players.players:
+    if p not in services.players:
         return b""
 
     return await write(
@@ -248,7 +248,7 @@ async def UpdateStats(p: "Player") -> bytes:
 
 
 async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
-    if p not in services.players.players:
+    if p not in services.players:
         return b""
 
     rank = Ranks.NONE

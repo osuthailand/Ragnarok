@@ -2,8 +2,10 @@ from typing import Any, Callable, Pattern, TYPE_CHECKING
 from lenhttp import Router, LenHTTP
 from lib.database import Database
 from config import conf
-import aioredis
+from redis import asyncio as aioredis
 import re
+
+from objects.achievement import Achievement
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches
@@ -23,7 +25,6 @@ avatar: Router
 osu: Router
 
 packets: dict[int, "Packet"] = {}
-tasks: list[dict[str, Callable]] = []
 
 bot: "Player"
 
@@ -46,7 +47,7 @@ title_card: str = '''
              \ ...  .    . ..  ./
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 osu!ragnarok, an osu!bancho & /web/ emulator.
-Simon & Aoba
+Authored by Simon & Aoba
 '''
 
 
@@ -57,6 +58,7 @@ matches: "Matches"
 osu_key: str = config["api_conf"]["osu_api_key"]
 
 beatmaps: dict[str, "Beatmap"] = {}
+achievements: set[Achievement] = set()
 
 regex: dict[str, Pattern[str]] = {
     "np": re.compile(

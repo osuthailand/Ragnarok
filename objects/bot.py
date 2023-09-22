@@ -4,7 +4,7 @@ from packets import writer
 from objects import services
 
 
-class Louise:
+class Bot:
     @staticmethod
     async def init() -> bool:
         if not (

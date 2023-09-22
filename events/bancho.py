@@ -5,7 +5,6 @@ from packets.reader import Reader, Packet
 from constants import commands as cmd
 from objects.beatmap import Beatmap
 from constants.playmode import Mode
-from lenhttp import Router, Request
 from objects.player import Player
 from constants.mods import Mods
 from constants.match import *
@@ -22,8 +21,10 @@ import struct
 import time
 import copy
 import os
-import re
 
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Router
 
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
@@ -34,13 +35,11 @@ def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     return decorator
 
 
-bancho = Router(
-    {re.compile(rf"^c[e4-6]?\.{services.domain}"), f"127.0.0.1:{services.port}"}
-)
-IGNORED_PACKETS: list[int] = [4, 79]
+bancho = Router()
+IGNORED_PACKETS = (4, 79)
 
 
-@bancho.add_endpoint("/", methods=["POST"])
+@bancho.route("/", methods=["POST"])
 async def handle_bancho(req: Request):
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
         return "no"
@@ -51,12 +50,13 @@ async def handle_bancho(req: Request):
     token = req.headers["osu-token"]
 
     if not (player := services.players.get(token)):
-        return (
-            await writer.Notification("Server has restarted")
-            + await writer.ServerRestart()
+        return Response(
+            content=await writer.Notification("Server has restarted") + await writer.ServerRestart()
         )
 
-    for p in (sr := Reader(req.body)):
+    body = await req.body()
+
+    for p in (sr := Reader(body)):
         if player.is_restricted and (not p.restricted):
             continue
 
@@ -74,21 +74,28 @@ async def handle_bancho(req: Request):
                 f"Packet <{p.packet.value} | {p.packet.name}> has been requested by {player.username} - {round(end, 2)}ms"
             )
 
-    req.add_header("Content-Type", "text/html; charset=UTF-8")
     player.last_update = time.time()
 
-    return player.dequeue() or b""
+    return Response(content=player.dequeue() or b"", headers={
+        "Content-Type": "text/html; charset=UTF-8"
+    })
+
+
+ALREADY_ONLINE = "You're already online!"
+
+RESTRICTED_MSG = "Your account has been set in restricted mode."
+
+async def failed_login(code: int, /, extra: bytes = b"") -> bytes:
+    return Response(content=await writer.UserID(code) + extra, headers={"cho-token": "no"})
 
 
 async def login(req: Request) -> bytes:
-    req.add_header("cho-token", "no")
-
-    start = time.time_ns()
     data = bytearray(await writer.ProtocolVersion(19))
+    body = await req.body()
+    start = time.time_ns()
     # parse login info and client info.
     # {0}
-
-    login_info = req.body.decode().split("\n")[:-1]
+    login_info = body.decode().split("\n")[:-1]
 
     # {0}|{1}|{2}|{3}|{4}
     # 0 = Build name, 1 = Time offset
@@ -108,7 +115,7 @@ async def login(req: Request) -> bytes:
             [login_info[0].lower().replace(" ", "_")],
         )
     ):
-        return await writer.UserID(-1)
+        return await failed_login(-1)
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -121,32 +128,31 @@ async def login(req: Request) -> bytes:
                 f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
-            return await writer.UserID(-1)
-    else:
-        if not bcrypt.checkpw(pmd5, phash):
-            log.warn(
-                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-            )
+            return await failed_login(-1)
+        else:
+            if not bcrypt.checkpw(pmd5, phash):
+                log.warn(
+                    f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+                )
 
-            return await writer.UserID(-1)
+                return await failed_login(-1)
 
-        services.bcrypt_cache[phash] = pmd5
+            services.bcrypt_cache[phash] = pmd5
 
-    if services.players.get(user_info["username"]):
+    if _p := services.players.get(user_info["username"]):
         # user is already online? sus
-        return await writer.Notification(
-            "You're already online on the server!"
-        ) + await writer.UserID(-1)
+        log.warn(
+            f"A user tried to login onto the account {_p.username} ({_p.id}), but user already online."
+        )
+        return await failed_login(-1, extra=await writer.Notification(ALREADY_ONLINE))
 
     # invalid security hash (old ver probably using that)
     if len(client_info[3].split(":")) < 4:
-        return await writer.UserID(-2)
+        return await failed_login(-1)
 
     # check if user is restricted; pretty sure its like this lol
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
-        data += await writer.Notification(
-            "Your account has been set in restricted mode."
-        )
+        data += await writer.Notification(RESTRICTED_MSG)
 
     # only allow 2021 clients
     # if not client_info[0].startswith("b2021"):
@@ -158,7 +164,7 @@ async def login(req: Request) -> bytes:
             f"{user_info['username']} tried to login, but failed to do so, since they're banned."
         )
 
-        return await writer.UserID(-3)
+        return await failed_login(-3)
 
     # TODO: Hardware ban check (security[3] and [4])
     """
@@ -184,11 +190,13 @@ async def login(req: Request) -> bytes:
 
     services.players.add(p)
 
-    await asyncio.gather(*[p.get_friends(), p.update_stats_cache()])
+    await asyncio.gather(*[p.get_friends(), p.update_stats_cache(), p.get_achievements()])
 
     if p.privileges & Privileges.PENDING:
         await services.bot.send_message(
-            "Since we're still in beta, you'll need to verify your account with a beta key given by one of the founders. You'll have 30 minutes to verify the account, or the account will be deleted. To verify your account, please enter !verify <your beta key>",
+            "Since we're still in beta, you'll need to verify your account with a beta key given by one of the founders. "
+            "You'll have 30 minutes to verify the account, or the account will be deleted. "
+            "To verify your account, please enter !verify <your beta key>",
             reciever=p,
         )
 
@@ -243,8 +251,9 @@ async def login(req: Request) -> bytes:
 
     log.info(f"<{user_info['username']} | {user_info['id']}; {p.token}> logged in.")
 
-    req.add_header("cho-token", p.token)
-    return data
+    return Response(content=bytes(data), headers={
+        "cho-token": p.token
+    })
 
 
 # id: 0
@@ -376,10 +385,13 @@ async def stop_spectate(p: Player, sr: Reader) -> None:
 @register_event(BanchoPackets.OSU_SPECTATE_FRAMES)
 async def spectating_frames(p: Player, sr: Reader) -> None:
     # TODO: make a proper R/W instead of echoing like this
-    sframe = sr.read_raw()
+    frame = sr.read_spectate_packet()
 
     # packing manually seems to be faster, so let's use that.
-    data = struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(sframe)) + sframe
+    data = (
+        struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame.raw))
+        + frame.raw
+    )
 
     if p.privileges & Privileges.PENDING:
         return
@@ -847,7 +859,6 @@ async def mp_transfer_host(p: Player, sr: Reader) -> None:
     slot.p.enqueue(await writer.MatchTransferHost())
 
     m.enqueue(await writer.Notification(f"{slot.p.username} became host!"))
-
     await m.enqueue_state()
 
 

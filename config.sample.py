@@ -20,4 +20,5 @@ conf = {
             "katsu": "https://katsu.moe/",
         },
     },
+    "fun": {"rank_all_maps": False},
 }

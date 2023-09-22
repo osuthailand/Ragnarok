@@ -1,3 +1,4 @@
+from enum import IntEnum
 from typing import AnyStr, Callable, Iterator
 from constants.packets import BanchoPackets
 from objects.score import ScoreFrame
@@ -19,6 +20,38 @@ class Packet:
 
     callback: Callable
     restricted: bool
+
+
+class SpectateAction(IntEnum):
+    NORMAL = 0
+    NEW_SONG = 1
+    SKIP = 2
+    COMPLETION = 3
+    FAIL = 4
+    PAUSE = 5
+    RESUME = 6
+    SELECTING = 7
+    SPECTATING = 8
+
+
+@dataclass
+class SpectateFrame:
+    buttons: int
+    taiko_u8: int
+    x: float
+    y: float
+    time: int
+
+
+@dataclass
+class SpectateFrameFinished:
+    frames: list[SpectateFrame]
+    score: ScoreFrame
+    action: SpectateAction
+    extra: int
+    sequence: int
+
+    raw: memoryview
 
 
 class Reader:
@@ -239,3 +272,23 @@ class Reader:
             self.read_float64()
 
         return s
+
+    def read_spectate_frame(self) -> SpectateFrame:
+        return SpectateFrame(
+            buttons=self.read_uint8(),
+            taiko_u8=self.read_uint8(),
+            x=self.read_float32(),
+            y=self.read_float32(),
+            time=self.read_int32(),
+        )
+
+    def read_spectate_packet(self) -> SpectateFrameFinished:
+        raw = self.data[: self.offset]
+        extra = self.read_int32()
+        count = self.read_uint16()
+        frames = [self.read_spectate_frame() for _ in range(count)]
+        action = SpectateAction(self.read_uint8())
+        score = self.read_scoreframe()
+        sequence = self.read_uint16()
+
+        return SpectateFrameFinished(frames, score, action, extra, sequence, raw)

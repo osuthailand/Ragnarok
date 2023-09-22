@@ -70,7 +70,7 @@ class Beatmap:
 
     @property
     def web_format(self) -> str:
-        return f"{self.approved}|false|{self.map_id}|{self.set_id}|{self.scores}\n0\n{self.display_title}\n{self.rating}"
+        return f"{self.approved.to_osu}|false|{self.map_id}|{self.set_id}|{self.scores}\n0\n{self.display_title}\n{self.rating}"
 
     @staticmethod
     def add_chart(name: str, prev: int | float = 0.0, after: int | float = 0.0) -> str:
@@ -112,7 +112,10 @@ class Beatmap:
         b.mode = ret["mode"]
         b.bpm = ret["bpm"]
 
-        b.approved = Approved(ret["approved"])
+        if services.config["fun"]["rank_all_maps"]:
+            b.approved = Approved.RANKED
+        else:
+            b.approved = Approved(ret["approved"])
 
         b.submit_date = ret["submit_date"]
         b.approved_date = ret["approved_date"]
@@ -191,10 +194,13 @@ class Beatmap:
         )  # fix taiko and mania "null" combo
 
         # for some reason, the api shows approved as one behind?
-        if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:
-            b.approved = ranked_status
+        if services.config["fun"]["rank_all_maps"]:
+            b.approved = Approved.RANKED
         else:
-            b.approved = Approved(ranked_status + 1)
+            if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:
+                b.approved = ranked_status
+            else:
+                b.approved = Approved(ranked_status + 1)
 
         b.submit_date = ret["submit_date"]
 

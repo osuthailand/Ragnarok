@@ -1,0 +1,3 @@
+[submodule "rina-pp-sys"]
+	path = pp
+	url = https://github.com/osuthailand/rina-pp-sys

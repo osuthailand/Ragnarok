@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Iterator, Union
 
 from objects import services
 from objects.channel import Channel
@@ -10,13 +10,16 @@ class Tokens:
     def __init__(self):
         self.players: list[Player] = []
 
+    def __iter__(self) -> Iterator[Player]:
+        return iter(self.players)
+
     def add(self, p: Player) -> None:
         self.players.append(p)
 
     def remove(self, p: Player) -> None:
         self.players.remove(p)
 
-    def get(self, value: Union[str, int]) -> Player:
+    def get(self, value: str | int) -> Player:
         for p in self.players:
             if (
                 p.id == value
@@ -26,18 +29,36 @@ class Tokens:
             ):
                 return p
 
-    async def get_offline(self, value: Union[str, int]) -> Player:
+    async def get_offline(self, value: str | int) -> Player:
         if p := self.get(value):
             return p
 
-        if p := await self.from_sql(value):
-            return p
+        if isinstance(value, int):
+            if p := await self.from_sql_by_id(value):
+                return p
+        else:
+            if p := await self.from_sql_by_name(value):
+                return p
 
-    async def from_sql(self, value: Union[str, int]) -> Player:
+    async def from_sql_by_name(self, value: str | int) -> Player:
         data = await services.sql.fetch(
             "SELECT username, id, privileges, passhash FROM users "
-            "WHERE (id = %s OR username = %s OR safe_username = %s)",
-            (value, value, value),
+            "WHERE (username = %s OR safe_username = %s)",
+            (value, value),
+        )
+
+        if not data:
+            return
+
+        p = Player(**data)
+
+        return p
+
+    async def from_sql_by_id(self, value: str | int) -> Player:
+        data = await services.sql.fetch(
+            "SELECT username, id, privileges, passhash FROM users "
+            "WHERE id = %s",
+            (value),
         )
 
         if not data:

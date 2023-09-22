@@ -7,10 +7,8 @@ from utils import log
 from objects.score import Score, SubmitStatus
 from collections import defaultdict
 from constants.player import Privileges
-from lenhttp import Router, Request
 from typing import Callable, Union, Any
 from functools import wraps
-from anticheat import run
 from utils import general
 from urllib.parse import unquote
 import numpy as np
@@ -23,17 +21,22 @@ import bcrypt
 import hashlib
 import asyncio
 
+from starlette.routing import Router
+from starlette.requests import Request
+from starlette.responses import FileResponse, Response, RedirectResponse
+
 
 def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
     def decorator(cb: Callable) -> Callable:
         @wraps(cb)
         async def wrapper(req, *args, **kwargs):
             if method == "GET":
-                player = unquote(req.get_args[u])
-                password = req.get_args[pw]
+                player = unquote(req.query_params[u])
+                password = req.query_params[pw]
             else:
-                player = unquote(req.post_args[u])
-                password = req.post_args[pw]
+                form = await req.form()
+                player = unquote(form[u])
+                password = form[pw]
 
             if cho_auth:
                 if not (
@@ -44,7 +47,7 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
                         [player.lower().replace(" ", "_")],
                     )
                 ):
-                    return b""
+                    return Response(content=b"")
 
                 phash = user_info["passhash"].encode("utf-8")
                 pmd5 = password.encode("utf-8")
@@ -55,23 +58,23 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
                             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
                         )
 
-                        return b""
+                        return Response(content=b"")
                 else:
                     if not bcrypt.checkpw(pmd5, phash):
                         log.warn(
                             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
                         )
 
-                        return b""
+                        return Response(content=b"")
 
                     services.bcrypt_cache[phash] = pmd5
             else:
                 if not (p := services.players.get(player)):
-                    return b""
+                    return Response(content=b"")
 
                 if p.passhash in services.bcrypt_cache:
                     if password.encode("utf-8") != services.bcrypt_cache[p.passhash]:
-                        return b""
+                        return Response(content=b"")
 
             return await cb(req, *args, **kwargs)
 
@@ -80,14 +83,15 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
     return decorator
 
 
-osu = Router({f"osu.{services.domain}", f"127.0.0.1:{services.port}"})
+osu = Router()
 
 
-@osu.add_endpoint("/users", methods=["POST"])
+@osu.route("/users", methods=["POST"])
 async def registration(req: Request) -> Union[dict[str, Any], bytes]:
-    uname = req.post_args["user[username]"]
-    email = req.post_args["user[user_email]"]
-    pwd = req.post_args["user[password]"]
+    form = await req.form()
+    uname = form["user[username]"]
+    email = form["user[user_email]"]
+    pwd = form["user[password]"]
 
     error_response = defaultdict(list)
 
@@ -102,9 +106,9 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
         )
 
     if error_response:
-        return req.return_json(200, {"form_error": {"user": error_response}})
+        return Response(content=req.return_json(200, {"form_error": {"user": error_response}}))
 
-    if req.post_args["check"] == "0":
+    if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
         pw_bcrypt = bcrypt.hashpw(pw_md5, bcrypt.gensalt())
 
@@ -124,7 +128,7 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
         await services.sql.execute("INSERT INTO stats (id) VALUES (%s)", [id])
         await services.sql.execute("INSERT INTO stats_rx (id) VALUES (%s)", [id])
 
-    return b"ok"
+    return Response(content=b"ok")
 
 
 async def save_beatmap_file(id: int) -> None:
@@ -139,28 +143,28 @@ async def save_beatmap_file(id: int) -> None:
                     log.fail(
                         f"Couldn't fetch the .osu file of {id}. Maybe because api rate limit?"
                     )
-                    return b""
+                    return Response(content=b"")
 
                 async with aiofiles.open(f".data/beatmaps/{id}.osu", "w+") as osu:
                     await osu.write(await resp.text())
 
 
-# @osu.add_endpoint("/web/bancho_connect.php")
+# @osu.route("/web/bancho_connect.php")
 # @check_auth("u", "h", cho_auth = True)
-# async def bancho_connect(req: Request) -> bytes:
+# async def bancho_connect(req: Request) -> Response:
 #     # TODO: make some verification (ch means client hash)
 #     #       "error: verify" is a thing
-#     return req.headers["CF-IPCountry"].lower().encode()
+#     return Response(content=req.headers["CF-IPCountry"].lower().encode())
 
 
-@osu.add_endpoint("/web/osu-osz2-getscores.php")
+@osu.route("/web/osu-osz2-getscores.php")
 @check_auth("us", "ha")
-async def get_scores(req: Request) -> bytes:
-    hash = req.get_args["c"]
-    mode = int(req.get_args["m"])
+async def get_scores(req: Request) -> Response:
+    hash = req.query_params["c"]
+    mode = int(req.query_params["m"])
 
     if not hash in services.beatmaps:
-        b = await Beatmap.get_beatmap(hash, req.get_args["i"])
+        b = await Beatmap.get_beatmap(hash, req.query_params["i"])
     else:
         b = services.beatmaps[hash]
 
@@ -168,23 +172,23 @@ async def get_scores(req: Request) -> bytes:
         if not hash in services.beatmaps:
             services.beatmaps[hash] = None
 
-        return b"-1|true"
+        return Response(content=b"-1|true")
 
     if b.approved <= Approved.UPDATE:
         if not hash in services.beatmaps:
             services.beatmaps[hash] = b
 
-        return f"{b.approved.value}|false".encode()
+        return Response(content=f"{b.approved.to_osu}|false".encode())
 
     # no need for check, as its in the decorator
-    if not (p := services.players.get(unquote(req.get_args["us"]))):
-        return b"what"
+    if not (p := services.players.get(unquote(req.query_params["us"]))):
+        return Response(content=b"what")
 
     # pretty sus
-    if not int(req.get_args["mods"]) & Mods.RELAX and p.relax:
+    if not int(req.query_params["mods"]) & Mods.RELAX and p.relax:
         p.relax = False
 
-    if int(req.get_args["mods"]) & Mods.RELAX and not p.relax:
+    if int(req.query_params["mods"]) & Mods.RELAX and not p.relax:
         p.relax = True
 
     ret = b.web_format
@@ -204,7 +208,7 @@ async def get_scores(req: Request) -> bytes:
             s = await Score.set_data_from_sql(data["id"])
 
             ret += s.web_format
-
+            
         async for play in services.sql.iterall(
             "SELECT s.id FROM scores s INNER JOIN users u ON u.id = s.user_id "
             "WHERE s.hash_md5 = %s AND s.mode = %s AND s.relax = %s AND s.status = 3 "
@@ -219,37 +223,41 @@ async def get_scores(req: Request) -> bytes:
 
             ret += ls.web_format
 
+
     asyncio.create_task(save_beatmap_file(b.map_id))
 
     if not hash in services.beatmaps:
         services.beatmaps[hash] = b
 
-    return ret.encode()  # placeholder
+    return Response(content=ret.encode())
 
 
-@osu.add_endpoint("/web/osu-submit-modular-selector.php", methods=["POST"])
-async def score_submission(req: Request) -> bytes:
+@osu.route("/web/osu-submit-modular-selector.php", methods=["POST"])
+async def score_submission(req: Request) -> Response:
     # The dict is empty for some reason... odd...
-    if not req.post_args:
-        return b"error: unknown"
+    if not (form := await req.form()):
+        return Response(content=b"error: unknown")
 
-    if (ver := req.post_args["osuver"])[:4] != "2022":
-        return b"error: oldver"
+    if (ver := form["osuver"])[:4] != "2023":
+        return Response(content=b"error: oldver")
 
     submission_key = f"osu!-scoreburgr---------{ver}"
 
     s = await Score.set_data_from_submission(
-        req.post_args["score"],
-        req.post_args["iv"],
+        form.getlist("score")[0],
+        form["iv"],
         submission_key,
-        int(req.post_args["x"]),
+        int(form["x"]),
     )
 
     if not s or not s.player or not s.map:
-        return b"error: no"
+        return Response(content=b"error: no")
+
+    if s.mods & Mods.DISABLED:
+        return Response(content=b"error: disabled")
 
     passed = s.status >= SubmitStatus.PASSED
-    s.play_time = req.post_args["st" if passed else "ft"]
+    s.play_time = form["st" if passed else "ft"]
 
     # handle needed things, if the map is ranked.
     if s.map.approved >= Approved.RANKED:
@@ -262,19 +270,16 @@ async def score_submission(req: Request) -> bytes:
                 # restrict the player if they
                 # somehow managed to submit a
                 # score without a replay.
-                if "score" not in req.files.keys():
+                if not form.getlist("score"):
                     await s.player.restrict()
-                    return b"error: no"
-
-                with open(f".data/replays/{s.id}.osr", "wb+") as file:
-                    file.write(req.files["score"])
+                    return Response(content=b"error: no")
 
                 await services.sql.execute(
                     "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
                     (s.map.plays, s.map.passes, s.map.hash_md5),
                 )
 
-    s.id = await s.save_to_db() + 1
+    s.id = await s.save_to_db()
 
     if passed:
         stats = s.player
@@ -285,15 +290,32 @@ async def score_submission(req: Request) -> bytes:
         if stats.total_score > 0:
             prev_stats = copy.copy(stats)
 
+        with open(f".data/replays/{s.id}.osr", "wb+") as file:
+            file.write(await form["score"].read())
+
         # calculate new stats
         if s.map.approved >= Approved.RANKED:
+            _achievements = []
+            for ach in services.achievements:
+                if ach in stats.achievements:
+                    continue
+
+                if eval(ach.condition):
+                    await services.sql.execute(
+                        "INSERT INTO users_achievements "
+                        "(user_id, achievement_id) VALUES (%s, %s)",
+                        (stats.id, ach.id)
+                    )
+
+                    stats.achievements.add(ach)
+                    _achievements.append(ach)
+
+            achievements = "/".join(str(ach) for ach in _achievements)
 
             stats.playcount += 1
             stats.total_score += s.score
 
             if s.status == SubmitStatus.BEST:
-                table = ("stats", "stats_rx")[s.relax]
-
                 sus = s.score
 
                 if s.pb:
@@ -423,8 +445,7 @@ async def score_submission(req: Request) -> bytes:
                                 Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
                             )
                         ),
-                        # achievements can wait
-                        f"achievements-new:osu-combo-1000+deez+nuts",
+                        f"achievements-new:{achievements}",
                     )
                 )
             )
@@ -437,107 +458,101 @@ async def score_submission(req: Request) -> bytes:
 
             stats.last_score = s
         else:
-            return b"error: disabled"
+            return Response(content=b"error: no")
     else:
-        return b"error: no"
+        return Response(content=b"error: no")
 
-    return "\n".join(ret).encode()
+    return Response(content="\n".join(ret).encode())
 
 
-@osu.add_endpoint("/web/osu-getreplay.php")
+@osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
-async def get_replay(req: Request) -> bytes:
-    try:
-        async with aiofiles.open(f".data/replays/{req.get_args['c']}.osr", "rb") as raw:
-            if replay := await raw.read():
-                return replay
-    except OSError as e:
-        log.info(f"Replay ID {req.get_args['c']} cannot be loaded! (File not found?)")
+async def get_replay(req: Request) -> Response:
+    if not os.path.isfile((path := f".data/replays/{req.query_params['c']}.osr")):
+        log.info(f"Replay ID {req.query_params['c']} cannot be loaded! (File not found?)")
+        return Response(content=b"")
 
-    return b""
+    return FileResponse(path=path)
 
 
-@osu.add_endpoint("/web/osu-getfriends.php")
+
+@osu.route("/web/osu-getfriends.php")
 @check_auth("u", "h")
-async def get_friends(req: Request) -> bytes:
-    p = await services.players.get_offline(unquote(req.get_args["u"]))
+async def get_friends(req: Request) -> Response:
+    p = await services.players.get_offline(unquote(req.query_params["u"]))
 
     await p.get_friends()
 
-    return "\n".join(map(str, p.friends)).encode()
+    return Response(content="\n".join(map(str, p.friends)).encode())
 
 
-@osu.add_endpoint("/web/osu-markasread.php")
+@osu.route("/web/osu-markasread.php")
 @check_auth("u", "h")
-async def markasread(req: Request) -> bytes:
-    if not (chan := services.channels.get(req.get_args["channel"])):
-        return b""
+async def markasread(req: Request) -> Response:
+    if not (chan := services.channels.get(req.query_params["channel"])):
+        return Response(content=b"")
 
     # TODO: maybe make a mail system???
-    return b""
+    return Response(content=b"")
 
 
-@osu.add_endpoint("/web/lastfm.php")
+@osu.route("/web/lastfm.php")
 @check_auth("us", "ha")
-async def lastfm(req: Request) -> bytes:
+async def lastfm(req: Request) -> Response:
     # something odd in client detected
     # TODO: add enums to check abnormal stuff
-    if req.get_args["b"][0] == "a":
-        return b"-3"
+    if req.query_params["b"][0] == "a":
+        return Response(content=b"-3")
 
     # if nothing odd happens... then keep checking
-    return b""
+    return Response(content=b"")
 
 
-@osu.add_endpoint("/web/osu-getseasonal.php")
-async def get_seasonal(req: Request) -> bytes:
+@osu.route("/web/osu-getseasonal.php")
+async def get_seasonal(req: Request) -> Response:
     # hmmm... it seems like there's nothing special yet
     # TODO: make a config file for this?
-    return b"[]"
+    return Response(content=b"[]")
 
 
-@osu.add_endpoint("/web/osu-error.php", methods=["POST"])
-async def get_osu_error(req: Request) -> bytes:
+@osu.route("/web/osu-error.php", methods=["POST"])
+async def get_osu_error(req: Request) -> Response:
     # not really our problem though :trolley:
     # let's just send this empty thing
-    return b""
+    return Response(content=b"")
 
 
-@osu.add_endpoint("/web/osu-comment.php", methods=["POST"])
+@osu.route("/web/osu-comment.php", methods=["POST"])
 @check_auth("u", "p", method="POST")
-async def get_beatmap_comments(req: Request) -> bytes:
-    if not req.post_args:
-        return b""
-
-    log.info(req.post_args)
-    return b""
+async def get_beatmap_comments(req: Request) -> Response:
+    return Response(content=b"")
 
 
-@osu.add_endpoint("/web/osu-screenshot.php", methods=["POST"])
+@osu.route("/web/osu-screenshot.php", methods=["POST"])
 @check_auth("u", "p", method="POST")
-async def post_screenshot(req: Request) -> bytes:
+async def post_screenshot(req: Request) -> Response:
     id = general.random_string(8)
+    form = await req.form()
 
     async with aiofiles.open(f".data/ss/{id}.png", "wb+") as ss:
-        await ss.write(req.files["ss"])
+        await ss.write(form['ss'])
 
-    return f"{id}.png".encode()
-
-
-@osu.add_endpoint("/ss/<ssid>.png")
-async def get_screenshot(req: Request, ssid: int) -> bytes:
-    if os.path.isfile((path := f".data/ss/{ssid}.png")):
-        async with aiofiles.open(path, "rb") as ss:
-            return await ss.read()
-
-    return b"no screenshot with that id."
+    return Response(content=f"{id}.png".encode())
 
 
-@osu.add_endpoint("/web/osu-search.php")
+@osu.route("/ss/{ssid:int}.png")
+async def get_screenshot(req: Request) -> FileResponse | Response:
+    if os.path.isfile((path := f".data/ss/{req.path_params['ssid']}.png")):
+        return FileResponse(path=path)
+
+    return Response(content=b"no screenshot with that id.")
+
+
+@osu.route("/web/osu-search.php")
 @check_auth("u", "h")
-async def osu_direct(req: Request) -> bytes:
+async def osu_direct(req: Request) -> Response:
     # man im way too lazy to do this man
-    args = req.get_args
+    args = req.query_params
 
     if (query := args["q"]) in ("Newest", "Top+Rated", "Most+Played"):
         query = ""
@@ -552,21 +567,20 @@ async def osu_direct(req: Request) -> bytes:
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url) as resp:
             a = await resp.text()
-            return a.encode()
+            return Response(content=a.encode())
 
 
-@osu.add_endpoint("/web/osu-search-set.php")
+@osu.route("/web/osu-search-set.php")
 @check_auth("u", "h")
-async def osu_search_set(req: Request) -> bytes:
-    log.debug(req.get_args)
+async def osu_search_set(req: Request) -> Response:
     map = await services.sql.fetch(
         "SELECT set_id, artist, title, rating, "
         "creator, approved, latest_update "
         "FROM beatmaps WHERE map_id = %s",
-        (req.get_args["b"]),
+        (req.query_params["b"]),
     )
 
-    return (
+    return Response(content=
         "{set_id}.osz|{artist}|{title}|"
         "{creator}|{approved}|{rating}|"
         "{latest_update}|{set_id}|"
@@ -574,7 +588,10 @@ async def osu_search_set(req: Request) -> bytes:
     )
 
 
-@osu.add_endpoint("/d/<map_id>")
-async def download_osz(req: Request, map_id: int) -> bytes:
-    # redirect to osu.ppy.sh/d/<id>
-    return b""
+@osu.route("/d/{map_id:int}")
+async def download_osz(req: Request) -> Response:
+    # redirect to osu.ppy.sh/d/{id}
+    return RedirectResponse(
+        url=f"https://api.nerinyan.moe/d/{req.query_params['map_id']}",
+        status_code=301
+    )

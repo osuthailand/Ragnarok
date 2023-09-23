@@ -604,7 +604,7 @@ async def osu_direct(req: Request) -> Response:
                     starsRating = beatmaps["difficulty_rating"]
                     mode = beatmaps["mode_int"]
 
-                    directList += f"{diffName.replace(',', '')} ★{starsRating}@{mode}"
+                    directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{starsRating}@{mode}"
 
                     if i < len(beatmapsSet["beatmaps"]) - 1:
                         directList += ","

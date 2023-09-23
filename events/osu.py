@@ -604,7 +604,7 @@ async def osu_direct(req: Request) -> Response:
                     starsRating = beatmaps["difficulty_rating"]
                     mode = beatmaps["mode_int"]
 
-                    directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{starsRating}@{mode}"
+                    directList += f"{diffName.replace(',', '')} ★{starsRating}@{mode}"
 
                     if i < len(beatmapsSet["beatmaps"]) - 1:
                         directList += ","
@@ -617,12 +617,33 @@ async def osu_direct(req: Request) -> Response:
 @osu.route("/web/osu-search-set.php")
 @check_auth("u", "h")
 async def osu_search_set(req: Request) -> Response:
-    map = await services.sql.fetch(
-        "SELECT set_id, artist, title, rating, "
-        "creator, approved, latest_update "
-        "FROM beatmaps WHERE map_id = %s",
-        (req.query_params["b"]),
-    )
+    match req.query_params:
+        case {"s": sid}: # TODO: Beatmap Set
+            return Response(content=b"")
+        case {"b": bid}: # Beatmap ID
+            log.debug("osu-search-set.php: beatmap id")
+            bm = bid
+            map = await services.sql.fetch(
+                "SELECT set_id, artist, title, rating, "
+                "creator, approved, latest_update "
+                "FROM beatmaps WHERE map_id = %s",
+                (req.query_params["b"]),
+            )
+        case {"t": tid}: # TODO: Topic
+            return Response(content=b"")
+        case {"p": pid}: # TODO: Post
+            return Response(content=b"")
+        case {"c": hash}: # Checksum
+            bm = hash
+            map = await services.sql.fetch(
+                "SELECT set_id, artist, title, rating, "
+                "creator, approved, latest_update "
+                "FROM beatmaps WHERE hash = %s",
+                (req.query_params["c"]),
+            )
+
+    if not map: # if beatmap doesn't exists in db then fetch!
+        b = await Beatmap.get_beatmap(bm)
 
     return Response(content=
         "{set_id}.osz|{artist}|{title}|"

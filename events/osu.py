@@ -87,7 +87,7 @@ osu = Router()
 
 
 @osu.route("/users", methods=["POST"])
-async def registration(req: Request) -> Union[dict[str, Any], bytes]:
+async def registration(req: Request) -> Response:
     form = await req.form()
     uname = form["user[username]"]
     email = form["user[user_email]"]
@@ -131,7 +131,7 @@ async def registration(req: Request) -> Union[dict[str, Any], bytes]:
     return Response(content=b"ok")
 
 
-async def save_beatmap_file(id: int) -> None:
+async def save_beatmap_file(id: int) -> None | Response:
     if not os.path.exists(f".data/beatmaps/{id}.osu"):
         async with aiohttp.ClientSession() as sess:
             # I hope this is legal.
@@ -234,9 +234,27 @@ async def get_scores(req: Request) -> Response:
 
 @osu.route("/web/osu-submit-modular-selector.php", methods=["POST"])
 async def score_submission(req: Request) -> Response:
+    # possible errors in osu! score submission system:
+
+    # version mismatch: osu! version in form and score data is mismatched
+    # reset: password reset
+    # pass: wrong password
+    # verify: account verify needed
+    # nouser: username is wrong
+    # inactive/ban: account hasnt been activated or banned
+    # beatmap: beatmap is not existed/not ranked in beatmap table
+    # disabled: mods not allowed to submit
+    # oldver: old version
+    # unknown: user is invalid or just for any exception
+    # missinginfo: not all fields are there
+    # checksum: score verification failed
+    # dup: duplicated score in 24 hours period
+    # invalid: score is impossible/hacked
+    # no: ignore the score
+    
     # The dict is empty for some reason... odd...
     if not (form := await req.form()):
-        return Response(content=b"error: unknown")
+        return Response(content=b"error: missinginfo")
 
     if (ver := form["osuver"])[:4] != "2023":
         return Response(content=b"error: oldver")
@@ -252,6 +270,9 @@ async def score_submission(req: Request) -> Response:
 
     if not s or not s.player or not s.map:
         return Response(content=b"error: no")
+
+    if not s.player & Privileges.VERIFIED:
+        return Response(content=b"error: verify")
 
     if s.mods & Mods.DISABLED:
         return Response(content=b"error: disabled")
@@ -272,7 +293,7 @@ async def score_submission(req: Request) -> Response:
                 # score without a replay.
                 if not form.getlist("score"):
                     await s.player.restrict()
-                    return Response(content=b"error: no")
+                    return Response(content=b"error: invalid")
 
                 await services.sql.execute(
                     "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
@@ -284,12 +305,13 @@ async def score_submission(req: Request) -> Response:
     if passed:
         stats = s.player
 
-        # check if the user is playing for the first time
+        # check if the user is playing the map for the first time
         prev_stats = None
 
         if stats.total_score > 0:
             prev_stats = copy.copy(stats)
 
+        # save replay
         with open(f".data/replays/{s.id}.osr", "wb+") as file:
             file.write(await form["score"].read())
 
@@ -299,7 +321,9 @@ async def score_submission(req: Request) -> Response:
             for ach in services.achievements:
                 if ach in stats.achievements:
                     continue
-
+                
+                # if the achievement condition matches
+                # with the score, it should be unlocked.
                 if eval(ach.condition):
                     await services.sql.execute(
                         "INSERT INTO users_achievements "
@@ -323,6 +347,7 @@ async def score_submission(req: Request) -> Response:
 
                 stats.ranked_score += sus
 
+                # maybe we can cache this?
                 scores = await services.sql.fetchall(
                     "SELECT pp, accuracy FROM scores "
                     "WHERE user_id = %s AND mode = %s "
@@ -343,7 +368,10 @@ async def score_submission(req: Request) -> Response:
                 s.rank = await stats.update_rank(s.relax, s.mode) + 1
                 await stats.update_stats(s.mode, s.relax)
 
-                if s.position == 1 and not stats.is_restricted:
+                # if the player got a position on
+                # the leaderboard lower than or equal to 11
+                # announce it
+                if s.position <= 10 and not stats.is_restricted:
                     modes = {0: "osu!", 1: "osu!taiko", 2: "osu!catch", 3: "osu!mania"}[
                         s.mode.value
                     ]
@@ -351,10 +379,11 @@ async def score_submission(req: Request) -> Response:
                     chan: Channel = services.channels.get("#announce")
 
                     await chan.send(
-                        f"{s.player.embed} achieved #1 on {s.map.embed} ({modes}) [{'RX' if s.relax else 'VN'}]",
+                        f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({modes}) [{'RX' if s.relax else 'VN'}]",
                         sender=services.bot,
                     )
 
+        # only do charts if the score isn't relax
         if not s.relax:
             ret: list = []
 
@@ -449,12 +478,6 @@ async def score_submission(req: Request) -> Response:
                     )
                 )
             )
-
-            # asyncio.create_task(
-            #     run.run_anticheat(
-            #         s, f".data/replays/{s.id}.osr", f".data/beatmaps/{s.map.map_id}.osu"
-            #     )
-            # )
 
             stats.last_score = s
         else:
@@ -630,8 +653,10 @@ async def osu_search_set(req: Request) -> Response:
                 (req.query_params["b"]),
             )
         case {"t": tid}: # TODO: Topic
+            # /forum/viewtopic.php?t=XXXX but seriously who uses that in unofficial servers?
             return Response(content=b"")
         case {"p": pid}: # TODO: Post
+            # /forum/viewtopic.php?p=XXXX but seriously who uses that in unofficial servers?
             return Response(content=b"")
         case {"c": hash}: # Checksum
             bm = hash
@@ -643,7 +668,7 @@ async def osu_search_set(req: Request) -> Response:
             )
 
     if not map: # if beatmap doesn't exists in db then fetch!
-        b = await Beatmap.get_beatmap(bm)
+        map = await Beatmap.get_beatmap(bm)
 
     return Response(content=
         "{set_id}.osz|{artist}|{title}|"

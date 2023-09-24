@@ -65,6 +65,7 @@ class Command:
 
     perms: Privileges
     doc: str
+    category: str
     hidden: bool
 
 
@@ -86,6 +87,7 @@ def rmp_command(
             perms=required_perms,
             doc=cb.__doc__,
             hidden=hidden,
+            category="Multiplayer"
         )
 
         mp_commands.append(cmd)
@@ -98,6 +100,7 @@ def register_command(
     required_perms: Privileges = Privileges.USER,
     hidden: bool = False,
     aliases: list[str] = (),
+    category: str = "undefined",
 ):
     def decorator(cb: Callable) -> None:
         cmd = Command(
@@ -107,6 +110,7 @@ def register_command(
             perms=required_perms,
             doc=cb.__doc__,
             hidden=hidden,
+            category=category,
         )
 
         commands.append(cmd)
@@ -119,42 +123,40 @@ def register_command(
 #
 
 
-@register_command("help")
+@register_command("help", category="General")
 async def help(ctx: Context) -> str:
     """The help message"""
 
-    if ctx.args:
-        trigger = ctx.args[0]
+    cmds: dict[str, dict[str, str]] = {}
+    for cmd in commands:
+        if cmd.hidden:
+            continue
 
-        for key in commands:
-            if key.cmd != trigger:
-                continue
+        if cmd.category not in cmds:
+            cmds[cmd.category] = {}
 
-            if key.hidden:
-                continue
+        cmds[cmd.category][cmd.cmd] = cmd.doc
+    
+    command_list = ""
+    for key, value in cmds.items():
+        command_list += key + " commands:\n"
 
-            if not key.perms & ctx.author.privileges:
-                continue
+        for key, value in value.items():
+            command_list += f"!{key} - {value}\n"
 
-            return f"{services.prefix}{key.cmd} | Needed privileges ~> {key.perms.name}\nDescription: {key.doc}"
+        command_list += "\n"
 
-    visible_cmds = [
-        cmd.cmd
-        for cmd in commands
-        if not cmd.hidden and cmd.perms & ctx.author.privileges
-    ]
-
-    return "List of all commands.\n " + "|".join(visible_cmds)
+    return "These are the commands supported by our chat bot.\n" + command_list
 
 
-@register_command("ping")
+@register_command("ping", category="General")
 async def ping_command(ctx: Context) -> str:
     """Ping the server, to see if it responds."""
 
     return "PONG"
 
 
-@register_command("roll")
+@register_command("roll", category="General")
 async def roll(ctx: Context) -> str:
     """Roll a dice!"""
 
@@ -166,15 +168,8 @@ async def roll(ctx: Context) -> str:
     return f"{ctx.author.username} rolled {random.randint(0, x)} point(s)"
 
 
-@register_command("last_np", hidden=True)
-async def last_np(ctx: Context) -> str:
-    if not ctx.author.last_np:
-        return "No np."
-
-    return ctx.author.last_np.full_title
-
-
-@register_command("stats")
+# rewrite this
+@register_command("stats", category="Player")
 async def user_stats(ctx: Context) -> str:
     """Display a users stats both vanilla or relax."""
 
@@ -200,7 +195,7 @@ async def user_stats(ctx: Context) -> str:
     )
 
 
-@register_command("verify", required_perms=Privileges.PENDING)
+@register_command("verify", category="Player", hidden=True, required_perms=Privileges.PENDING)
 async def verify_with_key(ctx: Context) -> str:
     """Verify your account with our key system!"""
 
@@ -245,60 +240,7 @@ async def verify_with_key(ctx: Context) -> str:
     return "Successfully verified your account."
 
 
-@register_command("recalc", required_perms=Privileges.ADMIN)
-async def recalc_scores(ctx: Context) -> str:
-    if not ctx.args:
-        return "Usage: !recalc <relax/vanilla>"
-
-    if ctx.args[0].lower() not in ("relax", "vanilla"):
-        return "Usage: !recalc <relax/vanilla>"
-
-    async for score in services.sql.iterall(
-        "SELECT s.id, s.mods, s.count_300, s.count_100, s.count_50, "
-        "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
-        "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
-        "b.version, b.artist FROM scores s "
-        "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
-        "WHERE s.relax = %s AND s.mode = 0 AND s.status >= %s",
-        (True if ctx.args[0].lower() == "relax" else False, SubmitStatus.PASSED),
-    ):
-        bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
-
-        calc = Calculator(
-            mode=score["mode"],
-            n300=score["count_300"],
-            n100=score["count_100"],
-            n50=score["count_50"],
-            n_misses=score["count_miss"],
-            n_geki=score["count_geki"],
-            n_katu=score["count_katu"],
-            combo=score["max_combo"],
-            acc=score["accuracy"],
-            mods=score["mods"],
-        )
-
-        pp = min(calc.performance(bmap).pp, 2000)
-
-        if math.isnan(pp):
-            await ctx.reciever.send(
-                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
-                sender=services.bot,
-            )
-            pp = 0
-
-        await services.sql.execute(
-            "UPDATE scores SET pp = %s WHERE id = %s", (pp, score["id"])
-        )
-
-        await ctx.reciever.send(
-            message=f"Finished recalculating score {score['id']} (before: {round(score['pp'],4)}, after: {round(pp,4)})",
-            sender=services.bot,
-        )
-
-    return f"Finished recalculating all scores for {ctx.args[0]}"
-
-
-@register_command("pp")
+@register_command("pp", category="Tillerino-like")
 async def calc_pp_for_map(ctx: Context) -> str:
     if not (_map := ctx.author.last_np):
         return "Please /np a map first."
@@ -599,7 +541,7 @@ async def invite_people(ctx: Context) -> str:
 #
 
 
-@register_command("announce", required_perms=Privileges.MODERATOR)
+@register_command("announce", category="Staff", required_perms=Privileges.MODERATOR)
 async def announce(ctx: Context) -> str:
     if len(ctx.args) < 2:
         return
@@ -617,7 +559,7 @@ async def announce(ctx: Context) -> str:
     return "ok"
 
 
-@register_command("kick", required_perms=Privileges.MODERATOR)
+@register_command("kick", category="Staff", required_perms=Privileges.MODERATOR)
 async def kick_user(ctx: Context) -> str:
     """Kick all players or just one player from the server."""
 
@@ -645,7 +587,7 @@ async def kick_user(ctx: Context) -> str:
     return f"Successfully kicked {t.username}"
 
 
-@register_command("restrict", required_perms=Privileges.ADMIN)
+@register_command("restrict", category="Staff", required_perms=Privileges.ADMIN)
 async def restrict_user(ctx: Context) -> str:
     """Restrict users from the server"""
 
@@ -676,7 +618,7 @@ async def restrict_user(ctx: Context) -> str:
     return f"Successfully restricted {t.username}"
 
 
-@register_command("unrestrict", required_perms=Privileges.ADMIN)
+@register_command("unrestrict", category="Staff", required_perms=Privileges.ADMIN)
 async def unrestrict_user(ctx: Context) -> str:
     """Unrestrict users from the server."""
 
@@ -704,7 +646,7 @@ async def unrestrict_user(ctx: Context) -> str:
     return f"Successfully unrestricted {t.username}"
 
 
-@register_command("bot", required_perms=Privileges.DEV)
+@register_command("bot", category="Staff", required_perms=Privileges.ADMIN)
 async def bot_commands(ctx: Context) -> str:
     """Handle our bot ingame"""
 
@@ -720,7 +662,7 @@ async def bot_commands(ctx: Context) -> str:
         return f"Successfully connected {services.bot.username}."
 
 
-@register_command("approve")
+@register_command("approve", category="Staff", required_perms=Privileges.BAT)
 async def approve_map(ctx: Context) -> str:
     """Change the ranked status of beatmaps."""
 
@@ -776,17 +718,61 @@ async def approve_map(ctx: Context) -> str:
     return resp
 
 
-@register_command("test_awaited_response")
-async def await_response_test(ctx: Context) -> str:
-    response = await ctx.await_response()
+@register_command("recalc", category="Staff", required_perms=Privileges.ADMIN)
+async def recalc_scores(ctx: Context) -> str:
+    """Recalculate all the scores on either relax or vanilla."""
+    if not ctx.args:
+        return "Usage: !recalc <relax/vanilla>"
 
-    if not response:
-        return "timeout"
+    if ctx.args[0].lower() not in ("relax", "vanilla"):
+        return "Usage: !recalc <relax/vanilla>"
 
-    return response
+    async for score in services.sql.iterall(
+        "SELECT s.id, s.mods, s.count_300, s.count_100, s.count_50, "
+        "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
+        "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
+        "b.version, b.artist FROM scores s "
+        "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+        "WHERE s.relax = %s AND s.mode = 0 AND s.status >= %s",
+        (True if ctx.args[0].lower() == "relax" else False, SubmitStatus.PASSED),
+    ):
+        bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
+
+        calc = Calculator(
+            mode=score["mode"],
+            n300=score["count_300"],
+            n100=score["count_100"],
+            n50=score["count_50"],
+            n_misses=score["count_miss"],
+            n_geki=score["count_geki"],
+            n_katu=score["count_katu"],
+            combo=score["max_combo"],
+            acc=score["accuracy"],
+            mods=score["mods"],
+        )
+
+        pp = min(calc.performance(bmap).pp, 2000)
+
+        if math.isnan(pp):
+            await ctx.reciever.send(
+                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
+                sender=services.bot,
+            )
+            pp = 0
+
+        await services.sql.execute(
+            "UPDATE scores SET pp = %s WHERE id = %s", (pp, score["id"])
+        )
+
+        await ctx.reciever.send(
+            message=f"Finished recalculating score {score['id']} (before: {round(score['pp'],4)}, after: {round(pp,4)})",
+            sender=services.bot,
+        )
+
+    return f"Finished recalculating all scores for {ctx.args[0]}"
 
 
-@register_command("key", required_perms=Privileges.ADMIN)
+@register_command("key", category="Admin", required_perms=Privileges.ADMIN)
 async def beta_keys(ctx: Context) -> str:
     """Create or delete keys."""
 
@@ -838,10 +824,10 @@ async def beta_keys(ctx: Context) -> str:
 
 
 # group commands
-@register_command("creategroup", required_perms=Privileges.DEV)
+@register_command("group", hidden=True, required_perms=Privileges.DEV)
 async def creategroup(ctx: Context) -> str:
     if len(ctx.args) != 1:
-        return "Usage: !creategroup <name>"
+        return "Usage: !group <name>"
 
     if services.channels.get(name := ctx.args[0]):
         return "Group name already created (fix)"

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from constants.player import bStatus, Privileges
 from constants.packets import BanchoPackets
 from objects.channel import Channel
@@ -22,7 +23,7 @@ import time
 import copy
 import os
 
-from starlette.requests import Request
+from starlette.requests import Request, ClientDisconnect
 from starlette.responses import Response
 from starlette.routing import Router
 
@@ -54,8 +55,13 @@ async def handle_bancho(req: Request):
             content=await writer.Notification("Server has restarted") + await writer.ServerRestart()
         )
 
-    body = await req.body()
-
+    try:
+        body = await req.body()
+    except ClientDisconnect:
+        log.info(f"{player.username} logged out.")
+        await player.logout()
+        return Response(content=player.dequeue())
+    
     for p in (sr := Reader(body)):
         if player.is_restricted and (not p.restricted):
             continue
@@ -76,13 +82,10 @@ async def handle_bancho(req: Request):
 
     player.last_update = time.time()
 
-    return Response(content=player.dequeue() or b"", headers={
-        "Content-Type": "text/html; charset=UTF-8"
-    })
+    return Response(content=player.dequeue())
 
 
 ALREADY_ONLINE = "You're already online!"
-
 RESTRICTED_MSG = "Your account has been set in restricted mode."
 
 async def failed_login(code: int, /, extra: bytes = b"") -> bytes:
@@ -329,7 +332,7 @@ async def send_public_message(p: Player, sr: Reader) -> None:
 # id: 2
 @register_event(BanchoPackets.OSU_LOGOUT, restricted=True)
 async def logout(p: Player, sr: Reader) -> None:
-    reason = sr.read_int32()  # 1 means update
+    _ = sr.read_int32()
 
     if (time.time() - p.login_time) < 1:
         return

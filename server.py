@@ -11,6 +11,7 @@ from objects.collections import Tokens, Channels, Matches
 from events.bancho import bancho
 from events.osu import osu
 from events.avatar import avatar
+from events.api import api
 
 # dont remove
 from constants import commands
@@ -92,12 +93,14 @@ app = Starlette(
         Host(f"c4.{services.domain}", bancho),
         Host(f"osu.{services.domain}", osu),
         Host(f"a.{services.domain}", avatar),
+
+        Host(f"api.{services.domain}", api)
     ],
     on_startup=[startup],
 )
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="127.0.0.1", port=services.port, log_level="error")
+    uvicorn.run("server:app", host="127.0.0.1", port=services.port, log_level="error", loop="uvloop")
 
 
 # @avatar.avatar.after_request()

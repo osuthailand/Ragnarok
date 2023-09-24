@@ -111,11 +111,11 @@ class Player:
 
     @property
     def embed(self) -> str:
-        return f"[https://osu.mitsuha.pw/users/{self.id} {self.username}]"
+        return f"[https://{services.domain}/users/{self.id} {self.username}]"
 
     @property
     def url(self) -> str:
-        return f"https://osu.mitsuha.pw/users/{self.id}"
+        return f"https://{services.domain}/users/{self.id}"
 
     @staticmethod
     def generate_token() -> str:
@@ -136,9 +136,11 @@ class Player:
         return b""
 
     async def shout(self, text: str):
+        """``shout()`` alerts the player."""
         self.enqueue(await writer.Notification(text))
 
     async def logout(self) -> None:
+        """``logout()`` logs the player out."""
         if self.channels:
             while self.channels:
                 await self.leave_channel(self.channels[0], kicked=False)
@@ -157,6 +159,7 @@ class Player:
                 player.enqueue(await writer.Logout(self.id))
 
     async def add_spectator(self, p: "Player") -> None:
+        """``add_spectator()`` adds a spectator to player"""
         # TODO: Create temp spec channel
 
         joined = await writer.FellasJoinSpec(p.id)
@@ -172,6 +175,7 @@ class Player:
         p.spectating = self
 
     async def remove_spectator(self, p) -> None:
+        """``remove_spectator()`` removes a spectator to player"""
         # TODO: Remove chan and part chan
         left = await writer.FellasLeftSpec(p.id)
 
@@ -184,6 +188,7 @@ class Player:
         p.spectating = None
 
     async def join_match(self, m: Match, pwd: Optional[str] = "") -> None:
+        """``join_match()`` makes the player join a multiplayer match."""
         if self.match or pwd != m.match_pass or not m in services.matches.matches:
             self.enqueue(await writer.MatchFail())
             return  # user is already in a match
@@ -224,6 +229,7 @@ class Player:
         await self.match.enqueue_state(lobby=True)
 
     async def leave_match(self) -> None:
+        """``leave_match()`` leaves the multiplayer match, the user is in."""
         if not self.match or not (slot := self.match.find_user(self)):
             return
 

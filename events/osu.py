@@ -106,11 +106,12 @@ async def registration(req: Request) -> Response:
         )
 
     if error_response:
-        return general.ORJSONResponse(status_code=403, content={"form_error": {"user": error_response}})
+        return general.ORJSONResponse(status_code=400, content={"form_error": {"user": error_response}})
 
     # TODO: website registration config
     #if services.web_register:
-        #return ORJSONResponse(status_code=403, content={"error":"please register manually from Rina website","url":"https:\/\/rina.place\/register"}})
+        # osu! will attempt to go to https://url?username={username}&email={email}
+        #return ORJSONResponse(status_code=403, content={"error":"please register from Rina website","url":"https:\/\/rina.place\/register"}})
 
     if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
@@ -650,7 +651,6 @@ async def osu_search_set(req: Request) -> Response:
         case {"s": sid}: # TODO: Beatmap Set
             return Response(content=b"")
         case {"b": bid}: # Beatmap ID
-            log.debug("osu-search-set.php: beatmap id")
             bm = bid
             map = await services.sql.fetch(
                 "SELECT set_id, artist, title, rating, "

@@ -157,9 +157,9 @@ async def login(req: Request) -> bytes:
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
         data += await writer.Notification(RESTRICTED_MSG)
 
-    # only allow 2021 clients
-    # if not client_info[0].startswith("b2021"):
-    #     return await writer.UserID(-2)
+    # only allow 2023 clients
+    if not client_info[0].startswith("b2023"):
+        return await writer.UserID(-2)
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:

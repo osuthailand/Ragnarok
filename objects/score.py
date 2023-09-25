@@ -71,7 +71,7 @@ class Score:
 
         self.perfect: bool = False
 
-        self.rank: str = ""
+        self.rank: int = 0
 
         self.mods: int = 0
         self.status: SubmitStatus = SubmitStatus.FAILED
@@ -150,6 +150,7 @@ class Score:
     @classmethod
     async def set_data_from_submission(
         cls, score_enc: bytes, iv: bytes, key: str, exited: int
+    #) -> "Score" | None:
     ) -> "Score":
         score_latin = b64decode(score_enc).decode("latin_1")
         iv_latin = b64decode(iv).decode("latin_1")

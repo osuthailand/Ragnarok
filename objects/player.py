@@ -462,7 +462,7 @@ class Player:
         return ret
 
     async def get_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
-        _rank = await services.redis.zrevrank(
+        _rank: int = await services.redis.zrevrank(
             f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode.value}",
             str(self.id),
         )

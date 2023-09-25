@@ -7,7 +7,7 @@ from utils import log
 from objects.score import Score, SubmitStatus
 from collections import defaultdict
 from constants.player import Privileges
-from typing import Callable, Union, Any
+from typing import Callable
 from functools import wraps
 from utils import general
 from urllib.parse import unquote
@@ -102,11 +102,15 @@ async def registration(req: Request) -> Response:
 
     if await services.sql.fetch("SELECT 1 FROM users WHERE email = %s", [email]):
         error_response["user_email"].append(
-            "A user with that name already exists in our database."
+            "A user with that email already exists in our database."
         )
 
     if error_response:
-        return Response(content=req.return_json(200, {"form_error": {"user": error_response}}))
+        return general.ORJSONResponse(status_code=403, content={"form_error": {"user": error_response}})
+
+    # TODO: website registration config
+    #if services.web_register:
+        #return ORJSONResponse(status_code=403, content={"error":"please register manually from Rina website","url":"https:\/\/rina.place\/register"}})
 
     if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
@@ -252,8 +256,9 @@ async def score_submission(req: Request) -> Response:
     # invalid: score is impossible/hacked
     # no: ignore the score
     
-    # The dict is empty for some reason... odd...
-    if not (form := await req.form()):
+    # The dict is empty for some reason... odd..
+    form = await req.form()
+    if not form:
         return Response(content=b"error: missinginfo")
 
     if (ver := form["osuver"])[:4] != "2023":
@@ -271,7 +276,7 @@ async def score_submission(req: Request) -> Response:
     if not s or not s.player or not s.map:
         return Response(content=b"error: no")
 
-    if not s.player & Privileges.VERIFIED:
+    if not s.player.privileges & Privileges.VERIFIED:
         return Response(content=b"error: verify")
 
     if s.mods & Mods.DISABLED:
@@ -641,6 +646,7 @@ async def osu_direct(req: Request) -> Response:
 @check_auth("u", "h")
 async def osu_search_set(req: Request) -> Response:
     match req.query_params:
+        # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
         case {"s": sid}: # TODO: Beatmap Set
             return Response(content=b"")
         case {"b": bid}: # Beatmap ID
@@ -652,12 +658,6 @@ async def osu_search_set(req: Request) -> Response:
                 "FROM beatmaps WHERE map_id = %s",
                 (req.query_params["b"]),
             )
-        case {"t": tid}: # TODO: Topic
-            # /forum/viewtopic.php?t=XXXX but seriously who uses that in unofficial servers?
-            return Response(content=b"")
-        case {"p": pid}: # TODO: Post
-            # /forum/viewtopic.php?p=XXXX but seriously who uses that in unofficial servers?
-            return Response(content=b"")
         case {"c": hash}: # Checksum
             bm = hash
             map = await services.sql.fetch(

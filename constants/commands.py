@@ -194,6 +194,38 @@ async def user_stats(ctx: Context) -> str:
         f"Accuracy: {ret['level']}%"
     )
 
+# this is not a permanent command, as soon as the
+# server has a website, it'll be removed
+@register_command("leaderboard", category="Player")
+async def leaderboard(ctx: Context) -> str:
+    if len(ctx.args) < 2:
+        return "Wrong usage: !leaderboard <rx|vn> <mode>"
+    
+    _relax, _mode = ctx.args
+    mode = Mode.from_str(_mode)
+    relax = _relax == "rx"
+
+    if mode == Mode.NONE:
+        return f"Mode {_mode.lower()} doesn't exist."
+
+    leaderboard = await services.redis.zrevrange(
+        f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode.value}",
+        start=0,
+        end=10
+    )
+
+    response = f"Leaderboard for {mode} [{_relax}]\n"
+
+    for rank, id in enumerate(leaderboard):
+        if not (player := await services.players.get_offline(int(id))):
+            # what da floppers
+            log.fail(f"Failed to fetch player ({id}), when fetching leaderboard")
+            continue
+
+        response += f"#{rank + 1} - {player.username} ({player.pp}pp)\n" 
+
+    return response
+
 
 @register_command("verify", category="Player", hidden=True, required_perms=Privileges.PENDING)
 async def verify_with_key(ctx: Context) -> str:

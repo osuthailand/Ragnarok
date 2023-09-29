@@ -371,7 +371,7 @@ async def score_submission(req: Request) -> Response:
                 weighted += 416.6667 * (1 - 0.9994 ** len(scores))
                 stats.pp = math.ceil(weighted)
 
-                s.rank = await stats.update_rank(s.relax, s.mode) + 1
+                stats.rank = await stats.update_rank(s.relax, s.mode) + 1
                 await stats.update_stats(s.mode, s.relax)
 
                 # if the player got a position on
@@ -508,7 +508,8 @@ async def get_replay(req: Request) -> Response:
 @osu.route("/web/osu-getfriends.php")
 @check_auth("u", "h")
 async def get_friends(req: Request) -> Response:
-    p = await services.players.get_offline(unquote(req.query_params["u"]))
+    if not (p := await services.players.get_offline(unquote(req.query_params["u"]))):
+        return Response(content="player not found")
 
     await p.get_friends()
 
@@ -564,12 +565,12 @@ async def post_screenshot(req: Request) -> Response:
     form = await req.form()
 
     async with aiofiles.open(f".data/ss/{id}.png", "wb+") as ss:
-        await ss.write(form['ss'])
+        await ss.write(await form['ss'].read())
 
     return Response(content=f"{id}.png".encode())
 
 
-@osu.route("/ss/{ssid:int}.png")
+@osu.route("/ss/{ssid:str}.png")
 async def get_screenshot(req: Request) -> FileResponse | Response:
     if os.path.isfile((path := f".data/ss/{req.path_params['ssid']}.png")):
         return FileResponse(path=path)
@@ -610,6 +611,7 @@ async def osu_direct(req: Request) -> Response:
         async with sess.get(url) as resp:
             if len(await resp.json()) == 100:
                 bmCount = 1
+
             for beatmapsSet in await resp.json():
                 bmCount += 1
                 
@@ -652,29 +654,21 @@ async def osu_search_set(req: Request) -> Response:
             return Response(content=b"")
         case {"b": bid}: # Beatmap ID
             bm = bid
-            map = await services.sql.fetch(
-                "SELECT set_id, artist, title, rating, "
-                "creator, approved, latest_update "
-                "FROM beatmaps WHERE map_id = %s",
-                (req.query_params["b"]),
-            )
+            bmap = await Beatmap.get_beatmap(beatmap_id=bm) # type: ignore
         case {"c": hash}: # Checksum
             bm = hash
-            map = await services.sql.fetch(
-                "SELECT set_id, artist, title, rating, "
-                "creator, approved, latest_update "
-                "FROM beatmaps WHERE hash = %s",
-                (req.query_params["c"]),
-            )
+            bmap = await Beatmap.get_beatmap(hash=bm) # type: ignore
+        case _:
+            bmap = None
 
-    if not map: # if beatmap doesn't exists in db then fetch!
-        map = await Beatmap.get_beatmap(bm)
+    if not bmap: # if beatmap doesn't exists in db then fetch!
+        log.fail("/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
 
     return Response(content=
-        "{set_id}.osz|{artist}|{title}|"
-        "{creator}|{approved}|{rating}|"
-        "{latest_update}|{set_id}|"
-        "0|0|0|0|0".format(**map).encode()
+        "{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
+        "{bmap.creator}|{bmap.approved}|{bmap.rating}|"
+        "{bmap.latest_update}|{bmap.set_id}|"
+        "0|0|0|0|0".encode()
     )
 
 

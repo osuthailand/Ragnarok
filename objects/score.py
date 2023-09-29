@@ -71,7 +71,7 @@ class Score:
 
         self.perfect: bool = False
 
-        self.rank: int = 0
+        self.rank: str = "F"
 
         self.mods: int = 0
         self.status: SubmitStatus = SubmitStatus.FAILED

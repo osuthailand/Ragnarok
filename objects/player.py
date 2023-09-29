@@ -302,12 +302,16 @@ class Player:
 
     async def get_achievements(self) -> None:
         async for achievement in services.sql.iterall(
-            "SELECT a.* FROM users_achievements ua "
+            "SELECT a.id FROM users_achievements ua "
             "INNER JOIN achievements a ON ua.achievement_id = a.id "
             "WHERE ua.user_id = %s",
             (self.id)
         ):
-            self.achievements.add(Achievement(**achievement))
+            if not (ach := services.get_achievement_by_id(achievement["id"])):
+                log.fail(f"user_achievements: Failed to fetch achievements (id: {achievement['id']})")
+                return
+
+            self.achievements.add(ach)
 
     async def get_friends(self) -> None:
         async for player in services.sql.iterall(

@@ -15,7 +15,7 @@ TOKEN_EXPIRATION = 30  # seconds
 class Task:
     cb: Callable
     delay: int
-    last_called: int
+    last_called: float
 
 
 tasks: list[Task] = []

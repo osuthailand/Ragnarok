@@ -10,7 +10,7 @@ a_path = ".data/avatars/"
 
 
 @avatar.route("/{uid:int}")
-async def handle(req: Request) -> bytes:
+async def handle(req: Request) -> FileResponse:
     uid = req.path_params["uid"]
     has_avatar = os.path.exists(a_path + f"{uid}.png")
     return FileResponse(

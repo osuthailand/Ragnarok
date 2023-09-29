@@ -34,7 +34,7 @@ async def startup():
     services.channels = Channels()
     services.matches = Matches()
 
-    for _path in (".data/avatars", ".data/replays", ".data/beatmaps"):
+    for _path in (".data/avatars", ".data/replays", ".data/beatmaps", ".data/ss"):
         if not os.path.exists(_path):
             log.warn(
                 f"You're missing the folder {_path}! Don't worry we'll add it for you!"

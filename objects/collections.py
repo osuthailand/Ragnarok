@@ -19,7 +19,7 @@ class Tokens:
     def remove(self, p: Player) -> None:
         self.players.remove(p)
 
-    def get(self, value: str | int) -> Player:
+    def get(self, value: str | int) -> Player | None:
         for p in self.players:
             if (
                 p.id == value
@@ -29,7 +29,7 @@ class Tokens:
             ):
                 return p
 
-    async def get_offline(self, value: str | int) -> Player:
+    async def get_offline(self, value: str | int) -> Player | None:
         if p := self.get(value):
             return p
 
@@ -40,7 +40,7 @@ class Tokens:
             if p := await self.from_sql_by_name(value):
                 return p
 
-    async def from_sql_by_name(self, value: str | int) -> Player:
+    async def from_sql_by_name(self, value: str | int) -> Player | None:
         data = await services.sql.fetch(
             "SELECT username, id, privileges, passhash FROM users "
             "WHERE (username = %s OR safe_username = %s)",
@@ -54,7 +54,7 @@ class Tokens:
 
         return p
 
-    async def from_sql_by_id(self, value: str | int) -> Player:
+    async def from_sql_by_id(self, value: str | int) -> Player | None:
         data = await services.sql.fetch(
             "SELECT username, id, privileges, passhash FROM users "
             "WHERE id = %s",
@@ -83,7 +83,7 @@ class Channels:
     def remove(self, c: Channel) -> None:
         self.channels.remove(c)
 
-    def get(self, name: str) -> Channel:
+    def get(self, name: str) -> Channel | None:
         for chan in self.channels:
             if chan._name == name or chan.name == name:
                 return chan
@@ -97,7 +97,7 @@ class Matches:
         if m in self.matches:
             self.matches.remove(m)
 
-    async def find(self, match_id: int) -> "Match":
+    async def find(self, match_id: int) -> "Match": # type: ignore
         for match in self.matches:
             if match_id == match.match_id:
                 return match

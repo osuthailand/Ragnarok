@@ -4,12 +4,9 @@ import orjson
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Router
+from utils.general import ORJSONResponse
 
 api = Router()
-
-class ORJSONResponse(JSONResponse):
-    def render(self, content: Any) -> bytes:
-        return orjson.dumps(content)
 
 @api.route("/")
 async def dash(req: Request) -> JSONResponse: 

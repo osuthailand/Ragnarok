@@ -66,8 +66,9 @@ class Match:
 
         self.connected: list = []
 
-        self.chat: Channel = None
         self.locked: bool = False
+        
+        self.chat: Channel
 
     def __repr__(self) -> str:
         return f"MATCH-{self.match_id}"
@@ -79,22 +80,22 @@ class Match:
 
         return -1
 
-    def find_host(self) -> Players:
+    def find_host(self) -> Players | None:
         for slot in self.slots:
             if slot.p.id == self.host:
                 return slot
 
-    def find_user(self, p: "Player") -> Players:
+    def find_user(self, p: "Player") -> Players | None:
         for slot in self.slots:
             if slot.p == p:
                 return slot
 
-    def find_user_slot(self, p: "Player") -> int:
+    def find_user_slot(self, p: "Player") -> int | None:
         for id, slot in enumerate(self.slots):
             if slot.p == p:
                 return id
 
-    def find_slot(self, slot_id: int) -> Players:
+    def find_slot(self, slot_id: int) -> Players | None:
         for id, slot in enumerate(self.slots):
             if id == slot_id:
                 return slot

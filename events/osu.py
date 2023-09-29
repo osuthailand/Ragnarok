@@ -663,6 +663,7 @@ async def osu_search_set(req: Request) -> Response:
 
     if not bmap: # if beatmap doesn't exists in db then fetch!
         log.fail("/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
+        return Response(content=b"xoxo gossip girl")
 
     return Response(content=
         "{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"

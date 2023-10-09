@@ -18,6 +18,7 @@ conf = {
         "mirrors": {
             "chimu": "https://api.chimu.moe/v1/",
             "katsu": "https://katsu.moe/",
+            "nerinyan": "https://api.nerinyan.moe/",
         },
     },
     "fun": {"rank_all_maps": False},

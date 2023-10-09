@@ -44,7 +44,7 @@ async def _write_replay(s: Score, replay=None, score_id: int = 0, file_name="") 
     ret += struct.pack("<b", s.mode)
     ret += await writer.write_int32(
         20210520
-    )  # we just gonna use the latest version of osu
+    )  # we just gonna use the latest version of osu (this is no longer the latest version...)
 
     ret += (
         await writer.write_str(s.map.hash_md5)

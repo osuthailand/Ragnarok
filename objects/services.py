@@ -58,12 +58,24 @@ matches: "Matches"
 osu_key: str = config["api_conf"]["osu_api_key"]
 
 beatmaps: dict[str, "Beatmap"] = {}
+
+def get_beatmap_hashes_by_set_id(set_id: int) -> list[str]:
+    h = []
+
+    for key, map in beatmaps.items():
+        if map.set_id == set_id:
+            h.append(key)
+            
+    return h
+
 achievements: set[Achievement] = set()
+
 
 def get_achievement_by_id(id: int) -> Achievement | None:
     for ach in achievements:
         if ach.id == id:
             return ach
+
 
 regex: dict[str, Pattern[str]] = {
     "np": re.compile(

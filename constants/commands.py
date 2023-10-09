@@ -87,7 +87,7 @@ def rmp_command(
             perms=required_perms,
             doc=cb.__doc__,
             hidden=hidden,
-            category="Multiplayer"
+            category="Multiplayer",
         )
 
         mp_commands.append(cmd)
@@ -129,14 +129,14 @@ async def help(ctx: Context) -> str:
 
     cmds: dict[str, dict[str, str]] = {}
     for cmd in commands:
-        if cmd.hidden:
+        if cmd.hidden or not cmd.perms & ctx.author.privileges:
             continue
 
         if cmd.category not in cmds:
             cmds[cmd.category] = {}
 
         cmds[cmd.category][cmd.cmd] = cmd.doc
-    
+
     command_list = ""
     for key, value in cmds.items():
         command_list += key + " commands:\n"
@@ -194,13 +194,14 @@ async def user_stats(ctx: Context) -> str:
         f"Accuracy: {ret['level']}%"
     )
 
+
 # this is not a permanent command, as soon as the
 # server has a website, it'll be removed
 @register_command("leaderboard", category="Player")
 async def leaderboard(ctx: Context) -> str:
     if len(ctx.args) < 2:
         return "Wrong usage: !leaderboard <rx|vn> <mode>"
-    
+
     _relax, _mode = ctx.args
     mode = Mode.from_str(_mode)
     relax = _relax == "rx"
@@ -208,26 +209,23 @@ async def leaderboard(ctx: Context) -> str:
     if mode == Mode.NONE:
         return f"Mode {_mode.lower()} doesn't exist."
 
-    leaderboard = await services.redis.zrevrange(
-        f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode.value}",
-        start=0,
-        end=10
-    )
-
     response = f"Leaderboard for {mode} [{_relax}]\n"
 
-    for rank, id in enumerate(leaderboard):
-        if not (player := await services.players.get_offline(int(id))):
-            # what da floppers
-            log.fail(f"Failed to fetch player ({id}), when fetching leaderboard")
-            continue
+    table = ("stats", "stats_rx")[relax]
 
-        response += f"#{rank + 1} - {player.username} ({player.pp}pp)\n" 
+    rank = 0
+    async for player in services.sql.iterall(
+        f"SELECT s.{mode.to_db('pp')} as pp, u.username FROM {table} s LEFT JOIN users u ON u.id = s.id WHERE s.{mode.to_db('pp')} > 0 ORDER BY s.{mode.to_db('pp')} DESC LIMIT 50"
+    ):
+        response += f"#{rank + 1} - {player['username']} ({player['pp']}pp)\n"
+        rank += 1
 
     return response
 
 
-@register_command("verify", category="Player", hidden=True, required_perms=Privileges.PENDING)
+@register_command(
+    "verify", category="Player", hidden=True, required_perms=Privileges.PENDING
+)
 async def verify_with_key(ctx: Context) -> str:
     """Verify your account with our key system!"""
 
@@ -278,10 +276,17 @@ async def calc_pp_for_map(ctx: Context) -> str:
         return "Please /np a map first."
 
     if not ctx.args:
-        return "Usage: !pp <mods>"
+        return "Usage: !pp [(+)mods | acc(%) | (100x)100s | (50x)s | (0x)misses | combo(x)]"
+
+    bmap = BMap(path=f".data/beatmaps/{_map.file}")
+
+    # too lazy to add this
+    formatting = (
+        "+", "%", "100x",
+        "50x", "0x", "x"
+    )
 
     mods = Mods.from_str(ctx.args[0])
-    bmap = BMap(path=f".data/beatmaps/{_map.file}")
 
     # if the original map mode is standard, but
     # the user is on another mode, it should convert pp
@@ -520,22 +525,26 @@ async def get_beatmap(ctx: Context) -> str:
     if not ctx.reciever.is_multi or not (m := ctx.author.match):
         return
 
+    mirrors = services.config["api_conf"]["mirrors"]
+
     if not ctx.args:
-        return "Wrong usage: !multi get <chimu|katsu>"
+        return f"Wrong usage: !multi get <{'|'.join(mirrors.keys())}>"
 
     if m.map_id == 0:
         return "The host has probably choosen a map that needs to be updated! Tell them to do so!"
 
-    if ctx.args[0] not in (mirrors := services.config["api_conf"]["mirrors"]):
+    if ctx.args[0] not in mirrors:
         return "Mirror doesn't exist in our database"
 
     url = mirrors[ctx.args[0]]
 
-    if ctx.args[0] == "chimu":
-        url += f"download/{m.map_id}"
-
-    elif ctx.args[0] == "katsu":
-        url += f"d/{m.map_id}"
+    match ctx.args[0]:
+        case "chimu":
+            url += f"download/{m.map_id}"
+        case "katsu":
+            url += f"d/{m.map_id}"
+        case "nerinyan":
+            url += f"d/{m.map_id}"
 
     return f"[{url} Download beatmap from {ctx.args[0]}]"
 
@@ -647,6 +656,8 @@ async def restrict_user(ctx: Context) -> str:
         await writer.Notification("An admin has set your account in restricted mode!")
     )
 
+    await ctx.author.log(f"restricted {t.username}")
+
     return f"Successfully restricted {t.username}"
 
 
@@ -654,7 +665,7 @@ async def restrict_user(ctx: Context) -> str:
 async def unrestrict_user(ctx: Context) -> str:
     """Unrestrict users from the server."""
 
-    if ctx.reciever != "#staff":
+    if ctx.reciever.name != "#staff":
         return "You can't do that here."
 
     if len(ctx.args) < 1:
@@ -674,6 +685,8 @@ async def unrestrict_user(ctx: Context) -> str:
 
     if t.token:  # if user is online
         t.enqueue(await writer.Notification("An admin has unrestricted your account!"))
+
+    await ctx.author.log(f"unrestricted {t.username}")
 
     return f"Successfully unrestricted {t.username}"
 
@@ -735,6 +748,10 @@ async def approve_map(ctx: Context) -> str:
 
     resp = f"Successfully changed {title}'s status, from {Approved(bmap.approved).name} to {ranked_status.name}"
 
+    await ctx.author.log(
+        f"changed {title}'s status from {Approved(bmap.approved).name} to {ranked_status.name}"
+    )
+
     bmap.approved = ranked_status
 
     if condition == "set_id":
@@ -768,7 +785,10 @@ async def recalc_scores(ctx: Context) -> str:
         "WHERE s.relax = %s AND s.mode = 0 AND s.status >= %s",
         (True if ctx.args[0].lower() == "relax" else False, SubmitStatus.PASSED),
     ):
-        bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
+        try:
+            bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
+        except:
+            continue
 
         calc = Calculator(
             mode=score["mode"],
@@ -800,6 +820,8 @@ async def recalc_scores(ctx: Context) -> str:
             message=f"Finished recalculating score {score['id']} (before: {round(score['pp'],4)}, after: {round(pp,4)})",
             sender=services.bot,
         )
+
+    await ctx.author.log(f"recalculated all scores for {ctx.args[0]}")
 
     return f"Finished recalculating all scores for {ctx.args[0]}"
 

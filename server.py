@@ -2,6 +2,9 @@ import asyncio
 import uvicorn
 
 from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.exceptions import HTTPException
+from starlette.responses import Response
 from starlette.routing import Host
 
 from objects.achievement import Achievement
@@ -12,6 +15,8 @@ from events.bancho import bancho
 from events.osu import osu
 from events.avatar import avatar
 from events.api import api
+
+from events import map  # don't remove
 
 # dont remove
 from constants import commands
@@ -26,6 +31,14 @@ import os
 import sys
 import tasks
 
+REQUIRED_DIRECTORIES = (
+    ".data/avatars",
+    ".data/replays",
+    ".data/beatmaps",
+    ".data/ss",
+    ".data/osz2",
+)
+
 
 async def startup():
     print(f"\033[94m{services.title_card}\033[0m")
@@ -34,7 +47,7 @@ async def startup():
     services.channels = Channels()
     services.matches = Matches()
 
-    for _path in (".data/avatars", ".data/replays", ".data/beatmaps", ".data/ss"):
+    for _path in REQUIRED_DIRECTORIES:
         if not os.path.exists(_path):
             log.warn(
                 f"You're missing the folder {_path}! Don't worry we'll add it for you!"
@@ -87,40 +100,28 @@ async def startup():
     log.info("Finished up connecting to everything!")
 
 
+async def not_found(req: Request, exc: HTTPException) -> Response:
+    log.fail(f"[{req.method}] {req.url._url[8:]} not found")
+    return Response(content=exc.detail.encode(), status_code=404)
+
+
 app = Starlette(
     routes=[
         Host(f"c.{services.domain}", bancho),
         Host(f"c4.{services.domain}", bancho),
         Host(f"osu.{services.domain}", osu),
         Host(f"a.{services.domain}", avatar),
-
-        Host(f"api.{services.domain}", api)
+        Host(f"api.{services.domain}", api),
     ],
     on_startup=[startup],
+    exception_handlers={404: not_found},  # type: ignore
 )
 
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="127.0.0.1", port=services.port, log_level="error", loop="uvloop")
-
-
-# @avatar.avatar.after_request()
-# @osu.osu.after_request()
-# async def after_request(req: Request):
-#     if req.resp_code == 404:
-#         lprint = log.error
-#     else:
-#         lprint = log.info
-
-#     lprint(f"[{req.type}] {req.path} | {req.elapsed}")
-
-
-# @services.server.add_middleware(500)
-# async def fivehundred(req: Request, tb: str):
-#     log.fail(f"An error occured on `{req.path}` | {req.elapsed}\n{tb}")
-
-#     return b""
-
-
-# if __name__ == "__main__":
-#     services.server.add_routers({bancho.bancho, avatar.avatar, osu.osu})
-#     services.server.start()
+    uvicorn.run(
+        "server:app",
+        host="127.0.0.1",
+        port=services.port,
+        log_level="error",
+        loop="uvloop",
+    )

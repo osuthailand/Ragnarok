@@ -11,7 +11,7 @@ class Group(Channel):
 
     @classmethod
     async def create(
-        cls, owner: Player, name: str, description: Optional[str] = None
+        cls, owner: Player, name: str, description: str | None = None
     ) -> "Group":
         kwargs = {
             "owner": owner,

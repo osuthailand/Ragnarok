@@ -27,6 +27,7 @@ from starlette.requests import Request, ClientDisconnect
 from starlette.responses import Response
 from starlette.routing import Router
 
+
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
         services.packets |= {
@@ -52,7 +53,8 @@ async def handle_bancho(req: Request):
 
     if not (player := services.players.get(token)):
         return Response(
-            content=await writer.Notification("Server has restarted") + await writer.ServerRestart()
+            content=await writer.Notification("Server has restarted")
+            + await writer.ServerRestart()
         )
 
     try:
@@ -61,7 +63,7 @@ async def handle_bancho(req: Request):
         log.info(f"{player.username} logged out.")
         await player.logout()
         return Response(content=player.dequeue())
-    
+
     for p in (sr := Reader(body)):
         if player.is_restricted and (not p.restricted):
             continue
@@ -88,11 +90,14 @@ async def handle_bancho(req: Request):
 ALREADY_ONLINE = "You're already online!"
 RESTRICTED_MSG = "Your account has been set in restricted mode."
 
-async def failed_login(code: int, /, extra: bytes = b"") -> bytes:
-    return Response(content=await writer.UserID(code) + extra, headers={"cho-token": "no"})
+
+async def failed_login(code: int, /, extra: bytes = b"") -> Response:
+    return Response(
+        content=await writer.UserID(code) + extra, headers={"cho-token": "no"}
+    )
 
 
-async def login(req: Request) -> bytes:
+async def login(req: Request) -> Response:
     data = bytearray(await writer.ProtocolVersion(19))
     body = await req.body()
     start = time.time_ns()
@@ -188,12 +193,13 @@ async def login(req: Request) -> bytes:
     }
 
     p = Player(**user_info, **kwargs)
-
     p.last_update = time.time()
 
     services.players.add(p)
 
-    await asyncio.gather(*[p.get_friends(), p.update_stats_cache(), p.get_achievements()])
+    await asyncio.gather(
+        *[p.get_friends(), p.update_stats_cache(), p.get_achievements()]
+    )
 
     if p.privileges & Privileges.PENDING:
         await services.bot.send_message(
@@ -254,9 +260,7 @@ async def login(req: Request) -> bytes:
 
     log.info(f"<{user_info['username']} | {user_info['id']}; {p.token}> logged in.")
 
-    return Response(content=bytes(data), headers={
-        "cho-token": p.token
-    })
+    return Response(content=bytes(data), headers={"cho-token": p.token})
 
 
 # id: 0
@@ -538,7 +542,9 @@ async def mp_ready_up(p: Player, sr: Reader) -> None:
     if not (m := p.match) or m.in_progress:
         return
 
-    slot = m.find_user(p)
+    if not (slot := m.find_user(p)):
+        log.debug("Slot not found?")
+        return
 
     if slot.status == SlotStatus.READY:
         return

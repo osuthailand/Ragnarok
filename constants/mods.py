@@ -98,7 +98,7 @@ class Mods(IntFlag):
 
         for mod in str_mods:
             for key, value in mods.__dict__().items():
-                if value == mod:
+                if value == mod.upper():
                     mods |= key
                     break
             else:

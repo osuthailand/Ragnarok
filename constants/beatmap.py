@@ -11,6 +11,9 @@ class Approved(IntEnum):
     QUALIFIED = 4
     LOVED = 5
 
+    HAS_LEADERBOARD = RANKED | APPROVED | QUALIFIED | LOVED
+    AWARDS_PP = RANKED | APPROVED
+
     @property
     def to_osu(self) -> int:
         return {

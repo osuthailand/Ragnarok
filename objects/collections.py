@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, Iterator, Union
+from typing import Any, Iterator
 
 from objects import services
 from objects.channel import Channel
@@ -56,8 +56,7 @@ class Tokens:
 
     async def from_sql_by_id(self, value: str | int) -> Player | None:
         data = await services.sql.fetch(
-            "SELECT username, id, privileges, passhash FROM users "
-            "WHERE id = %s",
+            "SELECT username, id, privileges, passhash FROM users " "WHERE id = %s",
             (value),
         )
 
@@ -97,7 +96,7 @@ class Matches:
         if m in self.matches:
             self.matches.remove(m)
 
-    async def find(self, match_id: int) -> "Match": # type: ignore
+    async def find(self, match_id: int) -> "Match":  # type: ignore
         for match in self.matches:
             if match_id == match.match_id:
                 return match

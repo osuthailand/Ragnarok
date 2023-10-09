@@ -17,7 +17,7 @@ class Bot:
         p = Player(bot["username"], bot["id"], bot["privileges"], bot["passhash"])
 
         p.status = bStatus.WATCHING
-        p.status_text = "over deez nutz"
+        p.status_text = "over scores"
 
         p.bot = True
 

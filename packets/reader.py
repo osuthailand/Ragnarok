@@ -96,6 +96,11 @@ class Reader:
     def data(self):
         return self.packet_data[self.offset :]
 
+    def read_bytes(self, size: int):
+        ret = struct.unpack("<" + "B" * size, self.data[:size])
+        self.offset += size
+        return ret
+
     def read_byte(self) -> int:
         ret = struct.unpack("<b", self.data[:1])
         self.offset += 1
@@ -164,8 +169,13 @@ class Reader:
         self.offset += 8
         return ret
 
-    def read_str(self) -> str:
-        self.offset += 1
+    def read_str(self, retarded: bool = False) -> str:
+        if not retarded:
+            is_string = self.data[0] == 0x0B
+            self.offset += 1
+
+            if not is_string:
+                return ""
 
         shift = 0
         result = 0

@@ -49,7 +49,7 @@ class Player:
         self.longitude: float = lon
         self.latitude: float = lat
         self.timezone: int = kwargs.get("time_offset", 0) + 24
-        self.client_version: float = kwargs.get("version", 0.0)
+        self.client_version: str = kwargs.get("version", "0")
         self.in_lobby: bool = False
 
         if kwargs.get("token"):
@@ -95,6 +95,7 @@ class Player:
         self.is_restricted: bool = not (self.privileges & Privileges.VERIFIED) and (
             not self.privileges & Privileges.PENDING
         )
+        self.on_rina: bool = self.client_version.endswith("rina")
         self.is_staff: bool = self.privileges & Privileges.BAT
 
         self.last_np: "Beatmap" = None
@@ -187,7 +188,7 @@ class Player:
 
         p.spectating = None
 
-    async def join_match(self, m: Match, pwd: Optional[str] = "") -> None:
+    async def join_match(self, m: Match, pwd: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
         if self.match or pwd != m.match_pass or not m in services.matches.matches:
             self.enqueue(await writer.MatchFail())
@@ -305,10 +306,12 @@ class Player:
             "SELECT a.id FROM users_achievements ua "
             "INNER JOIN achievements a ON ua.achievement_id = a.id "
             "WHERE ua.user_id = %s",
-            (self.id)
+            (self.id),
         ):
             if not (ach := services.get_achievement_by_id(achievement["id"])):
-                log.fail(f"user_achievements: Failed to fetch achievements (id: {achievement['id']})")
+                log.fail(
+                    f"user_achievements: Failed to fetch achievements (id: {achievement['id']})"
+                )
                 return
 
             self.achievements.add(ach)
@@ -357,6 +360,13 @@ class Player:
                 "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
             )
         )
+
+        # remove player from leaderboards
+        for rv in ("_rx", ""):
+            for mode in Mode:
+                await services.redis.zrem(
+                    f"ragnarok:leaderboard{rv}:{mode.value}", self.id
+                )
 
         # notify user
         await self.shout("Your account has been put in restricted mode!")
@@ -493,3 +503,17 @@ class Player:
         self.pp = math.ceil(ret["pp"])
 
         return True
+
+    async def report(self, target: "Player", reason: str) -> None:
+        await services.sql.execute(
+            "INSERT INTO reports (reporter, reported, reason, time) "
+            "VALUES (%s, %s, %s, %s)",
+            (self.id, target.id, reason, time.time())
+        )
+
+    async def log(self, note: str) -> None:
+        await services.sql.execute(
+            "INSERT INTO logs (user_id, note, time) "
+            "VALUES (%s, %s, %S)",
+            (self.id, note, time.time())
+        )

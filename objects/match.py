@@ -4,7 +4,7 @@ from constants.playmode import Mode
 from constants.mods import Mods
 from packets import writer
 from objects import services
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from objects.player import Player
@@ -67,8 +67,8 @@ class Match:
         self.connected: list = []
 
         self.locked: bool = False
-        
-        self.chat: Channel
+
+        self.chat: Channel = None
 
     def __repr__(self) -> str:
         return f"MATCH-{self.match_id}"

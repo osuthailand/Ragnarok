@@ -7,7 +7,7 @@ from utils import log
 from objects.score import Score, SubmitStatus
 from collections import defaultdict
 from constants.player import Privileges
-from typing import Callable
+from typing import Callable, Optional
 from functools import wraps
 from utils import general
 from urllib.parse import unquote
@@ -26,15 +26,28 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, Response, RedirectResponse
 
 
-def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
+def check_auth(
+    u: str,
+    pw: str,
+    cho_auth: bool = False,
+    custom_resp: bytes | None = None,
+    method="GET",
+):
     def decorator(cb: Callable) -> Callable:
         @wraps(cb)
         async def wrapper(req, *args, **kwargs):
             if method == "GET":
+                if u not in req.query_params or pw not in req.query_params:
+                    return Response(content=custom_resp or b"not allowed")
+
                 player = unquote(req.query_params[u])
                 password = req.query_params[pw]
             else:
                 form = await req.form()
+
+                if u not in form or pw not in form:
+                    return Response(content=custom_resp or b"not allowed")
+
                 player = unquote(form[u])
                 password = form[pw]
 
@@ -47,7 +60,7 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
                         [player.lower().replace(" ", "_")],
                     )
                 ):
-                    return Response(content=b"")
+                    return Response(content=custom_resp or b"not allowed")
 
                 phash = user_info["passhash"].encode("utf-8")
                 pmd5 = password.encode("utf-8")
@@ -58,23 +71,23 @@ def check_auth(u: str, pw: str, cho_auth: bool = False, method="GET"):
                             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
                         )
 
-                        return Response(content=b"")
+                        return Response(content=custom_resp or b"not allowed")
                 else:
                     if not bcrypt.checkpw(pmd5, phash):
                         log.warn(
                             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
                         )
 
-                        return Response(content=b"")
+                        return Response(content=custom_resp or b"not allowed")
 
                     services.bcrypt_cache[phash] = pmd5
             else:
                 if not (p := services.players.get(player)):
-                    return Response(content=b"")
+                    return Response(content=custom_resp or b"not allowed")
 
                 if p.passhash in services.bcrypt_cache:
                     if password.encode("utf-8") != services.bcrypt_cache[p.passhash]:
-                        return Response(content=b"")
+                        return Response(content=custom_resp or b"not allowed")
 
             return await cb(req, *args, **kwargs)
 
@@ -106,12 +119,14 @@ async def registration(req: Request) -> Response:
         )
 
     if error_response:
-        return general.ORJSONResponse(status_code=400, content={"form_error": {"user": error_response}})
+        return general.ORJSONResponse(
+            status_code=400, content={"form_error": {"user": error_response}}
+        )
 
     # TODO: website registration config
-    #if services.web_register:
-        # osu! will attempt to go to https://url?username={username}&email={email}
-        #return ORJSONResponse(status_code=403, content={"error":"please register from Rina website","url":"https:\/\/rina.place\/register"}})
+    # if services.web_register:
+    # osu! will attempt to go to https://url?username={username}&email={email}
+    # return ORJSONResponse(status_code=403, content={"error":"please register from Rina website","url":"https:\/\/rina.place\/register"}})
 
     if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
@@ -213,7 +228,7 @@ async def get_scores(req: Request) -> Response:
             s = await Score.set_data_from_sql(data["id"])
 
             ret += s.web_format
-            
+
         async for play in services.sql.iterall(
             "SELECT s.id FROM scores s INNER JOIN users u ON u.id = s.user_id "
             "WHERE s.hash_md5 = %s AND s.mode = %s AND s.relax = %s AND s.status = 3 "
@@ -227,7 +242,6 @@ async def get_scores(req: Request) -> Response:
             ls.map.scores += 1
 
             ret += ls.web_format
-
 
     asyncio.create_task(save_beatmap_file(b.map_id))
 
@@ -256,7 +270,7 @@ async def score_submission(req: Request) -> Response:
     # dup: duplicated score in 24 hours period
     # invalid: score is impossible/hacked
     # no: ignore the score
-    
+
     # The dict is empty for some reason... odd..
     form = await req.form()
     if not form:
@@ -274,7 +288,7 @@ async def score_submission(req: Request) -> Response:
         int(form["x"]),
     )
 
-    if not s or not s.player or not s.map:
+    if not s or not s.player or not s.map or s.player.is_restricted:
         return Response(content=b"error: no")
 
     if not s.player.privileges & Privileges.VERIFIED:
@@ -285,27 +299,6 @@ async def score_submission(req: Request) -> Response:
 
     passed = s.status >= SubmitStatus.PASSED
     s.play_time = form["st" if passed else "ft"]
-
-    # handle needed things, if the map is ranked.
-    if s.map.approved >= Approved.RANKED:
-        if not s.player.is_restricted:
-            s.map.plays += 1
-
-            if passed:
-                s.map.passes += 1
-
-                # restrict the player if they
-                # somehow managed to submit a
-                # score without a replay.
-                if not form.getlist("score"):
-                    await s.player.restrict()
-                    return Response(content=b"error: invalid")
-
-                await services.sql.execute(
-                    "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
-                    (s.map.plays, s.map.passes, s.map.hash_md5),
-                )
-
     s.id = await s.save_to_db()
 
     if passed:
@@ -322,25 +315,21 @@ async def score_submission(req: Request) -> Response:
             file.write(await form["score"].read())
 
         # calculate new stats
-        if s.map.approved >= Approved.RANKED:
-            _achievements = []
-            for ach in services.achievements:
-                if ach in stats.achievements:
-                    continue
-                
-                # if the achievement condition matches
-                # with the score, it should be unlocked.
-                if eval(ach.condition):
-                    await services.sql.execute(
-                        "INSERT INTO users_achievements "
-                        "(user_id, achievement_id) VALUES (%s, %s)",
-                        (stats.id, ach.id)
-                    )
+        if s.map.approved & Approved.HAS_LEADERBOARD:
+            # update map passes
+            s.map.passes += 1
 
-                    stats.achievements.add(ach)
-                    _achievements.append(ach)
+            # restrict the player if they
+            # somehow managed to submit a
+            # score without a replay.
+            if not form.getlist("score"):
+                await s.player.restrict()
+                return Response(content=b"error: invalid")
 
-            achievements = "/".join(str(ach) for ach in _achievements)
+            await services.sql.execute(
+                "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
+                (s.map.plays, s.map.passes, s.map.hash_md5),
+            )
 
             stats.playcount += 1
             stats.total_score += s.score
@@ -365,144 +354,177 @@ async def score_submission(req: Request) -> Response:
 
                 stats.accuracy = float(np.mean(avg_accuracy))
 
-                weighted = np.sum(
-                    [score[0] * 0.95 ** (place) for place, score in enumerate(scores)]
-                )
-                weighted += 416.6667 * (1 - 0.9994 ** len(scores))
-                stats.pp = math.ceil(weighted)
+                if s.map.approved & Approved.AWARDS_PP:
+                    weighted = np.sum(
+                        [
+                            score[0] * 0.95 ** (place)
+                            for place, score in enumerate(scores)
+                        ]
+                    )
+                    weighted += 416.6667 * (1 - 0.9994 ** len(scores))
+                    stats.pp = math.ceil(weighted)
 
-                stats.rank = await stats.update_rank(s.relax, s.mode) + 1
+                    stats.rank = await stats.update_rank(s.relax, s.mode) + 1
+
                 await stats.update_stats(s.mode, s.relax)
 
                 # if the player got a position on
-                # the leaderboard lower than or equal to 11
+                # the leaderboard lower than or equal to 10
                 # announce it
                 if s.position <= 10 and not stats.is_restricted:
-                    modes = {0: "osu!", 1: "osu!taiko", 2: "osu!catch", 3: "osu!mania"}[
-                        s.mode.value
-                    ]
-
-                    chan: Channel = services.channels.get("#announce")
+                    chan = services.channels.get("#announce")
 
                     await chan.send(
-                        f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({modes}) [{'RX' if s.relax else 'VN'}]",
+                        f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({s.mode.to_string()}) [{'RX' if s.relax else 'VN'}]",
                         sender=services.bot,
                     )
 
-        # only do charts if the score isn't relax
-        if not s.relax:
+            _achievements = []
+            for ach in services.achievements:
+                if ach in stats.achievements:
+                    continue
+
+                # if the achievement condition matches
+                # with the score, it should be unlocked.
+                if eval(ach.condition):
+                    await services.sql.execute(
+                        "INSERT INTO users_achievements "
+                        "(user_id, achievement_id) VALUES (%s, %s)",
+                        (stats.id, ach.id),
+                    )
+
+                    stats.achievements.add(ach)
+                    _achievements.append(ach)
+
+            achievements = "/".join(str(ach) for ach in _achievements)
+
+            log.info(
+                f"{stats.username} submitted a score on {s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) [{'RELAX' if s.relax else 'VANILLA'}]"
+            )
+
+            # only do charts if the score isn't relax
+            # but do charts if the user is playing on rina
             ret: list = []
-
-            ret.append(
-                "|".join(
-                    (
-                        f"beatmapId:{s.map.map_id}",
-                        f"beatmapSetId:{s.map.set_id}",
-                        f"beatmapPlaycount:{s.map.plays}",
-                        f"beatmapPasscount:{s.map.passes}",
-                        f"approvedDate:{s.map.approved_date}",
+            if not s.relax and not stats.on_rina:
+                ret.append(
+                    "|".join(
+                        (
+                            f"beatmapId:{s.map.map_id}",
+                            f"beatmapSetId:{s.map.set_id}",
+                            f"beatmapPlaycount:{s.map.plays}",
+                            f"beatmapPasscount:{s.map.passes}",
+                            f"approvedDate:{s.map.approved_date}",
+                        )
                     )
                 )
-            )
 
-            ret.append(
-                "|".join(
-                    (
-                        "chartId:beatmap",
-                        f"chartUrl:{s.map.url}",
-                        "chartName:Beatmap Ranking",
-                        *(
-                            (
-                                Beatmap.add_chart("rank", after=s.position),
-                                Beatmap.add_chart("accuracy", after=s.accuracy),
-                                Beatmap.add_chart("maxCombo", after=s.max_combo),
-                                Beatmap.add_chart("rankedScore", after=s.score),
-                                Beatmap.add_chart("totalScore", after=s.score),
-                                Beatmap.add_chart("pp", after=math.ceil(s.pp)),
-                            )
-                            if not s.pb
-                            else (
-                                Beatmap.add_chart("rank", s.pb.position, s.position),
-                                Beatmap.add_chart(
-                                    "accuracy", s.pb.accuracy, s.accuracy
-                                ),
-                                Beatmap.add_chart(
-                                    "maxCombo", s.pb.max_combo, s.max_combo
-                                ),
-                                Beatmap.add_chart("rankedScore", s.pb.score, s.score),
-                                Beatmap.add_chart("totalScore", s.pb.score, s.score),
-                                Beatmap.add_chart(
-                                    "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
-                                ),
-                            )
-                        ),
-                        f"onlineScoreId:{s.id}",
+                ret.append(
+                    "|".join(
+                        (
+                            "chartId:beatmap",
+                            f"chartUrl:{s.map.url}",
+                            "chartName:Beatmap Ranking",
+                            *(
+                                (
+                                    Beatmap.add_chart("rank", after=s.position),
+                                    Beatmap.add_chart("accuracy", after=s.accuracy),
+                                    Beatmap.add_chart("maxCombo", after=s.max_combo),
+                                    Beatmap.add_chart("rankedScore", after=s.score),
+                                    Beatmap.add_chart("totalScore", after=s.score),
+                                    Beatmap.add_chart("pp", after=math.ceil(s.pp)),
+                                )
+                                if not s.pb
+                                else (
+                                    Beatmap.add_chart(
+                                        "rank", s.pb.position, s.position
+                                    ),
+                                    Beatmap.add_chart(
+                                        "accuracy", s.pb.accuracy, s.accuracy
+                                    ),
+                                    Beatmap.add_chart(
+                                        "maxCombo", s.pb.max_combo, s.max_combo
+                                    ),
+                                    Beatmap.add_chart(
+                                        "rankedScore", s.pb.score, s.score
+                                    ),
+                                    Beatmap.add_chart(
+                                        "totalScore", s.pb.score, s.score
+                                    ),
+                                    Beatmap.add_chart(
+                                        "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
+                                    ),
+                                )
+                            ),
+                            f"onlineScoreId:{s.id}",
+                        )
                     )
                 )
-            )
 
-            ret.append(
-                "|".join(
-                    (
-                        "chartId:overall",
-                        f"chartUrl:{s.player.url}",
-                        "chartName:Overall Ranking",
-                        *(
-                            (
-                                Beatmap.add_chart("rank", after=stats.rank),
-                                Beatmap.add_chart("accuracy", after=stats.accuracy),
-                                Beatmap.add_chart("maxCombo", after=0),
-                                Beatmap.add_chart(
-                                    "rankedScore", prev=stats.ranked_score
-                                ),
-                                Beatmap.add_chart(
-                                    "totalScore", after=stats.total_score
-                                ),
-                                Beatmap.add_chart("pp", after=stats.pp),
-                            )
-                            if not prev_stats
-                            else (
-                                Beatmap.add_chart("rank", prev_stats.rank, stats.rank),
-                                Beatmap.add_chart(
-                                    "accuracy", prev_stats.accuracy, stats.accuracy
-                                ),
-                                Beatmap.add_chart("maxCombo", 0, 0),
-                                Beatmap.add_chart(
-                                    "rankedScore",
-                                    prev_stats.ranked_score,
-                                    stats.ranked_score,
-                                ),
-                                Beatmap.add_chart(
-                                    "totalScore",
-                                    prev_stats.total_score,
-                                    stats.total_score,
-                                ),
-                                Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
-                            )
-                        ),
-                        f"achievements-new:{achievements}",
+                ret.append(
+                    "|".join(
+                        (
+                            "chartId:overall",
+                            f"chartUrl:{s.player.url}",
+                            "chartName:Overall Ranking",
+                            *(
+                                (
+                                    Beatmap.add_chart("rank", after=stats.rank),
+                                    Beatmap.add_chart("accuracy", after=stats.accuracy),
+                                    Beatmap.add_chart("maxCombo", after=0),
+                                    Beatmap.add_chart(
+                                        "rankedScore", prev=stats.ranked_score
+                                    ),
+                                    Beatmap.add_chart(
+                                        "totalScore", after=stats.total_score
+                                    ),
+                                    Beatmap.add_chart("pp", after=stats.pp),
+                                )
+                                if not prev_stats
+                                else (
+                                    Beatmap.add_chart(
+                                        "rank", prev_stats.rank, stats.rank
+                                    ),
+                                    Beatmap.add_chart(
+                                        "accuracy", prev_stats.accuracy, stats.accuracy
+                                    ),
+                                    Beatmap.add_chart("maxCombo", 0, 0),
+                                    Beatmap.add_chart(
+                                        "rankedScore",
+                                        prev_stats.ranked_score,
+                                        stats.ranked_score,
+                                    ),
+                                    Beatmap.add_chart(
+                                        "totalScore",
+                                        prev_stats.total_score,
+                                        stats.total_score,
+                                    ),
+                                    Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
+                                )
+                            ),
+                            f"achievements-new:{achievements}",
+                        )
                     )
                 )
-            )
 
-            stats.last_score = s
-        else:
+                stats.last_score = s
+
+                return Response(content="\n".join(ret).encode())
+
             return Response(content=b"error: no")
-    else:
-        return Response(content=b"error: no")
 
-    return Response(content="\n".join(ret).encode())
+    return Response(content=b"error: no")
 
 
 @osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
 async def get_replay(req: Request) -> Response:
     if not os.path.isfile((path := f".data/replays/{req.query_params['c']}.osr")):
-        log.info(f"Replay ID {req.query_params['c']} cannot be loaded! (File not found?)")
+        log.info(
+            f"Replay ID {req.query_params['c']} cannot be loaded! (File not found?)"
+        )
         return Response(content=b"")
 
     return FileResponse(path=path)
-
 
 
 @osu.route("/web/osu-getfriends.php")
@@ -549,6 +571,7 @@ async def get_seasonal(req: Request) -> Response:
 async def get_osu_error(req: Request) -> Response:
     # not really our problem though :trolley:
     # let's just send this empty thing
+    log.error("osu sent an error")
     return Response(content=b"")
 
 
@@ -565,7 +588,7 @@ async def post_screenshot(req: Request) -> Response:
     form = await req.form()
 
     async with aiofiles.open(f".data/ss/{id}.png", "wb+") as ss:
-        await ss.write(await form['ss'].read())
+        await ss.write(await form["ss"].read())
 
     return Response(content=f"{id}.png".encode())
 
@@ -614,7 +637,7 @@ async def osu_direct(req: Request) -> Response:
 
             for beatmapsSet in await resp.json():
                 bmCount += 1
-                
+
                 sid = beatmapsSet["id"]
                 artist = beatmapsSet["artist"]
                 title = beatmapsSet["title"]
@@ -623,12 +646,16 @@ async def osu_direct(req: Request) -> Response:
 
                 lastUpd = beatmapsSet["last_updated"]
 
-                threadId = beatmapsSet["legacy_thread_url"][43:] #remove osu link and get only id
+                threadId = beatmapsSet["legacy_thread_url"][
+                    43:
+                ]  # remove osu link and get only id
                 hasVideo = "1" if beatmapsSet["video"] else ""
                 hasStoryboard = "1" if beatmapsSet["storyboard"] else ""
 
                 directList += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
-                directList += f"10|{lastUpd}|{sid}|{threadId}|{hasVideo}|{hasStoryboard}|0||"
+                directList += (
+                    f"10|{lastUpd}|{sid}|{threadId}|{hasVideo}|{hasStoryboard}|0||"
+                )
 
                 for i, beatmaps in enumerate(beatmapsSet["beatmaps"]):
                     diffName = beatmaps["version"]
@@ -650,23 +677,23 @@ async def osu_direct(req: Request) -> Response:
 async def osu_search_set(req: Request) -> Response:
     match req.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
-        case {"s": sid}: # TODO: Beatmap Set
+        case {"s": sid}:  # TODO: Beatmap Set
             return Response(content=b"")
-        case {"b": bid}: # Beatmap ID
+        case {"b": bid}:  # Beatmap ID
             bm = bid
-            bmap = await Beatmap.get_beatmap(beatmap_id=bm) # type: ignore
-        case {"c": hash}: # Checksum
+            bmap = await Beatmap.get_beatmap(beatmap_id=bm)  # type: ignore
+        case {"c": hash}:  # Checksum
             bm = hash
-            bmap = await Beatmap.get_beatmap(hash=bm) # type: ignore
+            bmap = await Beatmap.get_beatmap(hash=bm)  # type: ignore
         case _:
             bmap = None
 
-    if not bmap: # if beatmap doesn't exists in db then fetch!
+    if not bmap:  # if beatmap doesn't exists in db then fetch!
         log.fail("/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
         return Response(content=b"xoxo gossip girl")
 
-    return Response(content=
-        "{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
+    return Response(
+        content="{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
         "{bmap.creator}|{bmap.approved}|{bmap.rating}|"
         "{bmap.latest_update}|{bmap.set_id}|"
         "0|0|0|0|0".encode()
@@ -674,9 +701,9 @@ async def osu_search_set(req: Request) -> Response:
 
 
 @osu.route("/d/{map_id:int}")
-@osu.route("/d/{map_id:int}n") # no video
+@osu.route("/d/{map_id:int}n")  # no video
 async def download_osz(req: Request) -> Response:
     return RedirectResponse(
         url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{'?noVideo=true' if req.url.path[-1] == 'n' else ''}",
-        status_code=301
+        status_code=301,
     )

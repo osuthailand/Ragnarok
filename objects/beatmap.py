@@ -58,7 +58,8 @@ class Beatmap:
 
     @property
     def display_title(self) -> str:
-        return f"[bold:0,size:20]{self.artist_unicode}|{self.title_unicode}"  # You didn't see this
+        # You didn't see this
+        return f"[bold:0,size:20]{self.artist_unicode}|{self.title_unicode}"
 
     @property
     def url(self) -> str:
@@ -77,19 +78,25 @@ class Beatmap:
         return f"{name}Before:{prev if prev else ''}|{name}After:{after}"
 
     @classmethod
-    async def _get_beatmap_from_sql(cls, hash: str, beatmap_id: int) -> "Beatmap":
+    async def _get_beatmap_from_sql(cls, hash: str, beatmap_id: int, set_id: int) -> "Beatmap":
         b = cls()
 
-        if not (
-            ret := await services.sql.fetch(
-                "SELECT set_id, map_id, hash, title, title_unicode, "
-                "version, artist, artist_unicode, creator, creator_id, stars, "
-                "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
-                "latest_update, length, drain, plays, passes, favorites, rating "
-                f"FROM beatmaps WHERE {'hash' if hash else 'map_id'} = %s",
-                (hash or beatmap_id),
-            )
-        ):
+        params = (
+            ("set_id", set_id) if set_id else
+            ("hash", hash) if hash else
+            ("map_id", beatmap_id)
+        )
+
+        ret = await services.sql.fetch(
+            "SELECT set_id, map_id, hash, title, title_unicode, "
+            "version, artist, artist_unicode, creator, creator_id, stars, "
+            "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
+            "latest_update, length, drain, plays, passes, favorites, rating "
+            f"FROM beatmaps WHERE {params[0]} = %s ORDER BY stars DESC",
+            (params[1]),
+        )
+
+        if not ret:
             return
 
         b.set_id = ret["set_id"]
@@ -154,13 +161,19 @@ class Beatmap:
         log.info(f"Saved {self.full_title} ({self.hash_md5}) into database")
 
     @classmethod
-    async def _get_beatmap_from_osuapi(cls, hash: str, beatmap_id: int) -> "Beatmap":
+    async def _get_beatmap_from_osuapi(cls, hash: str, beatmap_id: int, set_id: int) -> "Beatmap":
         b = cls()
 
         async with aiohttp.ClientSession() as session:
             # get the beatmap with its hash
+            params = (
+                ("s", set_id) if set_id else
+                ("b", beatmap_id) if beatmap_id else
+                ("h", hash)
+            )
+
             async with session.get(
-                f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{'h' if hash else 'b'}={hash or beatmap_id}"
+                f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{params[0]}={params[1]}"
             ) as resp:
                 if not resp or resp.status != 200:
                     return
@@ -225,11 +238,11 @@ class Beatmap:
         return b
 
     @classmethod
-    async def get_beatmap(cls, hash: str = "", beatmap_id: int = 0) -> "Beatmap":
+    async def get_beatmap(cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0) -> "Beatmap":
         self = cls()  # trollface
 
-        if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id)):
-            if not (ret := await self._get_beatmap_from_osuapi(hash, beatmap_id)):
+        if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id, set_id)):
+            if not (ret := await self._get_beatmap_from_osuapi(hash, beatmap_id, set_id)):
                 return
 
         return ret

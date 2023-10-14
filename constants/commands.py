@@ -1,27 +1,27 @@
 import math
-from constants.match import SlotStatus, ScoringType
-from constants.mods import Mods
-from constants.packets import BanchoPackets
-from constants.player import Privileges
-from constants.beatmap import Approved
-from constants.playmode import Mode
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
-from objects.bot import Bot
-from typing import Callable
-from objects.group import Group
-from objects.score import SubmitStatus
-from packets import writer
-from typing import Union
-from objects import services
-from utils import log
-import asyncio
-import random
 import copy
 import uuid
 import time
+import random
+import asyncio
 
+from utils import log
+from typing import Union
+from packets import writer
+from typing import Callable
+from objects import services
+from typing import TYPE_CHECKING
+from dataclasses import dataclass
 from rina_pp_pyb import Beatmap as BMap, Calculator
+
+from objects.bot import Bot
+from constants.mods import Mods
+from objects.group import Group
+from constants.playmode import Mode
+from constants.beatmap import Approved
+from constants.player import Privileges
+from constants.packets import BanchoPackets
+from constants.match import SlotStatus, ScoringType
 
 if TYPE_CHECKING:
     from objects.channel import Channel
@@ -31,7 +31,8 @@ if TYPE_CHECKING:
 @dataclass
 class Context:
     author: "Player"
-    reciever: Union["Channel", "Player"]  # can't use | operator because str and str
+    # can't use | operator because str and str
+    reciever: Union["Channel", "Player"]
 
     cmd: str
     args: list[str]
@@ -215,7 +216,7 @@ async def leaderboard(ctx: Context) -> str:
 
     rank = 0
     async for player in services.sql.iterall(
-        f"SELECT s.{mode.to_db('pp')} as pp, u.username FROM {table} s LEFT JOIN users u ON u.id = s.id WHERE s.{mode.to_db('pp')} > 0 ORDER BY s.{mode.to_db('pp')} DESC LIMIT 50"
+        f"SELECT s.{mode.to_db('pp')} as pp, u.username FROM {table} s INNER JOIN users u ON u.id = s.id WHERE s.{mode.to_db('pp')} > 0 ORDER BY s.{mode.to_db('pp')} DESC LIMIT 50"
     ):
         response += f"#{rank + 1} - {player['username']} ({player['pp']}pp)\n"
         rank += 1
@@ -228,9 +229,10 @@ async def leaderboard(ctx: Context) -> str:
 )
 async def verify_with_key(ctx: Context) -> str:
     """Verify your account with our key system!"""
+    assert type(ctx.reciever) == Player
 
-    if type(ctx.reciever) is not type(services.bot):
-        return "This command only works in BanchoBot's PMs."
+    if not ctx.reciever.bot:
+        return
 
     if not ctx.args:
         return "Usage: !verify <your beta key>"
@@ -239,7 +241,8 @@ async def verify_with_key(ctx: Context) -> str:
 
     if not (
         key_info := await services.sql.fetch(
-            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (key)
+            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (
+                key)
         )
     ):
         return "Invalid key"
@@ -252,7 +255,8 @@ async def verify_with_key(ctx: Context) -> str:
     )
 
     asyncio.create_task(
-        services.sql.execute("DELETE FROM beta_keys WHERE id = %s", key_info["id"])
+        services.sql.execute(
+            "DELETE FROM beta_keys WHERE id = %s", key_info["id"])
     )
 
     ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
@@ -265,7 +269,8 @@ async def verify_with_key(ctx: Context) -> str:
         )
     )
 
-    log.info(f"{ctx.author.username} successfully verified their account with a key")
+    log.info(
+        f"{ctx.author.username} successfully verified their account with a key")
 
     return "Successfully verified your account."
 
@@ -276,17 +281,9 @@ async def calc_pp_for_map(ctx: Context) -> str:
         return "Please /np a map first."
 
     if not ctx.args:
-        return "Usage: !pp [(+)mods | acc(%) | (100x)100s | (50x)s | (0x)misses | combo(x)]"
+        return "Usage: !pp [(+)mods | acc(%) | 100s(x100) | 50s(x50) | misses(m) | combo(x)]"
 
     bmap = BMap(path=f".data/beatmaps/{_map.file}")
-
-    # too lazy to add this
-    formatting = (
-        "+", "%", "100x",
-        "50x", "0x", "x"
-    )
-
-    mods = Mods.from_str(ctx.args[0])
 
     # if the original map mode is standard, but
     # the user is on another mode, it should convert pp
@@ -296,9 +293,37 @@ async def calc_pp_for_map(ctx: Context) -> str:
         mode = ctx.author.play_mode
 
     calc = Calculator(
-        mods=mods,
-        mode=mode,
+        mode=mode
     )
+
+    mods = max_combo = count_100 = count_50 = count_miss = 0
+    acc = None
+
+    for arg in ctx.args:
+        if arg.startswith("+"):
+            calc.set_mods(Mods.from_str(arg[1:]).value)
+        if arg.endswith("%"):
+            calc.set_acc(float(arg[:-1]))
+        if arg.endswith("x"):
+            calc.set_combo(int(arg[:-1]))
+        if arg.endswith("x100"):
+            calc.set_n100(int(arg[:-4]))
+        if arg.endswith("x50"):
+            calc.set_n50(int(arg[:-3]))
+        if arg.endswith("m"):
+            calc.set_n_misses(int(arg[:-1]))
+
+    # if there are any attributes other than mods
+    # enabled the accuracy will be different, therefore
+    # we'll make a custom message for it
+    # if (
+    #     count_100 != 0 or
+    #     count_50 != 0 or
+    #     count_miss != 0 or
+    #     acc != 100
+    # ):
+    #     pp = calc.performance(bmap).pp
+    #     return f"{_map.full_title} {Mods(mods)} | accuracy: {acc} | 100x: {count_100} | 50x: {count_50} | misses: {count_miss} | pp: {round(pp, 2)}pp"
 
     pp_100p = calc.performance(bmap).pp
 
@@ -318,7 +343,7 @@ async def calc_pp_for_map(ctx: Context) -> str:
     pp_95p = calc.performance(bmap).pp
 
     return (
-        f"{_map.full_title} >> "
+        f"{_map.full_title} {mods} >> "
         f"95%: {round(pp_95p, 2)}pp | "
         f"96%: {round(pp_96p, 2)}pp | "
         f"97%: {round(pp_97p, 2)}pp | "
@@ -608,7 +633,7 @@ async def kick_user(ctx: Context) -> str:
         return "Usage: !kick <username>"
 
     if ctx.args[0].lower() == "all":
-        for p in services.players.players[:]:
+        for p in services.players:
             if (p == ctx.author) or p.bot:
                 continue
 
@@ -646,7 +671,8 @@ async def restrict_user(ctx: Context) -> str:
 
     asyncio.create_task(
         services.sql.execute(
-            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (t.id)
+            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (
+                t.id)
         )
     )
 
@@ -755,7 +781,7 @@ async def approve_map(ctx: Context) -> str:
     bmap.approved = ranked_status
 
     if condition == "set_id":
-        set = services.get_beatmap_hashes_by_set_id(bmap.set_id)
+        set = services.beatmaps.get_maps_from_set_id(bmap.set_id)
 
         for hash in set:
             services.beatmaps[hash].approved = ranked_status
@@ -776,18 +802,27 @@ async def recalc_scores(ctx: Context) -> str:
     if ctx.args[0].lower() not in ("relax", "vanilla"):
         return "Usage: !recalc <relax/vanilla>"
 
+    await ctx.reciever.send(
+        message=f"Fetching EVERY SCORE on the server for {ctx.args[0].lower()}...",
+        sender=services.bot,
+    )
+
     async for score in services.sql.iterall(
         "SELECT s.id, s.mods, s.count_300, s.count_100, s.count_50, "
         "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
         "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
         "b.version, b.artist FROM scores s "
         "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
-        "WHERE s.relax = %s AND s.mode = 0 AND s.status >= %s",
-        (True if ctx.args[0].lower() == "relax" else False, SubmitStatus.PASSED),
+        "WHERE s.relax = %s AND s.mode = 0 AND s.status = 3",  # 3: best
+        (1 if ctx.args[0].lower() == "relax" else 0),
     ):
         try:
             bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
         except:
+            await ctx.reciever.send(
+                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
+                sender=services.bot,
+            )
             continue
 
         calc = Calculator(
@@ -803,7 +838,7 @@ async def recalc_scores(ctx: Context) -> str:
             mods=score["mods"],
         )
 
-        pp = min(calc.performance(bmap).pp, 2000)
+        pp = calc.performance(bmap).pp
 
         if math.isnan(pp):
             await ctx.reciever.send(
@@ -837,25 +872,21 @@ async def beta_keys(ctx: Context) -> str:
         if len(ctx.args) != 2:
             key = uuid.uuid4().hex
 
-            asyncio.create_task(
-                services.sql.execute(
-                    "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
-                    (key, time.time() + 432000),
-                )
+            id = await services.sql.execute(
+                "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
+                (key, time.time() + 432000),  # 5 days
             )
 
-            return f"Created key with the name {key}"
+            return f"Created key with the name {key} (id: {id})"
 
         key = ctx.args[1]
 
-        asyncio.create_task(
-            services.sql.execute(
-                "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
-                (key, time.time() + 432000),
-            )
+        id = await services.sql.execute(
+            "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
+            (key, time.time() + 432000),  # 5 days
         )
 
-        return f"Created key with the name {key}"
+        return f"Created key with the name {key} (id: {id})"
 
     elif ctx.args[0] == "delete":
         if len(ctx.args) != 2:
@@ -869,7 +900,8 @@ async def beta_keys(ctx: Context) -> str:
             return "Key doesn't exist"
 
         asyncio.create_task(
-            services.sql.execute("DELETE FROM beta_keys WHERE id = %s", (key_id))
+            services.sql.execute(
+                "DELETE FROM beta_keys WHERE id = %s", (key_id))
         )
 
         return f"Deleted key {key_id}"

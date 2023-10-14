@@ -8,7 +8,7 @@ from starlette.responses import Response
 from starlette.routing import Host
 
 from objects.achievement import Achievement
-from objects.collections import Tokens, Channels, Matches
+from objects.collections import Tokens, Channels, Matches, Beatmaps
 
 # routers
 from events.bancho import bancho
@@ -46,6 +46,7 @@ async def startup():
     services.players = Tokens()
     services.channels = Channels()
     services.matches = Matches()
+    services.beatmaps = Beatmaps()
 
     for _path in REQUIRED_DIRECTORIES:
         if not os.path.exists(_path):

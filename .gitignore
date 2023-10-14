@@ -9,3 +9,4 @@ Pipfile.lock
 
 .vscode
 .mypy_cache
+/database_stuff

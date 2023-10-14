@@ -1,28 +1,22 @@
-from typing import Any, Callable, Pattern, TYPE_CHECKING
-from lenhttp import Router, LenHTTP
-from lib.database import Database
-from config import conf
-from redis import asyncio as aioredis
 import re
 
+from typing import Any, Pattern, TYPE_CHECKING
+from config import conf
+from redis import asyncio as aioredis
+
+from lib.database import Database
 from objects.achievement import Achievement
 
 if TYPE_CHECKING:
-    from objects.collections import Tokens, Channels, Matches
+    from objects.collections import Tokens, Channels, Matches, Beatmaps
     from objects.beatmap import Beatmap
     from objects.player import Player
     from packets.reader import Packet
 
 
-server: LenHTTP
-
 debug: bool = conf["server"]["debug"]
 domain: str = conf["server"]["domain"]
 port: int = conf["server"]["port"]
-
-bancho: Router
-avatar: Router
-osu: Router
 
 packets: dict[int, "Packet"] = {}
 
@@ -54,19 +48,9 @@ Authored by Simon & Aoba
 players: "Tokens"
 channels: "Channels"
 matches: "Matches"
+beatmaps: "Beatmaps"
 
 osu_key: str = config["api_conf"]["osu_api_key"]
-
-beatmaps: dict[str, "Beatmap"] = {}
-
-def get_beatmap_hashes_by_set_id(set_id: int) -> list[str]:
-    h = []
-
-    for key, map in beatmaps.items():
-        if map.set_id == set_id:
-            h.append(key)
-            
-    return h
 
 achievements: set[Achievement] = set()
 
@@ -79,7 +63,7 @@ def get_achievement_by_id(id: int) -> Achievement | None:
 
 regex: dict[str, Pattern[str]] = {
     "np": re.compile(
-        rf"\x01ACTION is (?:listening|editing|playing|watching) to \[https://osu.{domain}/beatmapsets/[0-9].*#/(\d*)"
+        rf"\x01ACTION is (?:listening to|editing|playing|watching) \[https://osu.{domain}/beatmapsets/[0-9].*#/(\d*)"
     )
 }
 

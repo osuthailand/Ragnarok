@@ -94,7 +94,7 @@ class Mods(IntFlag):
     def from_str(cls, s: str) -> "Mods":
         # split every 2nd character
         mods = cls.NONE
-        str_mods = [(s[i : i + 2]) for i in range(0, len(s), 2)]
+        str_mods = [(s[i: i + 2]) for i in range(0, len(s), 2)]
 
         for mod in str_mods:
             for key, value in mods.__dict__().items():

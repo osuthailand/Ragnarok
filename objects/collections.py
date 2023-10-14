@@ -4,6 +4,8 @@ from objects import services
 from objects.channel import Channel
 from objects.match import Match
 from objects.player import Player
+from objects.beatmap import Beatmap
+from utils import log
 
 
 class Tokens:
@@ -76,30 +78,95 @@ class Channels:
     def __init__(self):
         self.channels: list[Channel] = []
 
-    def add(self, data: dict[str, Any]) -> None:
-        self.channels.append(Channel(**data))
+    def __iter__(self):
+        return iter(self.channels)
+
+    def add(self, data: dict[str, Any]) -> Channel:
+        chan = Channel(**data)
+        self.channels.append(chan)
+        return chan
 
     def remove(self, c: Channel) -> None:
         self.channels.remove(c)
 
     def get(self, name: str) -> Channel | None:
         for chan in self.channels:
-            if chan._name == name or chan.name == name:
+            if chan._name == name:
                 return chan
 
 
 class Matches:
     def __init__(self):
-        self.matches: list["Match"] = []
+        self.matches: list[Match] = []
 
-    async def remove(self, m: "Match"):
+    def __iter__(self):
+        return iter(self.matches)
+
+    def __len__(self):
+        return len(self.matches)
+
+    def remove(self, m: Match):
         if m in self.matches:
             self.matches.remove(m)
 
-    async def find(self, match_id: int) -> "Match":  # type: ignore
+    def get(self, match_id: int) -> Match:  # type: ignore
         for match in self.matches:
             if match_id == match.match_id:
                 return match
 
-    async def add(self, m: "Match"):
+    def add(self, m: Match):
         self.matches.append(m)
+
+
+class Beatmaps:
+    def __init__(self):
+        self.beatmaps: dict[str, Beatmap] = {}
+
+    def __iter__(self):
+        return iter(self.beatmaps)
+
+    def remove(self, map_md5: str) -> None:
+        if map_md5 in self.beatmaps:
+            self.beatmaps.pop(map_md5)
+
+    # is this really needed, when ``get()`` already saves the beatmap?
+    def add(self, map_md5: str, b: Beatmap) -> None:
+        # even if it gets added again, it'll overwrite the current save
+        self.beatmaps[map_md5] = b
+
+    async def get(self, map_md5: str) -> Beatmap | None:
+        if map_md5 in self.beatmaps:
+            return self.beatmaps[map_md5]
+
+        if not (b := await Beatmap.get_beatmap(map_md5)):
+            log.fail(f"Failed to get beatmaps with hash {map_md5}")
+            return
+
+        # when getting from the api, it'll save into cache
+        self.beatmaps[map_md5] = b
+        return b
+
+    async def get_by_map_id(self, map_id: int) -> Beatmap | None:
+        if not (b := await Beatmap.get_beatmap(beatmap_id=map_id)):
+            log.fail(f"Failed to get beatmaps with map_id {map_id}")
+            return
+
+        self.beatmaps[b.hash_md5] = b
+        return b
+
+    async def get_by_set_id(self, set_id: int) -> Beatmap | None:
+        if not (b := await Beatmap.get_beatmap(set_id=set_id)):
+            log.fail(f"Failed to get beatmaps with map_id {set_id}")
+            return
+
+        self.beatmaps[b.hash_md5] = b
+        return b
+
+    def get_maps_from_set_id(self, set_id: int) -> list[str]:
+        h = []
+
+        for key, map in self.beatmaps.items():
+            if map.set_id == set_id:
+                h.append(key)
+
+        return h

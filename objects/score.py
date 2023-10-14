@@ -1,20 +1,22 @@
+import math
+import time
+
+from utils import score
+from enum import IntEnum
 from typing import Optional
-from py3rijndael.rijndael import RijndaelCbc
-from py3rijndael.paddings import ZeroPadding
-from constants.beatmap import Approved
+from base64 import b64decode
+from objects import services
+from dataclasses import dataclass
+from rina_pp_pyb import Calculator, Beatmap as BMap
+
+from constants.mods import Mods
+from objects.player import Player
 from objects.beatmap import Beatmap
 from constants.playmode import Mode
 from constants.playmode import Mode
-from dataclasses import dataclass
-from objects.player import Player
-from constants.mods import Mods
-from base64 import b64decode
-from enum import IntEnum
-from objects import services
-from utils import score
-from rina_pp_pyb import Calculator, Beatmap as BMap
-import math
-import time
+from constants.beatmap import Approved
+from py3rijndael.rijndael import RijndaelCbc
+from py3rijndael.paddings import ZeroPadding
 
 
 @dataclass
@@ -114,9 +116,6 @@ class Score:
 
         s.id = data["id"]
 
-        s.player = await services.players.get_offline(int(data["user_id"]))
-        s.map = await Beatmap.get_beatmap(data["hash_md5"])
-
         s.score = data["score"]
         s.pp = data["pp"]
 
@@ -144,14 +143,16 @@ class Score:
 
         s.relax = data["relax"]
 
-        await s.calculate_position()
-
         return s
 
     @classmethod
     async def set_data_from_submission(
-        cls, score_enc: bytes, iv: bytes, key: str, exited: int
-    #) -> "Score" | None:
+        cls,
+        score_enc: bytes,
+        iv: bytes,
+        key: str,
+        exited: int
+        # ) -> "Score" | None:
     ) -> Optional["Score"]:
         score_latin = b64decode(score_enc).decode("latin_1")
         iv_latin = b64decode(iv).decode("latin_1")
@@ -170,10 +171,10 @@ class Score:
 
         s.player = player
 
-        if data[0] in services.beatmaps:
-            s.map = services.beatmaps[data[0]]
-        else:
-            s.map = await Beatmap.get_beatmap(data[0])
+        if not (bmap := await services.beatmaps.get(data[0])):
+            return
+
+        s.map = bmap
 
         (
             s.count_300,
@@ -232,7 +233,6 @@ class Score:
                     combo=s.max_combo,
                     mods=s.mods,
                 )
-
 
                 s.pp = calc.performance(bmap).pp
 

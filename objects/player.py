@@ -1,22 +1,24 @@
 import math
-from constants.player import PresenceFilter, bStatus, Privileges, country_codes
-from constants.match import SlotStatus
-from objects.achievement import Achievement
+import time
+import uuid
+import asyncio
+import aiohttp
+
+from utils import log
+from copy import copy
+from packets import writer
+from typing import Optional
+from objects import services
+from typing import TYPE_CHECKING
+
+from constants.mods import Mods
+from objects.match import Match
 from objects.channel import Channel
 from constants.levels import levels
 from constants.playmode import Mode
-from typing import TYPE_CHECKING
-from constants.mods import Mods
-from objects.match import Match
-from typing import Optional
-from packets import writer
-from objects import services
-from utils import log
-from copy import copy
-import asyncio
-import aiohttp
-import time
-import uuid
+from constants.match import SlotStatus
+from objects.achievement import Achievement
+from constants.player import PresenceFilter, bStatus, Privileges, country_codes
 
 if TYPE_CHECKING:
     from objects.beatmap import Beatmap
@@ -33,7 +35,6 @@ class Player:
         lon: float = 0.0,
         lat: float = 0.0,
         country: str = "XX",
-        country_code: int = 0,
         **kwargs,
     ) -> None:
         self.id: int = id
@@ -42,8 +43,8 @@ class Player:
         self.privileges: int = privileges
         self.passhash: str = passhash
 
-        self.country_code: str = country
-        self.country: str = country_code
+        self.country: str = country
+        self.country_code: int = country_codes[self.country]
 
         self.ip: str = kwargs.get("ip", "127.0.0.1")
         self.longitude: float = lon
@@ -52,10 +53,7 @@ class Player:
         self.client_version: str = kwargs.get("version", "0")
         self.in_lobby: bool = False
 
-        if kwargs.get("token"):
-            self.token: str = kwargs.get("token")
-        else:
-            self.token: str = self.generate_token()
+        self.token: str = kwargs.get("token", self.generate_token())
 
         self.presence_filter: PresenceFilter = PresenceFilter.NIL
 
@@ -97,6 +95,7 @@ class Player:
         )
         self.on_rina: bool = self.client_version.endswith("rina")
         self.is_staff: bool = self.privileges & Privileges.BAT
+        self.is_verified: bool = not self.privileges & Privileges.PENDING
 
         self.last_np: "Beatmap" = None
         self.last_score: "Score" = None
@@ -104,8 +103,8 @@ class Player:
     def __repr__(self) -> str:
         return (
             "Player("
+            f'username="{self.username}", '
             f"id={self.id}, "
-            f'name="{self.username}", '
             f'token="{self.token}"'
             ")"
         )
@@ -126,9 +125,11 @@ class Player:
         return name.lower().replace(" ", "_")
 
     def enqueue(self, packet: bytes) -> None:
+        """``enqueue()`` adds a packet to the queue."""
         self.queue += packet
 
     def dequeue(self) -> bytes:
+        """``dequeue()`` dequeues the current filled queue."""
         if self.queue:
             ret = bytes(self.queue)
             self.queue.clear()
@@ -136,7 +137,7 @@ class Player:
 
         return b""
 
-    async def shout(self, text: str):
+    async def shout(self, text: str) -> None:
         """``shout()`` alerts the player."""
         self.enqueue(await writer.Notification(text))
 
@@ -150,18 +151,31 @@ class Player:
             await self.leave_match()
 
         if self.spectating:
-            # leave spectating code and stuff idk
-            ...
+            await self.spectating.remove_spectator(self)
 
         services.players.remove(self)
 
-        for player in services.players.players:
+        for player in services.players:
             if player != self:
                 player.enqueue(await writer.Logout(self.id))
 
     async def add_spectator(self, p: "Player") -> None:
-        """``add_spectator()`` adds a spectator to player"""
+        """``add_spectator()`` makes player `p` spectate the player"""
         # TODO: Create temp spec channel
+        spec_name = f"#spect_{self.id}"
+
+        spec_channel = services.channels.get(spec_name)
+        if not spec_channel:
+            spec_channel = services.channels.add({
+                "name": "#spectator",
+                "raw": spec_name,
+                "description": f"spectator chat for {self.username}",
+                "public": False,
+            })
+
+            await self.join_channel(spec_channel)
+
+        await p.join_channel(spec_channel)
 
         joined = await writer.FellasJoinSpec(p.id)
 
@@ -172,21 +186,28 @@ class Player:
         self.enqueue(await writer.UsrJoinSpec(p.id))
 
         self.spectators.append(p)
-
         p.spectating = self
 
-    async def remove_spectator(self, p) -> None:
-        """``remove_spectator()`` removes a spectator to player"""
-        # TODO: Remove chan and part chan
+    async def remove_spectator(self, p: "Player") -> None:
+        """``remove_spectator()`` makes player `p` stop spectating the player"""
+        p.spectating = None
+        self.spectators.remove(p)
+
+        chan = services.channels.get(f"#spect_{self.id}")
+        assert chan is not None
+
+        await p.leave_channel(chan)
+
+        if not self.spectators:
+            await self.leave_channel(chan)
+            services.channels.remove(chan)
+
         left = await writer.FellasLeftSpec(p.id)
 
         for s in self.spectators:
             s.enqueue(left)
 
         self.enqueue(await writer.UsrLeftSpec(p.id))
-        self.spectators.remove(p)
-
-        p.spectating = None
 
     async def join_match(self, m: Match, pwd: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
@@ -252,7 +273,7 @@ class Player:
 
             m.enqueue(await writer.MatchDispose(m.match_id), lobby=True)
 
-            await services.matches.remove(m)
+            services.matches.remove(m)
             return
 
         if m.host == self.id:
@@ -266,6 +287,7 @@ class Player:
         await m.enqueue_state(immune={self.id}, lobby=True)
 
     async def join_channel(self, chan: Channel):
+        """``join_channel()`` makes the player join a channel."""
         if chan in self.channels or (
             chan.staff  # if the chan is already in the user lists chans
             and not self.is_staff
@@ -280,6 +302,7 @@ class Player:
         await chan.update_info()
 
     async def leave_channel(self, chan: Channel, kicked: bool = True):
+        """``leave_channel()`` makes the player leave a channel."""
         if not chan in self.channels:
             return
 
@@ -440,22 +463,22 @@ class Player:
                 if not get:
                     self.latitude = ret["lat"]
                     self.longitude = ret["lon"]
-                    self.country = country_codes[ret["countryCode"]]
-                    self.country_code = ret["countryCode"]
+                    self.country = ret["countryCode"]
+                    self.country_code = country_codes[ret["countryCode"]]
 
                     return
 
                 return (
                     ret["lat"],
                     ret["lon"],
-                    country_codes[ret["countryCode"]],
                     ret["countryCode"],
+                    country_codes[ret["countryCode"]],
                 )
 
     async def save_location(self):
         await services.sql.execute(
-            "UPDATE users SET lon = %s, lat = %s, country = %s, cc = %s WHERE id = %s",
-            (self.longitude, self.latitude, self.country_code, self.country, self.id),
+            "UPDATE users SET lon = %s, lat = %s, country = %s WHERE id = %s",
+            (self.longitude, self.latitude, self.country, self.id),
         )
 
     async def get_stats(self, relax: int = 0, mode: Mode = Mode.OSU) -> dict:
@@ -508,12 +531,11 @@ class Player:
         await services.sql.execute(
             "INSERT INTO reports (reporter, reported, reason, time) "
             "VALUES (%s, %s, %s, %s)",
-            (self.id, target.id, reason, time.time())
+            (self.id, target.id, reason, int(time.time())),
         )
 
     async def log(self, note: str) -> None:
         await services.sql.execute(
-            "INSERT INTO logs (user_id, note, time) "
-            "VALUES (%s, %s, %S)",
-            (self.id, note, time.time())
+            "INSERT INTO logs (user_id, note, time) VALUES (%s, %s, %s)",
+            (self.id, note, int(time.time())),
         )

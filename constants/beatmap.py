@@ -1,5 +1,6 @@
 from enum import IntEnum
 
+
 class Approved(IntEnum):
     GRAVEYARD = -2
     WIP = -1

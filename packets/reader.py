@@ -94,7 +94,7 @@ class Reader:
 
     @property
     def data(self):
-        return self.packet_data[self.offset :]
+        return self.packet_data[self.offset:]
 
     def read_bytes(self, size: int):
         ret = struct.unpack("<" + "B" * size, self.data[:size])
@@ -209,7 +209,7 @@ class Reader:
     def read_match(self) -> Match:
         m = Match()
 
-        m.match_id = len(services.matches.matches)
+        m.match_id = len(services.matches)
 
         self.offset += 2
 

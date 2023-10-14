@@ -11,7 +11,7 @@ class Database:
 
     async def disconnect(self) -> None:
         self.pool.close()
-        await self.pool.wait_close()
+        await self.pool.wait_closed()
 
     async def _fetch(
         self,
@@ -44,7 +44,7 @@ class Database:
         params: Optional[tuple[Any, ...]] | Any = None,
         _dict: bool = False,
     ) -> dict[str, Any]:
-        _, cur = await self._fetch(query, params)
+        _, cur = await self._fetch(query, params, _dict)
 
         return await cur.fetchall()
 

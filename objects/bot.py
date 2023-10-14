@@ -14,7 +14,8 @@ class Bot:
         ):
             return False
 
-        p = Player(bot["username"], bot["id"], bot["privileges"], bot["passhash"])
+        p = Player(bot["username"], bot["id"],
+                   bot["privileges"], bot["passhash"])
 
         p.status = bStatus.WATCHING
         p.status_text = "over scores"
@@ -25,7 +26,7 @@ class Bot:
 
         services.players.add(p)
 
-        for player in services.players.players:
-            player.enqueue(await writer.UserPresence(p) + await writer.UpdateStats(p))
+        for player in services.players:
+            player.enqueue(await writer.BotPresence() + await writer.UpdateStats(p))
 
         return True

@@ -229,6 +229,8 @@ async def UpdateStats(p: "Player") -> bytes:
     if p not in services.players:
         return b""
 
+    pp_overflow = p.pp > 32767
+
     return await write(
         BanchoPackets.CHO_USER_STATS,
         (p.id, Types.int32),
@@ -238,12 +240,28 @@ async def UpdateStats(p: "Player") -> bytes:
         (p.current_mods, Types.int32),
         (p.play_mode, Types.uint8),
         (p.beatmap_id, Types.int32),
-        (p.ranked_score, Types.int64),
+        (p.ranked_score if not pp_overflow else p.pp, Types.int64),
         (p.accuracy / 100.0, Types.float32),
         (p.playcount, Types.int32),
         (p.total_score, Types.int64),
         (p.rank, Types.int32),
-        (math.ceil(p.pp), Types.int16),
+        (math.ceil(p.pp) if not pp_overflow else 0, Types.int16),
+    )
+
+
+async def BotPresence() -> bytes:
+    p = services.bot
+
+    return await write(
+        BanchoPackets.CHO_USER_PRESENCE,
+        (p.id, Types.int32),
+        (p.username, Types.string),
+        (p.timezone, Types.byte),
+        (1, Types.ubyte),
+        (1, Types.byte),
+        (1, Types.float32),
+        (1, Types.float32),
+        (0, Types.int32),
     )
 
 
@@ -273,13 +291,12 @@ async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
 
     if p.privileges & Privileges.DEV:
         rank |= Ranks.PEPPY
-
     return await write(
         BanchoPackets.CHO_USER_PRESENCE,
         (p.id, Types.int32),
         (p.username, Types.string),
         (p.timezone, Types.byte),
-        (p.country, Types.ubyte),
+        (p.country_code, Types.ubyte),
         (rank, Types.byte),
         (p.longitude, Types.float32),
         (p.latitude, Types.float32),
@@ -290,7 +307,7 @@ async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
 async def MainMenuIcon() -> bytes:
     return await write(
         BanchoPackets.CHO_MAIN_MENU_ICON,
-        ("https://imgur.com/Uihzw6N.png|https://c.mitsuha.pw", Types.string),
+        ("https://imgur.com/Uihzw6N.png|https://rina.place", Types.string),
     )
 
 
@@ -447,7 +464,8 @@ async def MatchScoreUpdate(s: "ScoreFrame", slot_id: int, raw_data: bytes) -> by
 
     ret += struct.pack("<HH", s.max_combo, s.combo)
 
-    ret += struct.pack("<bbbb", s.perfect, s.current_hp, s.tag_byte, s.score_v2)
+    ret += struct.pack("<bbbb", s.perfect, s.current_hp,
+                       s.tag_byte, s.score_v2)
 
     return ret
 

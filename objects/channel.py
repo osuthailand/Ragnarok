@@ -76,15 +76,10 @@ class Channel:
             if not (self in sender.channels or self.read_only):
                 return
 
-        for p in self.connected:
-            if (pos := message.find("@everyone")) != -1:
-                message = message[: pos + 9] + f" ({p.username}) " + message[pos + 9 :]
+        ret = await writer.SendMessage(
+            sender=sender.username, message=message, channel=self.name, id=sender.id
+        )
 
-            ret = await writer.SendMessage(
-                sender=sender.username, message=message, channel=self.name, id=sender.id
-            )
-
-            if p.id != sender.id:
-                p.enqueue(ret)
+        self.enqueue(ret, ignore=[sender.id])
 
         log.chat(f"<{sender.username}> {message} [{self._name}]")

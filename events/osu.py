@@ -1,35 +1,38 @@
-from constants.beatmap import Approved
-from objects.beatmap import Beatmap
-from objects.channel import Channel
-from constants.mods import Mods
-from objects import services
-from utils import log
-from objects.score import Score, SubmitStatus
-from collections import defaultdict
-from constants.player import Privileges
-from typing import Callable, Optional
-from functools import wraps
-from utils import general
-from urllib.parse import unquote
-import numpy as np
-import aiofiles
-import aiohttp
-import math
+from enum import IntEnum, unique
 import os
+import time
+import math
 import copy
 import bcrypt
+import aiohttp
 import hashlib
 import asyncio
+import aiofiles
+import numpy as np
 
+from utils import log
+from utils import general
+from functools import wraps
+from objects import services
+from collections import defaultdict
+from typing import Callable
+
+from objects.player import Player
+from constants.mods import Mods
+from urllib.parse import unquote
+from objects.beatmap import Beatmap
 from starlette.routing import Router
+from constants.beatmap import Approved
 from starlette.requests import Request
+from constants.player import Privileges
+from objects.score import Score, SubmitStatus
 from starlette.responses import FileResponse, Response, RedirectResponse
 
 
 def check_auth(
     u: str,
     pw: str,
-    cho_auth: bool = False,
+    # cho_auth: bool = False,
     custom_resp: bytes | None = None,
     method="GET",
 ):
@@ -51,45 +54,47 @@ def check_auth(
                 player = unquote(form[u])
                 password = form[pw]
 
-            if cho_auth:
-                if not (
-                    user_info := await services.sql.fetch(
-                        "SELECT username, id, privileges, "
-                        "passhash, lon, lat, country, cc FROM users "
-                        "WHERE safe_username = %s",
-                        [player.lower().replace(" ", "_")],
-                    )
-                ):
+            # if not cho_auth:
+            if not (p := services.players.get(player)):
+                return Response(content=custom_resp or b"not allowed")
+
+            if p.passhash in services.bcrypt_cache:
+                if password.encode("utf-8") != services.bcrypt_cache[p.passhash]:
                     return Response(content=custom_resp or b"not allowed")
 
-                phash = user_info["passhash"].encode("utf-8")
-                pmd5 = password.encode("utf-8")
+            return await cb(req, p, *args, **kwargs)
 
-                if phash in services.bcrypt_cache:
-                    if pmd5 != services.bcrypt_cache[phash]:
-                        log.warn(
-                            f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-                        )
+            # if not (
+            #     user_info := await services.sql.fetch(
+            #         "SELECT username, id, privileges, "
+            #         "passhash, lon, lat, country, cc FROM users "
+            #         "WHERE safe_username = %s",
+            #         [player.lower().replace(" ", "_")],
+            #     )
+            # ):
+            #     return Response(content=custom_resp or b"not allowed")
 
-                        return Response(content=custom_resp or b"not allowed")
-                else:
-                    if not bcrypt.checkpw(pmd5, phash):
-                        log.warn(
-                            f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-                        )
+            # phash = user_info["passhash"].encode("utf-8")
+            # pmd5 = password.encode("utf-8")
 
-                        return Response(content=custom_resp or b"not allowed")
+            # if phash in services.bcrypt_cache:
+            #     if pmd5 != services.bcrypt_cache[phash]:
+            #         log.warn(
+            #             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+            #         )
 
-                    services.bcrypt_cache[phash] = pmd5
-            else:
-                if not (p := services.players.get(player)):
-                    return Response(content=custom_resp or b"not allowed")
+            #         return Response(content=custom_resp or b"not allowed")
+            # else:
+            #     if not bcrypt.checkpw(pmd5, phash):
+            #         log.warn(
+            #             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+            #         )
 
-                if p.passhash in services.bcrypt_cache:
-                    if password.encode("utf-8") != services.bcrypt_cache[p.passhash]:
-                        return Response(content=custom_resp or b"not allowed")
+            #         return Response(content=custom_resp or b"not allowed")
 
-            return await cb(req, *args, **kwargs)
+            #     services.bcrypt_cache[phash] = pmd5
+
+            # return await cb(req, *args, **kwargs)
 
         return wrapper
 
@@ -154,7 +159,6 @@ async def registration(req: Request) -> Response:
 async def save_beatmap_file(id: int) -> None | Response:
     if not os.path.exists(f".data/beatmaps/{id}.osu"):
         async with aiohttp.ClientSession() as sess:
-            # I hope this is legal.
             async with sess.get(
                 f"https://osu.ppy.sh/web/osu-getosufile.php?q={id}",
                 headers={"user-agent": "osu!"},
@@ -177,78 +181,115 @@ async def save_beatmap_file(id: int) -> None | Response:
 #     return Response(content=req.headers["CF-IPCountry"].lower().encode())
 
 
+SCORES_FORMAT = (
+    "{id_}|{username}|{score}|"
+    "{max_combo}|{count_50}|{count_100}|{count_300}|{count_miss}|"
+    "{count_katu}|{count_geki}|{perfect}|{mods}|{user_id}|"
+    "{position}|{submitted}|1"
+)
+
+
+@unique
+class LeaderboardType(IntEnum):
+    LOCAL = 0
+    TOP = 1
+    MODS = 2
+    FRIENDS = 3
+    COUNTRY = 4
+
+
 @osu.route("/web/osu-osz2-getscores.php")
 @check_auth("us", "ha")
-async def get_scores(req: Request) -> Response:
+async def get_scores(req: Request, p: Player) -> Response:
     hash = req.query_params["c"]
-    mode = int(req.query_params["m"])
 
-    if not hash in services.beatmaps:
-        b = await Beatmap.get_beatmap(hash, req.query_params["i"])
-    else:
-        b = services.beatmaps[hash]
-
-    if not b:
-        if not hash in services.beatmaps:
-            services.beatmaps[hash] = None
-
+    if not (b := await services.beatmaps.get(hash)):
         return Response(content=b"-1|true")
 
-    if b.approved <= Approved.UPDATE:
-        if not hash in services.beatmaps:
-            services.beatmaps[hash] = b
+    # don't cache maps that doesn't have leaderboard
+    if not b.approved & Approved.HAS_LEADERBOARD:
+        services.beatmaps.remove(b.hash_md5)
 
         return Response(content=f"{b.approved.to_osu}|false".encode())
 
-    # no need for check, as its in the decorator
-    if not (p := services.players.get(unquote(req.query_params["us"]))):
-        return Response(content=b"what")
+    mods = int(req.query_params["mods"])
 
-    # pretty sus
-    if not int(req.query_params["mods"]) & Mods.RELAX and p.relax:
-        p.relax = False
+    # switch user to relax, when they have the relax mod enabled
+    if not mods & Mods.RELAX and p.relax:
+        p.relax = 0
+    elif mods & Mods.RELAX and not p.relax:
+        p.relax = 1
 
-    if int(req.query_params["mods"]) & Mods.RELAX and not p.relax:
-        p.relax = True
+    ret = [b.web_format]
 
-    ret = b.web_format
     order = ("score", "pp")[p.relax]
 
-    if b.approved >= Approved.RANKED:
-        if not (
-            data := await services.sql.fetch(
-                "SELECT id FROM scores WHERE user_id = %s "
-                "AND relax = %s AND hash_md5 = %s AND mode = %s "
-                f"AND status = 3 ORDER BY {order} DESC LIMIT 1",
-                (p.id, p.relax, b.hash_md5, mode),
-            )
-        ):
-            ret += "\n"
-        else:
-            s = await Score.set_data_from_sql(data["id"])
+    mode = int(req.query_params["m"])
 
-            ret += s.web_format
+    query = (
+        f"SELECT s.id as id_, u.username, CAST(s.{order} as INT) as score, s.submitted, s.max_combo, "
+        "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
+        "s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
+        f"INNER JOIN users u ON u.id = s.user_id WHERE s.hash_md5 = '{hash}' "
+        f"AND s.status = 3 AND u.privileges & 4 AND s.relax = {int(p.relax)} "
+        f"AND mode = {mode} "
+    )
 
-        async for play in services.sql.iterall(
-            "SELECT s.id FROM scores s INNER JOIN users u ON u.id = s.user_id "
-            "WHERE s.hash_md5 = %s AND s.mode = %s AND s.relax = %s AND s.status = 3 "
-            f"AND u.privileges & 4 ORDER BY s.{order} DESC, s.submitted ASC LIMIT 50",
-            (b.hash_md5, mode, p.relax),
-        ):
-            ls = await Score.set_data_from_sql(play["id"])
+    board_type = LeaderboardType(int(req.query_params["v"]))
 
-            await ls.calculate_position()
+    match board_type:
+        case LeaderboardType.MODS:
+            query += f"AND mods = {mods} "
+        case LeaderboardType.COUNTRY:
+            query += f"AND u.country = {p.country} "
+        case LeaderboardType.FRIENDS:
+            # this is absolutely so fucking ugly
+            # but i dont know what else works rn
+            friends = f"({', '.join(str(x) for x in (p.friends | {p.id}))})"
+            query += f"AND s.user_id IN {friends} "
 
-            ls.map.scores += 1
+    query += f"ORDER BY score DESC, s.submitted ASC LIMIT 50"
 
-            ret += ls.web_format
+    personal_best = await services.sql.fetch(
+        f"SELECT s.id as id_, CAST(s.{order} as INT) as score, s.max_combo, "
+        "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
+        "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
+        "AND s.hash_md5 = %s AND s.relax = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
+        (b.hash_md5, p.relax, mode, p.id)
+    )
+
+    if not personal_best:
+        ret.append("")
+    else:
+        pb_position = await services.sql.fetch(
+            "SELECT COUNT(*) FROM scores s "
+            "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+            "INNER JOIN users u ON u.id = s.user_id "
+            f"WHERE s.{order} > {personal_best['score']} "
+            "AND s.relax = %s AND b.hash = %s  "
+            "AND u.privileges & 4 AND s.status = 3 "
+            "AND s.mode = %s",
+            (p.relax, b.hash_md5, mode),
+            _dict=False
+        )
+
+        if pb_position:
+            ret.append(SCORES_FORMAT.format(**personal_best,
+                                            user_id=p.id, username=p.username, position=pb_position[0] + 1))  # type: ignore
+
+    top_scores = await services.sql.fetchall(query, _dict=True)
+
+    ret.extend([
+        SCORES_FORMAT.format(
+            **score,
+            position=idx + 1
+        )
+        for idx, score in enumerate(top_scores)
+    ])
 
     asyncio.create_task(save_beatmap_file(b.map_id))
 
-    if not hash in services.beatmaps:
-        services.beatmaps[hash] = b
-
-    return Response(content=ret.encode())
+    return Response(content="\n".join(ret).encode())
 
 
 @osu.route("/web/osu-submit-modular-selector.php", methods=["POST"])
@@ -288,7 +329,12 @@ async def score_submission(req: Request) -> Response:
         int(form["x"]),
     )
 
-    if not s or not s.player or not s.map or s.player.is_restricted:
+    if (
+        not s or
+        not s.player or
+        not s.map or
+        s.player.is_restricted
+    ):
         return Response(content=b"error: no")
 
     if not s.player.privileges & Privileges.VERIFIED:
@@ -342,7 +388,6 @@ async def score_submission(req: Request) -> Response:
 
                 stats.ranked_score += sus
 
-                # maybe we can cache this?
                 scores = await services.sql.fetchall(
                     "SELECT pp, accuracy FROM scores "
                     "WHERE user_id = %s AND mode = %s "
@@ -373,6 +418,7 @@ async def score_submission(req: Request) -> Response:
                 # announce it
                 if s.position <= 10 and not stats.is_restricted:
                     chan = services.channels.get("#announce")
+                    assert chan is not None
 
                     await chan.send(
                         f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({s.mode.to_string()}) [{'RX' if s.relax else 'VN'}]",
@@ -426,12 +472,18 @@ async def score_submission(req: Request) -> Response:
                             "chartName:Beatmap Ranking",
                             *(
                                 (
-                                    Beatmap.add_chart("rank", after=s.position),
-                                    Beatmap.add_chart("accuracy", after=s.accuracy),
-                                    Beatmap.add_chart("maxCombo", after=s.max_combo),
-                                    Beatmap.add_chart("rankedScore", after=s.score),
-                                    Beatmap.add_chart("totalScore", after=s.score),
-                                    Beatmap.add_chart("pp", after=math.ceil(s.pp)),
+                                    Beatmap.add_chart(
+                                        "rank", after=s.position),
+                                    Beatmap.add_chart(
+                                        "accuracy", after=s.accuracy),
+                                    Beatmap.add_chart(
+                                        "maxCombo", after=s.max_combo),
+                                    Beatmap.add_chart(
+                                        "rankedScore", after=s.score),
+                                    Beatmap.add_chart(
+                                        "totalScore", after=s.score),
+                                    Beatmap.add_chart(
+                                        "pp", after=math.ceil(s.pp)),
                                 )
                                 if not s.pb
                                 else (
@@ -451,7 +503,8 @@ async def score_submission(req: Request) -> Response:
                                         "totalScore", s.pb.score, s.score
                                     ),
                                     Beatmap.add_chart(
-                                        "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
+                                        "pp", math.ceil(
+                                            s.pb.pp), math.ceil(s.pp)
                                     ),
                                 )
                             ),
@@ -468,8 +521,10 @@ async def score_submission(req: Request) -> Response:
                             "chartName:Overall Ranking",
                             *(
                                 (
-                                    Beatmap.add_chart("rank", after=stats.rank),
-                                    Beatmap.add_chart("accuracy", after=stats.accuracy),
+                                    Beatmap.add_chart(
+                                        "rank", after=stats.rank),
+                                    Beatmap.add_chart(
+                                        "accuracy", after=stats.accuracy),
                                     Beatmap.add_chart("maxCombo", after=0),
                                     Beatmap.add_chart(
                                         "rankedScore", prev=stats.ranked_score
@@ -498,7 +553,8 @@ async def score_submission(req: Request) -> Response:
                                         prev_stats.total_score,
                                         stats.total_score,
                                     ),
-                                    Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
+                                    Beatmap.add_chart(
+                                        "pp", prev_stats.pp, stats.pp),
                                 )
                             ),
                             f"achievements-new:{achievements}",
@@ -507,7 +563,6 @@ async def score_submission(req: Request) -> Response:
                 )
 
                 stats.last_score = s
-
                 return Response(content="\n".join(ret).encode())
 
             return Response(content=b"error: no")
@@ -517,7 +572,7 @@ async def score_submission(req: Request) -> Response:
 
 @osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
-async def get_replay(req: Request) -> Response:
+async def get_replay(req: Request, p: Player) -> Response:
     if not os.path.isfile((path := f".data/replays/{req.query_params['c']}.osr")):
         log.info(
             f"Replay ID {req.query_params['c']} cannot be loaded! (File not found?)"
@@ -529,10 +584,7 @@ async def get_replay(req: Request) -> Response:
 
 @osu.route("/web/osu-getfriends.php")
 @check_auth("u", "h")
-async def get_friends(req: Request) -> Response:
-    if not (p := await services.players.get_offline(unquote(req.query_params["u"]))):
-        return Response(content="player not found")
-
+async def get_friends(req: Request, p: Player) -> Response:
     await p.get_friends()
 
     return Response(content="\n".join(map(str, p.friends)).encode())
@@ -540,7 +592,7 @@ async def get_friends(req: Request) -> Response:
 
 @osu.route("/web/osu-markasread.php")
 @check_auth("u", "h")
-async def markasread(req: Request) -> Response:
+async def markasread(req: Request, p: Player) -> Response:
     if not (chan := services.channels.get(req.query_params["channel"])):
         return Response(content=b"")
 
@@ -550,7 +602,7 @@ async def markasread(req: Request) -> Response:
 
 @osu.route("/web/lastfm.php")
 @check_auth("us", "ha")
-async def lastfm(req: Request) -> Response:
+async def lastfm(req: Request, p: Player) -> Response:
     # something odd in client detected
     # TODO: add enums to check abnormal stuff
     if req.query_params["b"][0] == "a":
@@ -577,13 +629,13 @@ async def get_osu_error(req: Request) -> Response:
 
 @osu.route("/web/osu-comment.php", methods=["POST"])
 @check_auth("u", "p", method="POST")
-async def get_beatmap_comments(req: Request) -> Response:
+async def get_beatmap_comments(req: Request, p: Player) -> Response:
     return Response(content=b"")
 
 
 @osu.route("/web/osu-screenshot.php", methods=["POST"])
 @check_auth("u", "p", method="POST")
-async def post_screenshot(req: Request) -> Response:
+async def post_screenshot(req: Request, p: Player) -> Response:
     id = general.random_string(8)
     form = await req.form()
 
@@ -603,7 +655,7 @@ async def get_screenshot(req: Request) -> FileResponse | Response:
 
 @osu.route("/web/osu-search.php")
 @check_auth("u", "h")
-async def osu_direct(req: Request) -> Response:
+async def osu_direct(req: Request, p: Player) -> Response:
     args = req.query_params
 
     match args["r"]:
@@ -674,28 +726,27 @@ async def osu_direct(req: Request) -> Response:
 
 @osu.route("/web/osu-search-set.php")
 @check_auth("u", "h")
-async def osu_search_set(req: Request) -> Response:
+async def osu_search_set(req: Request, p: Player) -> Response:
     match req.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
         case {"s": sid}:  # TODO: Beatmap Set
-            return Response(content=b"")
+            bmap = await services.beatmaps.get_by_set_id(sid)
         case {"b": bid}:  # Beatmap ID
-            bm = bid
-            bmap = await Beatmap.get_beatmap(beatmap_id=bm)  # type: ignore
+            bmap = await services.beatmaps.get_by_map_id(bid)  # type: ignore
         case {"c": hash}:  # Checksum
-            bm = hash
-            bmap = await Beatmap.get_beatmap(hash=bm)  # type: ignore
+            bmap = await services.beatmaps.get(hash)  # type: ignore
         case _:
             bmap = None
 
     if not bmap:  # if beatmap doesn't exists in db then fetch!
-        log.fail("/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
+        log.fail(
+            "/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
         return Response(content=b"xoxo gossip girl")
 
     return Response(
-        content="{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
-        "{bmap.creator}|{bmap.approved}|{bmap.rating}|"
-        "{bmap.latest_update}|{bmap.set_id}|"
+        content=f"{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
+        f"{bmap.creator}|{bmap.approved}|{bmap.rating}|"
+        f"{bmap.latest_update}|{bmap.set_id}|"
         "0|0|0|0|0".encode()
     )
 

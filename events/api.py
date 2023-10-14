@@ -8,8 +8,9 @@ from utils.general import ORJSONResponse
 
 api = Router()
 
+
 @api.route("/")
-async def dash(req: Request) -> JSONResponse: 
+async def dash(req: Request) -> JSONResponse:
     return ORJSONResponse(
         content={
             "motd": "din mor"

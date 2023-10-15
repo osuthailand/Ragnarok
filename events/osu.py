@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import aiofiles
 import numpy as np
+from packets import writer
 
 from utils import log
 from utils import general
@@ -129,9 +130,9 @@ async def registration(req: Request) -> Response:
         )
 
     # TODO: website registration config
-    # if services.web_register:
-    # osu! will attempt to go to https://url?username={username}&email={email}
-    # return ORJSONResponse(status_code=403, content={"error":"please register from Rina website","url":"https:\/\/rina.place\/register"}})
+    if services.osu_settings["allow_game_registration"]["boolean_value"]:
+        # osu! will attempt to go to https://url?username={username}&email={email}
+        return general.ORJSONResponse(status_code=403, content={"error": "please register from Rina website", "url": f"https:\/\/{services.domain}\/register"})
 
     if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
@@ -141,13 +142,13 @@ async def registration(req: Request) -> Response:
             "INSERT INTO users (id, username, safe_username, passhash, "
             "email, privileges, latest_activity_time, registered_time) "
             "VALUES (NULL, %s, %s, %s, %s, %s, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())",
-            [
+            (
                 uname,
                 uname.lower().replace(" ", "_"),
                 pw_bcrypt,
                 email,
                 Privileges.PENDING.value,
-            ],
+            ),
         )
 
         await services.sql.execute("INSERT INTO stats (id) VALUES (%s)", [id])
@@ -217,8 +218,14 @@ async def get_scores(req: Request, p: Player) -> Response:
     # switch user to relax, when they have the relax mod enabled
     if not mods & Mods.RELAX and p.relax:
         p.relax = 0
+
+        await p.update_stats_cache()
+        services.players.enqueue(await writer.UpdateStats(p))
     elif mods & Mods.RELAX and not p.relax:
         p.relax = 1
+
+        await p.update_stats_cache()
+        services.players.enqueue(await writer.UpdateStats(p))
 
     ret = [b.web_format]
 
@@ -616,7 +623,8 @@ async def lastfm(req: Request, p: Player) -> Response:
 async def get_seasonal(req: Request) -> Response:
     # hmmm... it seems like there's nothing special yet
     # TODO: make a config file for this?
-    return Response(content=b"[]")
+    log.debug("getting seasonal background")
+    return general.ORJSONResponse(["https://steamuserimages-a.akamaihd.net/ugc/1756934458426121120/870EB09212BCB5CC5FEFA9619BE83242DAECE498/?imw=637&imh=358&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=true"])
 
 
 @osu.route("/web/osu-error.php", methods=["POST"])
@@ -758,3 +766,10 @@ async def download_osz(req: Request) -> Response:
         url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{'?noVideo=true' if req.url.path[-1] == 'n' else ''}",
         status_code=301,
     )
+
+
+@osu.route("/web/bancho_connect.php")
+@check_auth("u", "h")
+async def bancho_connect(req: Request, p: Player) -> Response:
+    # TODO: proper verification
+    return Response(content=f"https://c.{services.domain}".encode())

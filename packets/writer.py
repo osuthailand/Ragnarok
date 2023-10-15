@@ -304,10 +304,10 @@ async def UserPresence(p: "Player", spoof: bool = False) -> bytes:
     )
 
 
-async def MainMenuIcon() -> bytes:
+async def MainMenuIcon(image_url: str, url: str) -> bytes:
     return await write(
         BanchoPackets.CHO_MAIN_MENU_ICON,
-        ("https://imgur.com/Uihzw6N.png|https://rina.place", Types.string),
+        (f"{image_url}|{url}", Types.string),
     )
 
 

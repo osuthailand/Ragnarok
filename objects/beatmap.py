@@ -1,4 +1,6 @@
+import copy
 import aiohttp
+from constants.mods import Mods
 from objects import services
 from utils import log
 from constants.playmode import Mode
@@ -32,7 +34,7 @@ class Beatmap:
         self.approved_date: str = ""
         self.latest_update: str = ""
 
-        self.length_total: int = 0
+        self.length_total: float = 0.0
         self.drain: int = 0
 
         self.plays: int = 0
@@ -63,11 +65,22 @@ class Beatmap:
 
     @property
     def url(self) -> str:
-        return f"https://mitsuha.pw/beatmapsets/{self.set_id}#{self.map_id}"
+        return f"https://{services.domain}/beatmapsets/{self.set_id}#{self.map_id}"
 
     @property
     def embed(self) -> str:
         return f"[{self.url} {self.full_title}]"
+
+    def length_in_minutes_seconds(self, mods: Mods = Mods.NONE) -> str:
+        length = copy.copy(self.length_total)
+
+        if mods & Mods.DOUBLETIME or mods & Mods.NIGHTCORE:
+            length -= length * 0.33
+        elif mods & Mods.HALFTIME:
+            length *= 1.33
+
+        minutes, seconds = divmod(length, 60)
+        return f"{int(minutes)}:{int(seconds):0>2}"
 
     @property
     def web_format(self) -> str:
@@ -224,7 +237,7 @@ class Beatmap:
 
         b.latest_update = ret["last_update"]
 
-        b.length_total = int(ret["total_length"])
+        b.length_total = float(ret["total_length"])
         b.drain = int(ret["hit_length"])
 
         b.plays = 0

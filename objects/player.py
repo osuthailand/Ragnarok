@@ -164,17 +164,22 @@ class Player:
         # TODO: Create temp spec channel
         spec_name = f"#spect_{self.id}"
 
+        # fake channel to make client aware of #spectator
+        generic_spectator_chat = Channel(
+            **{"name": "#spectator", "public": False, "auto_join": True})
         spec_channel = services.channels.get(spec_name)
+
         if not spec_channel:
             spec_channel = services.channels.add({
-                "name": "#spectator",
-                "raw": spec_name,
+                "name": spec_name,
                 "description": f"spectator chat for {self.username}",
                 "public": False,
             })
 
+            await self.join_channel(generic_spectator_chat)
             await self.join_channel(spec_channel)
 
+        await p.join_channel(generic_spectator_chat)
         await p.join_channel(spec_channel)
 
         joined = await writer.FellasJoinSpec(p.id)
@@ -193,14 +198,14 @@ class Player:
         p.spectating = None
         self.spectators.remove(p)
 
-        chan = services.channels.get(f"#spect_{self.id}")
-        assert chan is not None
+        spec_channel = services.channels.get(f"#spect_{self.id}")
+        assert spec_channel is not None
 
-        await p.leave_channel(chan)
+        await p.leave_channel(spec_channel)
 
         if not self.spectators:
-            await self.leave_channel(chan)
-            services.channels.remove(chan)
+            await self.leave_channel(spec_channel)
+            services.channels.remove(spec_channel)
 
         left = await writer.FellasLeftSpec(p.id)
 
@@ -211,7 +216,7 @@ class Player:
 
     async def join_match(self, m: Match, pwd: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
-        if self.match or pwd != m.match_pass or not m in services.matches.matches:
+        if self.match or pwd != m.match_pass or not m in services.matches:
             self.enqueue(await writer.MatchFail())
             return  # user is already in a match
 

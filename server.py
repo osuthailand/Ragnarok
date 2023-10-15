@@ -56,14 +56,15 @@ async def startup():
 
             os.makedirs(_path)
 
-    log.info(f"Running Ragnarok on `{services.domain}` (port: {services.port})")
-    log.info(".. Connecting to the database")
+    log.info(
+        f"Running Ragnarok on `{services.domain}` (port: {services.port})")
+    log.info("... Connecting to the database")
 
     services.sql = Database()
     await services.sql.connect(services.config["mysql"])
 
     log.info("✓ Connected to the database!")
-    log.info(".. Initalizing redis")
+    log.info("... Initalizing redis")
 
     redisconf = services.config["redis"]
     services.redis = aioredis.from_url(
@@ -93,16 +94,26 @@ async def startup():
         services.achievements.add(Achievement(**achievement))
 
     log.info("✓ Successfully cached all achievements")
+    log.info("... Getting bancho settings from database")
 
+    async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
+        services.osu_settings[setting["name"]] = {
+            key: item
+            for key, item in setting.items() if key != "name"
+        }
+
+    log.info("✓ Successfully got bancho settings")
     log.info("... Starting background tasks")
-    asyncio.create_task(tasks.run_all_tasks())
-    log.info("✓ Successfully started all background tasks")
 
+    asyncio.create_task(tasks.run_all_tasks())
+
+    log.info("✓ Successfully started all background tasks")
     log.info("Finished up connecting to everything!")
 
 
 async def not_found(req: Request, exc: HTTPException) -> Response:
-    log.fail(f"[{req.method}] {req.url._url[8:]} not found")
+    services.logging.print(
+        f"[{req.method}] {req.url._url[8:]} not found", style="red")
     return Response(content=exc.detail.encode(), status_code=404)
 
 

@@ -15,6 +15,9 @@ class Tokens:
     def __iter__(self) -> Iterator[Player]:
         return iter(self.players)
 
+    def __len__(self) -> int:
+        return len(self.players)
+
     def add(self, p: Player) -> None:
         self.players.append(p)
 
@@ -124,6 +127,9 @@ class Beatmaps:
 
     def __iter__(self):
         return iter(self.beatmaps)
+
+    def __getitem__(self, item: str) -> Beatmap:
+        return self.beatmaps[item]
 
     def remove(self, map_md5: str) -> None:
         if map_md5 in self.beatmaps:

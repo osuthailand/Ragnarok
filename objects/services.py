@@ -9,7 +9,6 @@ from objects.achievement import Achievement
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches, Beatmaps
-    from objects.beatmap import Beatmap
     from objects.player import Player
     from packets.reader import Packet
 
@@ -26,11 +25,15 @@ prefix: str = "!"
 
 config: dict[str, dict[str, Any]] = conf
 
+# from database
+osu_settings: dict[str, dict[str, int | str]] = {}
+
 sql: Database
 redis: aioredis.Redis
 
 bcrypt_cache: dict[str, bytes] = {}
 
+# title card - james a. janisse
 title_card: str = '''
                 . . .o .. o
                     o . o o.o

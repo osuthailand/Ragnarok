@@ -4,6 +4,8 @@ import uuid
 import time
 import random
 import asyncio
+from objects.beatmap import Beatmap
+from objects.match import Match
 
 from utils import log
 from typing import Union
@@ -23,23 +25,24 @@ from constants.player import Privileges
 from constants.packets import BanchoPackets
 from constants.match import SlotStatus, ScoringType
 
-if TYPE_CHECKING:
-    from objects.channel import Channel
-    from objects.player import Player
+from objects.channel import Channel
+from objects.player import Player
+
+
+from functools import wraps
 
 
 @dataclass
 class Context:
-    author: "Player"
-    # can't use | operator because str and str
-    reciever: Union["Channel", "Player"]
+    author: Player
+    reciever: Channel | Player
 
     cmd: str
     args: list[str]
 
     # there is probably a better solution to this
     # but this is just what i quickly came up with
-    async def await_response(self) -> str:
+    async def await_response(self) -> str | None:
         services.await_response[self.author.token] = ""
 
         # they will have 60 seconds to respond.
@@ -65,7 +68,7 @@ class Command:
     aliases: list[str]
 
     perms: Privileges
-    doc: str
+    doc: str | None
     category: str
     hidden: bool
 
@@ -100,7 +103,7 @@ def register_command(
     trigger: str,
     required_perms: Privileges = Privileges.USER,
     hidden: bool = False,
-    aliases: list[str] = (),
+    aliases: list[str] = [],
     category: str = "undefined",
 ):
     def decorator(cb: Callable) -> None:
@@ -119,13 +122,34 @@ def register_command(
     return decorator
 
 
+def ensure_channel(cb: Callable) -> Callable:
+    @wraps(cb)
+    async def wrapper(ctx: Context, *args, **kwargs):
+        if type(ctx.reciever) is Channel:
+            return await cb(ctx, *args, **kwargs)
+
+        return "This command can only be performed in a channel"
+
+    return wrapper
+
+
+def ensure_player(cb: Callable) -> Callable:
+    @wraps(cb)
+    async def wrapper(ctx: Context, *args, **kwargs):
+        if type(ctx.reciever) is Player:
+            return await cb(ctx, *args, **kwargs)
+
+        return "This command can only be performed in a channel"
+
+    return wrapper
+
 #
 # Normal user commands
 #
 
 
 @register_command("help", category="General")
-async def help(ctx: Context) -> str:
+async def help(ctx: Context) -> str | None:
     """The help message"""
 
     cmds: dict[str, dict[str, str]] = {}
@@ -151,14 +175,14 @@ async def help(ctx: Context) -> str:
 
 
 @register_command("ping", category="General")
-async def ping_command(ctx: Context) -> str:
+async def ping_command(ctx: Context) -> str | None:
     """Ping the server, to see if it responds."""
 
     return "PONG"
 
 
 @register_command("roll", category="General")
-async def roll(ctx: Context) -> str:
+async def roll(ctx: Context) -> str | None:
     """Roll a dice!"""
 
     x = 100
@@ -171,7 +195,7 @@ async def roll(ctx: Context) -> str:
 
 # rewrite this
 @register_command("stats", category="Player")
-async def user_stats(ctx: Context) -> str:
+async def user_stats(ctx: Context) -> str | None:
     """Display a users stats both vanilla or relax."""
 
     if len(ctx.args) < 1:
@@ -199,7 +223,7 @@ async def user_stats(ctx: Context) -> str:
 # this is not a permanent command, as soon as the
 # server has a website, it'll be removed
 @register_command("leaderboard", category="Player")
-async def leaderboard(ctx: Context) -> str:
+async def leaderboard(ctx: Context) -> str | None:
     if len(ctx.args) < 2:
         return "Wrong usage: !leaderboard <rx|vn> <mode>"
 
@@ -227,10 +251,9 @@ async def leaderboard(ctx: Context) -> str:
 @register_command(
     "verify", category="Player", hidden=True, required_perms=Privileges.PENDING
 )
-async def verify_with_key(ctx: Context) -> str:
+@ensure_player
+async def verify_with_key(ctx: Context) -> str | None:
     """Verify your account with our key system!"""
-    assert type(ctx.reciever) == Player
-
     if not ctx.reciever.bot:
         return
 
@@ -275,8 +298,78 @@ async def verify_with_key(ctx: Context) -> str:
     return "Successfully verified your account."
 
 
+@dataclass
+class PPBuilder:
+    accuracy: float = 0.0
+    combo: int = 0
+    x100: int = 0
+    x50: int = 0
+    misses: int = 0
+
+    def message(self, calculator: Calculator, bmap: BMap):
+        if not self.accuracy and not (self.x100 or self.x50):
+            pp_values = []
+            for acc in range(95, 101):
+                calculator.set_acc(acc)
+                pp = calculator.performance(bmap).pp
+                pp_values.append(f"{acc}%: {pp:.2f}pp")
+
+            return " | ".join(pp_values)
+
+        calculator.set_n_misses(self.misses)
+
+        if self.accuracy:
+            if self.combo:
+                calculator.set_combo(self.combo)
+
+            calculator.set_acc(self.accuracy)
+            performance = calculator.performance(bmap)
+
+            return f"{self.accuracy}% {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {performance.pp:.2f}pp"
+
+        if self.combo:
+            calculator.set_combo(self.combo)
+
+        calculator.set_n100(self.x100)
+        calculator.set_n50(self.x50)
+        performance = calculator.performance(bmap)
+
+        return f"{self.x100}x100 {self.x50}x50 {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {performance.pp:.2f}pp"
+
+
+def pp_message_format(
+    bmap: BMap,
+    map: Beatmap,
+    pp_builder: PPBuilder,
+    calculator: Calculator,
+    mods: Mods = Mods.NONE,
+) -> str | None:
+    response = []
+    response.append(map.embed)
+
+    if not mods & Mods.NONE:
+        response.append(mods.short_name)
+
+    response.append("|")
+    calculator.set_mods(mods.value)
+
+    response.append(pp_builder.message(calculator, bmap))
+
+    map_attributes = calculator.map_attributes(bmap)
+    difficulty_attributes = calculator.difficulty(bmap)
+
+    response.append("| " + map.length_in_minutes_seconds(mods))
+    response.append(f"★ {difficulty_attributes.stars:.2f}")
+    response.append(f"♫ {map_attributes.bpm:.0f}")
+    response.append(f"AR {map_attributes.ar:.1f}")
+    response.append(f"OD {map_attributes.od:.1f}")
+
+    return " ".join(response)
+
+
 @register_command("pp", category="Tillerino-like")
-async def calc_pp_for_map(ctx: Context) -> str:
+async def calc_pp_for_map(ctx: Context) -> str | None:
+    """Show PP for the previous requested beatmap with requested info (Don't use spaces for multiple mods (eg: !pp +HDHR))"""
     if not (_map := ctx.author.last_np):
         return "Please /np a map first."
 
@@ -296,109 +389,125 @@ async def calc_pp_for_map(ctx: Context) -> str:
         mode=mode
     )
 
-    mods = max_combo = count_100 = count_50 = count_miss = 0
-    acc = None
+    pp_builder = PPBuilder()
+    mods = Mods.NONE
 
+    # maybe regex would be better to use for this case?
     for arg in ctx.args:
         if arg.startswith("+"):
-            calc.set_mods(Mods.from_str(arg[1:]).value)
-        if arg.endswith("%"):
-            calc.set_acc(float(arg[:-1]))
-        if arg.endswith("x"):
-            calc.set_combo(int(arg[:-1]))
-        if arg.endswith("x100"):
-            calc.set_n100(int(arg[:-4]))
-        if arg.endswith("x50"):
-            calc.set_n50(int(arg[:-3]))
-        if arg.endswith("m"):
-            calc.set_n_misses(int(arg[:-1]))
+            mods = Mods.from_str(arg[1:])
 
-    # if there are any attributes other than mods
-    # enabled the accuracy will be different, therefore
-    # we'll make a custom message for it
-    # if (
-    #     count_100 != 0 or
-    #     count_50 != 0 or
-    #     count_miss != 0 or
-    #     acc != 100
-    # ):
-    #     pp = calc.performance(bmap).pp
-    #     return f"{_map.full_title} {Mods(mods)} | accuracy: {acc} | 100x: {count_100} | 50x: {count_50} | misses: {count_miss} | pp: {round(pp, 2)}pp"
+        elif arg.endswith("%"):
+            pp_builder.accuracy = float(arg[:-1])
 
-    pp_100p = calc.performance(bmap).pp
+        elif arg.endswith("x"):
+            pp_builder.combo = int(arg[:-1])
 
-    calc.set_acc(99)
-    pp_99p = calc.performance(bmap).pp
+        elif arg.endswith("x100"):
+            pp_builder.x100 = int(arg[:-4])
 
-    calc.set_acc(98)
-    pp_98p = calc.performance(bmap).pp
+        elif arg.endswith("x50"):
+            pp_builder.x50 = int(arg[:-3])
 
-    calc.set_acc(97)
-    pp_97p = calc.performance(bmap).pp
+        elif arg.endswith("m"):
+            pp_builder.misses = int(arg[:-1])
 
-    calc.set_acc(96)
-    pp_96p = calc.performance(bmap).pp
-
-    calc.set_acc(95)
-    pp_95p = calc.performance(bmap).pp
-
-    return (
-        f"{_map.full_title} {mods} >> "
-        f"95%: {round(pp_95p, 2)}pp | "
-        f"96%: {round(pp_96p, 2)}pp | "
-        f"97%: {round(pp_97p, 2)}pp | "
-        f"98%: {round(pp_98p, 2)}pp | "
-        f"99%: {round(pp_99p, 2)}pp | "
-        f"100%: {round(pp_100p, 2)}pp "
-    )
-
+    return pp_message_format(bmap, _map, pp_builder, calc, mods)
 
 #
 # Multiplayer commands
 #
 
 
+def ensure_match(host: bool):
+    """ Ensures that the command is being executed in a multiplayer match 
+    also gives the user the option to make the command only executable by the host"""
+    def decorator(cb: Callable) -> Callable:
+        @wraps(cb)
+        async def wrapper(ctx: Context, *args, **kwargs):
+            if ctx.author.match and type(ctx.reciever) is Channel:
+                if not ctx.reciever.is_multi:
+                    return "This command can only be performed in a multiplayer match"
+
+                if host and ctx.author.match.host != ctx.author.id:
+                    return "Only the host can perform this command."
+
+                return await cb(ctx, *args, **kwargs)
+
+            return "This command can only be performed in a multiplayer match"
+
+        return wrapper
+
+    return decorator
+
+
 @rmp_command("help")
-async def multi_help(ctx: Context) -> str:
+@ensure_channel
+async def multi_help(ctx: Context) -> str | None:
     """Multiplayer help command"""
     return "Not done yet."
 
 
 @rmp_command("make")
-async def make_multi(ctx: Context) -> str:
-    ...
+@ensure_channel
+async def make_multi(ctx: Context) -> str | None:
+    if ctx.author.match:
+        return "Leave the match before making your own."
 
+    if not ctx.args:
+        name = ctx.author.username + "'s multiplayer match"
+    else:
+        name = " ".join(ctx.args)
 
-@rmp_command("makeprivate")
-async def make_private_multi(ctx: Context) -> str:
-    ...
+    m = Match()
+    m.match_id = len(services.matches)
+    m.match_name = name
+    m.host = ctx.author.id
+
+    services.matches.add(m)
+
+    await ctx.author.join_match(m)
 
 
 @rmp_command("name")
-async def change_multi_name(ctx: Context) -> str:
-    ...
+@ensure_match(host=True)
+async def change_multi_name(ctx: Context) -> str | None:
+    if not ctx.args:
+        return "No name has been specified."
+
+    m = ctx.author.match
+    current_name = m.match_name
+    new_name = " ".join(ctx.args)
+    m.match_name = new_name
+
+    await m.enqueue_state()
+    return f"Changed match name from {current_name} to {new_name}"
 
 
 @rmp_command("lock")
-async def lock_slot(ctx: Context) -> str:
-    ...
+@ensure_match(host=True)
+async def lock_slot(ctx: Context) -> str | None:
+    m = ctx.author.match
+    m.locked = True
+
+    await m.enqueue_state()
+    return f"Locked the match"
 
 
 @rmp_command("unlock")
-async def unlock_slot(ctx: Context) -> str:
-    ...
+@ensure_match(host=True)
+async def unlock_slot(ctx: Context) -> str | None:
+    m = ctx.author.match
+    m.locked = True
+
+    await m.enqueue_state()
+    return f"Locked the match"
 
 
 @rmp_command("start")
-async def start_match(ctx: Context) -> str:
+@ensure_match(host=True)
+async def start_match(ctx: Context) -> str | None:
     """Start the multiplayer when all players are ready or force start it."""
-    if (
-        not ctx.reciever.is_multi
-        or not (m := ctx.author.match)
-        or ctx.author.match.host != ctx.author.id
-    ):
-        return
-
     m = ctx.author.match
 
     if ctx.args:
@@ -438,15 +547,10 @@ async def start_match(ctx: Context) -> str:
     return "Starting match... Good luck!"
 
 
-@rmp_command("abort", aliases=("ab"))
-async def abort_match(ctx: Context) -> str:
-    if (
-        not ctx.reciever.is_multi
-        or not (m := ctx.author.match)
-        or not m.in_progress
-        or m.host != ctx.author.id
-    ):
-        return
+@rmp_command("abort", aliases=["ab"])
+@ensure_match(host=True)
+async def abort_match(ctx: Context) -> str | None:
+    m = ctx.author.match
 
     for s in m.slots:
         if s.status == SlotStatus.PLAYING:
@@ -462,18 +566,14 @@ async def abort_match(ctx: Context) -> str:
     return "Aborted match."
 
 
-@rmp_command("win", aliases=("wc"))
-async def win_condition(ctx: Context) -> str:
+@rmp_command("win", aliases=["wc"])
+@ensure_match(host=True)
+async def win_condition(ctx: Context) -> str | None:
     """Change win condition in a multiplayer match."""
-    if (
-        not ctx.reciever.is_multi
-        or not (m := ctx.author.match)
-        or ctx.author.match.host != ctx.author.id
-    ):
-        return
+    m = ctx.author.match
 
     if not ctx.args:
-        return f"Wrong usage. !multi {ctx.cmd} <score/acc/combo/sv2/pp>"
+        return f"Wrong usage. !mp {ctx.cmd} <score/acc/combo/sv2/pp>"
 
     if ctx.args[0] in ("score", "acc", "sv2", "combo"):
         old_scoring = copy.copy(m.scoring_type)
@@ -494,16 +594,12 @@ async def win_condition(ctx: Context) -> str:
 
 
 @rmp_command("move")
-async def move_slot(ctx: Context) -> str:
-    if (
-        not ctx.reciever.is_multi
-        or not (m := ctx.author.match)
-        or ctx.author.match.host != ctx.author.id
-    ):
-        return
+@ensure_match(host=True)
+async def move_slot(ctx: Context) -> str | None:
+    m = ctx.author.match
 
     if len(ctx.args) < 2:
-        return "Wrong usage: !multi move <player> <to_slot>"
+        return "Wrong usage: !mp move <player> <to_slot>"
 
     ctx.args[1] = int(ctx.args[1]) - 1
 
@@ -512,7 +608,10 @@ async def move_slot(ctx: Context) -> str:
     if not (target := m.find_user(player)):
         return "Slot is not occupied."
 
-    if (to := m.find_slot(ctx.args[1])).status & SlotStatus.OCCUPIED:
+    to = m.find_slot(ctx.args[1])
+    assert to is not None
+
+    if to.status & SlotStatus.OCCUPIED:
         return "That slot is already occupied."
 
     to.copy_from(target)
@@ -524,19 +623,19 @@ async def move_slot(ctx: Context) -> str:
 
 
 @rmp_command("size")
-async def change_size(ctx: Context) -> str:
-    if (
-        not ctx.reciever.is_multi
-        or not (m := ctx.author.match)
-        or ctx.author.match.host != ctx.author.id
-        or m.in_progress
-    ):
-        return
+@ensure_match(host=True)
+async def change_size(ctx: Context) -> str | None:
+    m = ctx.author.match
 
     if not ctx.args:
-        return "Wrong usage: !multi size <amount of available slots>"
+        return "Wrong usage: !mp size <amount of available slots>"
 
-    for slot_id in range(0, int(ctx.args[0])):
+    size = int(ctx.args[0])
+
+    if size > 16:
+        return "You can't choose a size bigger than 16."
+
+    for slot_id in range(0, size):
         slot = m.find_slot(slot_id)
 
         if not slot.status & SlotStatus.OCCUPIED:
@@ -546,14 +645,13 @@ async def change_size(ctx: Context) -> str:
 
 
 @rmp_command("get")
-async def get_beatmap(ctx: Context) -> str:
-    if not ctx.reciever.is_multi or not (m := ctx.author.match):
-        return
-
+@ensure_match(host=False)
+async def get_beatmap(ctx: Context) -> str | None:
+    m = ctx.author.match
     mirrors = services.config["api_conf"]["mirrors"]
 
     if not ctx.args:
-        return f"Wrong usage: !multi get <{'|'.join(mirrors.keys())}>"
+        return f"Wrong usage: !mp get <{'|'.join(mirrors.keys())}>"
 
     if m.map_id == 0:
         return "The host has probably choosen a map that needs to be updated! Tell them to do so!"
@@ -575,9 +673,9 @@ async def get_beatmap(ctx: Context) -> str:
 
 
 @rmp_command("invite")
-async def invite_people(ctx: Context) -> str:
-    if not ctx.reciever.is_multi or not (m := ctx.author.match):
-        return
+@ensure_match(host=False)
+async def invite_people(ctx: Context) -> str | None:
+    m = ctx.author.match
 
     if not ctx.args:
         await ctx.reciever.send(
@@ -608,7 +706,7 @@ async def invite_people(ctx: Context) -> str:
 
 
 @register_command("announce", category="Staff", required_perms=Privileges.MODERATOR)
-async def announce(ctx: Context) -> str:
+async def announce(ctx: Context) -> str | None:
     if len(ctx.args) < 2:
         return
 
@@ -626,7 +724,7 @@ async def announce(ctx: Context) -> str:
 
 
 @register_command("kick", category="Staff", required_perms=Privileges.MODERATOR)
-async def kick_user(ctx: Context) -> str:
+async def kick_user(ctx: Context) -> str | None:
     """Kick all players or just one player from the server."""
 
     if not ctx.args:
@@ -654,10 +752,10 @@ async def kick_user(ctx: Context) -> str:
 
 
 @register_command("restrict", category="Staff", required_perms=Privileges.ADMIN)
-async def restrict_user(ctx: Context) -> str:
+@ensure_channel
+async def restrict_user(ctx: Context) -> str | None:
     """Restrict users from the server"""
-
-    if (not ctx.reciever == services.bot) and ctx.reciever.name != "#staff":
+    if ctx.reciever.name != "#staff":
         return "You can't do that here."
 
     if len(ctx.args) < 1:
@@ -688,9 +786,9 @@ async def restrict_user(ctx: Context) -> str:
 
 
 @register_command("unrestrict", category="Staff", required_perms=Privileges.ADMIN)
-async def unrestrict_user(ctx: Context) -> str:
+@ensure_channel
+async def unrestrict_user(ctx: Context) -> str | None:
     """Unrestrict users from the server."""
-
     if ctx.reciever.name != "#staff":
         return "You can't do that here."
 
@@ -718,8 +816,11 @@ async def unrestrict_user(ctx: Context) -> str:
 
 
 @register_command("bot", category="Staff", required_perms=Privileges.ADMIN)
-async def bot_commands(ctx: Context) -> str:
+@ensure_player
+async def bot_commands(ctx: Context) -> str | None:
     """Handle our bot ingame"""
+    if not ctx.reciever.bot:
+        return
 
     if not ctx.args:
         return f"{services.bot.username.lower()}."
@@ -734,7 +835,7 @@ async def bot_commands(ctx: Context) -> str:
 
 
 @register_command("approve", category="Staff", required_perms=Privileges.BAT)
-async def approve_map(ctx: Context) -> str:
+async def approve_map(ctx: Context) -> str | None:
     """Change the ranked status of beatmaps."""
 
     if not ctx.author.last_np:
@@ -794,8 +895,9 @@ async def approve_map(ctx: Context) -> str:
 
 
 @register_command("recalc", category="Staff", required_perms=Privileges.ADMIN)
-async def recalc_scores(ctx: Context) -> str:
+async def recalc_scores(ctx: Context) -> str | None:
     """Recalculate all the scores on either relax or vanilla."""
+
     if not ctx.args:
         return "Usage: !recalc <relax/vanilla>"
 
@@ -862,7 +964,7 @@ async def recalc_scores(ctx: Context) -> str:
 
 
 @register_command("key", category="Admin", required_perms=Privileges.ADMIN)
-async def beta_keys(ctx: Context) -> str:
+async def beta_keys(ctx: Context) -> str | None:
     """Create or delete keys."""
 
     if len(ctx.args) < 1:
@@ -910,24 +1012,24 @@ async def beta_keys(ctx: Context) -> str:
 
 
 # group commands
-@register_command("group", hidden=True, required_perms=Privileges.DEV)
-async def creategroup(ctx: Context) -> str:
-    if len(ctx.args) != 1:
-        return "Usage: !group <name>"
+# @register_command("group", hidden=True, required_perms=Privileges.DEV)
+# async def creategroup(ctx: Context) -> str | None:
+#     if len(ctx.args) != 1:
+#         return "Usage: !group <name>"
 
-    if services.channels.get(name := ctx.args[0]):
-        return "Group name already created (fix)"
+#     if services.channels.get(name := ctx.args[0]):
+#         return "Group name already created (fix)"
 
-    await Group.create(ctx.author, name)
+#     await Group.create(ctx.author, name)
 
-    return f"Created group `{name}`"
+#     return f"Created group `{name}`"
 
 
 async def handle_commands(
     message: str, sender: "Player", reciever: Union["Channel", "Player"]
 ) -> None:
-    if message[:6] == "!multi":
-        message = message[7:]
+    if message[:3] == "!mp":
+        message = message[4:]
         commands_set = mp_commands
     else:
         message = message[1:]

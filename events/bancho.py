@@ -39,11 +39,18 @@ def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
 
 
 bancho = Router()
-IGNORED_PACKETS = (4, 79)
+IGNORED_PACKETS = (79)
 
 
-@bancho.route("/", methods=["POST"])
-async def handle_bancho(req: Request):
+@bancho.route("/", methods=["POST", "GET"])
+async def handle_bancho(req: Request) -> Response:
+    if req.method == "GET":
+        msg = services.title_card
+        online_players = len(services.players)
+        msg += f"\ncurrently {online_players} players online"
+
+        return Response(content=msg.encode())
+
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
         return "no"
 
@@ -75,12 +82,9 @@ async def handle_bancho(req: Request):
 
         end = (time.time_ns() - start) / 1e6
 
-        if sr.packet == BanchoPackets.OSU_MATCH_SCORE_UPDATE:
-            log.debug(req.body)
-
         if services.debug and p.packet.value not in IGNORED_PACKETS:
             log.debug(
-                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {player.username} - {round(end, 2)}ms"
+                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by [bold]{player.username}[/bold] - {round(end, 2)}ms"
             )
 
     player.last_update = time.time()
@@ -221,7 +225,12 @@ async def login(req: Request) -> Response:
 
     data += await writer.UserID(p.id)
     data += await writer.UserPriv(p.privileges)
-    data += await writer.MainMenuIcon()
+
+    if services.osu_settings["osu_menu_icon"]["boolean_value"]:
+        data += await writer.MainMenuIcon(
+            image_url=services.osu_settings["osu_menu_icon"]["string_value"],
+            url=f"https://{services.domain}")
+
     data += await writer.FriendsList(*p.friends)
     data += await writer.UserPresence(p, spoof=True)
     data += await writer.UpdateStats(p)
@@ -258,7 +267,9 @@ async def login(req: Request) -> Response:
 
     et = (time.time_ns() - start) / 1e6
 
-    data += await writer.Notification(f"Authorization took {round(et, 2)} ms.")
+    if services.osu_settings["welcome_message"]["boolean_value"]:
+        data += await writer.Notification(services.osu_settings["welcome_message"]["string_value"])
+        data += await writer.Notification(f"Authorization took {round(et, 2)} ms.")
 
     log.info(f"{p!r} logged in.")
 
@@ -370,8 +381,9 @@ async def pong(p: Player, sr: Reader) -> None:
 @register_event(BanchoPackets.OSU_START_SPECTATING)
 async def start_spectate(p: Player, sr: Reader) -> None:
     spec = sr.read_int32()
+    host = services.players.get(spec)
 
-    if not p.is_verified and not (host := services.players.get(spec)):
+    if not p.is_verified or not host:
         return
 
     await host.add_spectator(p)
@@ -1008,5 +1020,7 @@ async def request_presence(p: Player, sr: Reader) -> None:
 # id: 98
 @register_event(BanchoPackets.OSU_USER_PRESENCE_REQUEST_ALL, restricted=True)
 async def request_presence_all(p: Player, sr: Reader) -> None:
+    sr.read_int32()
+
     for player in services.players:
         player.enqueue(await writer.UserPresence(player))

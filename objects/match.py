@@ -45,7 +45,7 @@ class Match:
         self.match_name: str = ""
         self.match_pass: str = ""
 
-        self.host = None
+        self.host: int = 0
         self.in_progress: bool = False
 
         self.map_id: int = 0
@@ -96,6 +96,9 @@ class Match:
                 return id
 
     def find_slot(self, slot_id: int) -> Players | None:
+        if slot_id > 16:
+            return
+
         for id, slot in enumerate(self.slots):
             if id == slot_id:
                 return slot

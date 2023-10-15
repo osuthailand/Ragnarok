@@ -90,6 +90,10 @@ class Mods(IntFlag):
             self.SCOREV2: "V2",
         }
 
+    @property
+    def short_name(self) -> str:
+        return "".join(name for mod, name in self.__dict__().items() if self & mod)
+
     @classmethod
     def from_str(cls, s: str) -> "Mods":
         # split every 2nd character

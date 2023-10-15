@@ -102,16 +102,7 @@ class Score:
         )
 
     @classmethod
-    async def set_data_from_sql(cls, score_id: int) -> "Score":
-        data = await services.sql.fetch(
-            "SELECT id, user_id, hash_md5, score, pp, count_300, count_100, "
-            "count_50, count_geki, count_katu, count_miss, "
-            "max_combo, accuracy, perfect, rank, mods, status, "
-            "play_time, mode, submitted, relax FROM scores "
-            "WHERE id = %s",
-            (score_id),
-        )
-
+    async def set_data_from_sql(cls, data: dict[str, float | int | str]) -> "Score":
         s = cls()
 
         s.id = data["id"]
@@ -238,12 +229,28 @@ class Score:
 
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(
-                "SELECT id FROM scores WHERE user_id = %s "
-                "AND relax = %s AND hash_md5 = %s "
+                "SELECT id, user_id, hash_md5, score, pp, count_300, count_100, "
+                "count_50, count_geki, count_katu, count_miss, "
+                "max_combo, accuracy, perfect, rank, mods, status, "
+                "play_time, mode, submitted, relax FROM scores "
+                "WHERE user_id = %s AND relax = %s AND hash_md5 = %s "
                 "AND mode = %s AND status = 3 LIMIT 1",
                 (s.player.id, s.relax, s.map.hash_md5, s.mode.value),
             ):
-                s.pb = await Score.set_data_from_sql(prev_best["id"])
+                s.pb = await Score.set_data_from_sql(prev_best)
+
+                # identical to `calculate_position(self)`
+                position = await services.sql.fetch(
+                    "SELECT COUNT(*) AS rank FROM scores s "
+                    "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+                    "INNER JOIN users u ON u.id = s.user_id "
+                    "WHERE s.score > %s AND s.relax = %s "
+                    "AND b.hash = %s AND u.privileges & 4 "
+                    "AND s.status = 3 AND s.mode = %s "
+                    "ORDER BY s.score DESC, s.submitted DESC",
+                    (s.pb.score, s.pb.relax, s.map.hash_md5, s.pb.mode.value),
+                )
+                s.pb.position = position["rank"] + 1
 
                 # if we found a personal best score
                 # that has more score on the map,

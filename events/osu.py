@@ -416,9 +416,10 @@ async def score_submission(req: Request) -> Response:
                     weighted += 416.6667 * (1 - 0.9994 ** len(scores))
                     stats.pp = math.ceil(weighted)
 
-                    stats.rank = await stats.update_rank(s.relax, s.mode) + 1
+                    stats.rank = await stats.update_rank(s.relax, s.mode)
 
                 await stats.update_stats(s.mode, s.relax)
+                services.players.enqueue(await writer.UpdateStats(stats))
 
                 # if the player got a position on
                 # the leaderboard lower than or equal to 10

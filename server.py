@@ -112,8 +112,7 @@ async def startup():
 
 
 async def not_found(req: Request, exc: HTTPException) -> Response:
-    services.logging.print(
-        f"[{req.method}] {req.url._url[8:]} not found", style="red")
+    log.fail(f"[{req.method}] {req.url._url[8:]} not found")
     return Response(content=exc.detail.encode(), status_code=404)
 
 

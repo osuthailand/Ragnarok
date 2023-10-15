@@ -84,7 +84,7 @@ async def handle_bancho(req: Request) -> Response:
 
         if services.debug and p.packet.value not in IGNORED_PACKETS:
             log.debug(
-                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by [bold]{player.username}[/bold] - {round(end, 2)}ms"
+                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {player.username} - {end:.2f}ms"
             )
 
     player.last_update = time.time()
@@ -268,8 +268,10 @@ async def login(req: Request) -> Response:
     et = (time.time_ns() - start) / 1e6
 
     if services.osu_settings["welcome_message"]["boolean_value"]:
+        # maybe add formatting to message?
         data += await writer.Notification(services.osu_settings["welcome_message"]["string_value"])
-        data += await writer.Notification(f"Authorization took {round(et, 2)} ms.")
+
+    data += await writer.Notification(f"Authorization took {et:.2f} ms.")
 
     log.info(f"{p!r} logged in.")
 

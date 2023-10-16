@@ -592,7 +592,7 @@ async def mp_change_settings(p: Player, sr: Reader) -> None:
         map = await Beatmap.get_beatmap(new_match.map_md5)
 
         if map:
-            m.map_md5 = map.hash_md5
+            m.map_md5 = map.map_md5
             m.map_title = map.full_title
             m.map_id = map.map_id
             m.mode = Mode(map.mode)

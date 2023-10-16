@@ -79,7 +79,7 @@ class Score:
         self.mods: int = 0
         self.status: SubmitStatus = SubmitStatus.FAILED
 
-        self.play_time: int = 0
+        self.playtime: int = 0
 
         self.mode: Mode = Mode.OSU
 
@@ -125,7 +125,7 @@ class Score:
         s.rank = data["rank"]
         s.mods = data["mods"]
 
-        s.play_time = data["play_time"]
+        s.playtime = data["playtime"]
 
         s.status = SubmitStatus(data["status"])
         s.mode = Mode(data["mode"])
@@ -227,28 +227,31 @@ class Score:
 
                 s.pp = calc.performance(bmap).pp
 
+                if math.isnan(s.pp) or math.isinf(s.pp):
+                    s.pp = 0
+
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(
-                "SELECT id, user_id, hash_md5, score, pp, count_300, count_100, "
+                "SELECT id, user_id, map_md5, score, pp, count_300, count_100, "
                 "count_50, count_geki, count_katu, count_miss, "
                 "max_combo, accuracy, perfect, rank, mods, status, "
-                "play_time, mode, submitted, relax FROM scores "
-                "WHERE user_id = %s AND relax = %s AND hash_md5 = %s "
+                "playtime, mode, submitted, relax FROM scores "
+                "WHERE user_id = %s AND relax = %s AND map_md5 = %s "
                 "AND mode = %s AND status = 3 LIMIT 1",
-                (s.player.id, s.relax, s.map.hash_md5, s.mode.value),
+                (s.player.id, s.relax, s.map.map_md5, s.mode.value),
             ):
                 s.pb = await Score.set_data_from_sql(prev_best)
 
                 # identical to `calculate_position(self)`
                 position = await services.sql.fetch(
                     "SELECT COUNT(*) AS rank FROM scores s "
-                    "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+                    "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
                     "INNER JOIN users u ON u.id = s.user_id "
                     "WHERE s.score > %s AND s.relax = %s "
-                    "AND b.hash = %s AND u.privileges & 4 "
+                    "AND b.map_md5 = %s AND u.privileges & 4 "
                     "AND s.status = 3 AND s.mode = %s "
                     "ORDER BY s.score DESC, s.submitted DESC",
-                    (s.pb.score, s.pb.relax, s.map.hash_md5, s.pb.mode.value),
+                    (s.pb.score, s.pb.relax, s.map.map_md5, s.pb.mode.value),
                 )
                 s.pb.position = position["rank"] + 1
 
@@ -261,8 +264,8 @@ class Score:
 
                     await services.sql.execute(
                         "UPDATE scores SET status = 2 WHERE user_id = %s AND relax = %s "
-                        "AND hash_md5 = %s AND mode = %s AND status = 3",
-                        (s.player.id, s.relax, s.map.hash_md5, s.mode.value),
+                        "AND map_md5 = %s AND mode = %s AND status = 3",
+                        (s.player.id, s.relax, s.map.map_md5, s.mode.value),
                     )
                 else:
                     s.status = SubmitStatus.PASSED
@@ -284,7 +287,7 @@ class Score:
         #     f"chickenmcnuggets"
         #     f"{s.count_100 + s.count_300}o15{s.count_50}{s.count_geki}"
         #     f"smustard{s.count_katu}{s.count_miss}uu"
-        #     f"{s.map.hash_md5}{s.max_combo}{str(s.perfect)}"
+        #     f"{s.map.map_md5}{s.max_combo}{str(s.perfect)}"
         #     f"{s.player.username}{s.score}{s.rank}{s.mods}Q{str(s.passed)}"
         #     f"{s.mode}{data[17].strip()}{data[16]}{security_hash}{storyboardchecksum}"
         #     .encode()
@@ -299,28 +302,28 @@ class Score:
     async def calculate_position(self) -> None:
         ret = await services.sql.fetch(
             "SELECT COUNT(*) AS rank FROM scores s "
-            "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+            "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
             "WHERE s.score > %s AND s.relax = %s "
-            "AND b.hash = %s AND u.privileges & 4 "
+            "AND b.map_md5 = %s AND u.privileges & 4 "
             "AND s.status = 3 AND s.mode = %s "
             "ORDER BY s.score DESC, s.submitted DESC",
-            (self.score, self.relax, self.map.hash_md5, self.mode.value),
+            (self.score, self.relax, self.map.map_md5, self.mode.value),
         )
 
         self.position = ret["rank"] + 1
 
     async def save_to_db(self) -> int:
         return await services.sql.execute(
-            "INSERT INTO scores (hash_md5, user_id, score, pp, "
+            "INSERT INTO scores (map_md5, user_id, score, pp, "
             "count_300, count_100, count_50, count_geki, "
             "count_katu, count_miss, max_combo, accuracy, "
-            "perfect, rank, mods, status, play_time, "
+            "perfect, rank, mods, status, playtime, "
             " mode, submitted, relax) VALUES "
             "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
             "%s, %s, %s, %s, %s, %s, %s)",
             (
-                self.map.hash_md5,
+                self.map.map_md5,
                 self.player.id,
                 self.score,
                 self.pp,
@@ -336,7 +339,7 @@ class Score:
                 self.rank,
                 self.mods,
                 self.status.value,
-                self.play_time,
+                self.playtime,
                 self.mode.value,
                 self.submitted,
                 self.relax,

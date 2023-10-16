@@ -1,24 +1,26 @@
 import math
 import copy
+import os
+import signal
+import sys
 import uuid
 import time
 import random
 import asyncio
 from objects.beatmap import Beatmap
 from objects.match import Match
+from objects.score import SubmitStatus
 
 from utils import log
 from typing import Union
 from packets import writer
 from typing import Callable
 from objects import services
-from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from rina_pp_pyb import Beatmap as BMap, Calculator
 
 from objects.bot import Bot
 from constants.mods import Mods
-from objects.group import Group
 from constants.playmode import Mode
 from constants.beatmap import Approved
 from constants.player import Privileges
@@ -220,34 +222,6 @@ async def user_stats(ctx: Context) -> str | None:
     )
 
 
-# this is not a permanent command, as soon as the
-# server has a website, it'll be removed
-@register_command("leaderboard", category="Player")
-async def leaderboard(ctx: Context) -> str | None:
-    if len(ctx.args) < 2:
-        return "Wrong usage: !leaderboard <rx|vn> <mode>"
-
-    _relax, _mode = ctx.args
-    mode = Mode.from_str(_mode)
-    relax = _relax == "rx"
-
-    if mode == Mode.NONE:
-        return f"Mode {_mode.lower()} doesn't exist."
-
-    response = f"Leaderboard for {mode} [{_relax}]\n"
-
-    table = ("stats", "stats_rx")[relax]
-
-    rank = 0
-    async for player in services.sql.iterall(
-        f"SELECT s.{mode.to_db('pp')} as pp, u.username FROM {table} s INNER JOIN users u ON u.id = s.id WHERE s.{mode.to_db('pp')} > 0 ORDER BY s.{mode.to_db('pp')} DESC LIMIT 50"
-    ):
-        response += f"#{rank + 1} - {player['username']} ({player['pp']}pp)\n"
-        rank += 1
-
-    return response
-
-
 @register_command(
     "verify", category="Player", hidden=True, required_perms=Privileges.PENDING
 )
@@ -414,6 +388,31 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
 
     return pp_message_format(bmap, _map, pp_builder, calc, mods)
 
+
+@register_command("last", category="Tillerino-like")
+async def last_score(ctx: Context) -> str:
+    """Show info (and gained PP) about the last submitted score"""
+    score = ctx.author.last_score
+
+    if not score:
+        return "You haven't set a score, since you started playing."
+
+    bmap = score.map
+
+    initial_response = (
+        bmap.embed +
+        f"{Mods(score.mods).short_name if score.mods else ''} "
+        f"({score.accuracy:.2f}%, {score.rank}) "
+        f"{score.max_combo}x/{bmap.max_combo}x | "
+        # TODO: difficulty changing mods changes stars
+        f"{score.pp:.2f}pp | ★ {bmap.stars:.2f} "
+    )
+
+    if not score.status & SubmitStatus.PASSED:
+        initial_response += f"[{score.status.name} | {int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
+
+    return initial_response
+
 #
 # Multiplayer commands
 #
@@ -455,7 +454,7 @@ async def make_multi(ctx: Context) -> str | None:
         return "Leave the match before making your own."
 
     if not ctx.args:
-        name = ctx.author.username + "'s multiplayer match"
+        name = ctx.author.username + "'s game"
     else:
         name = " ".join(ctx.args)
 
@@ -707,6 +706,7 @@ async def invite_people(ctx: Context) -> str | None:
 
 @register_command("announce", category="Staff", required_perms=Privileges.MODERATOR)
 async def announce(ctx: Context) -> str | None:
+    """Spread the message to the whole world."""
     if len(ctx.args) < 2:
         return
 
@@ -754,7 +754,7 @@ async def kick_user(ctx: Context) -> str | None:
 @register_command("restrict", category="Staff", required_perms=Privileges.ADMIN)
 @ensure_channel
 async def restrict_user(ctx: Context) -> str | None:
-    """Restrict users from the server"""
+    """Restrict users from the server."""
     if ctx.reciever.name != "#staff":
         return "You can't do that here."
 
@@ -818,7 +818,7 @@ async def unrestrict_user(ctx: Context) -> str | None:
 @register_command("bot", category="Staff", required_perms=Privileges.ADMIN)
 @ensure_player
 async def bot_commands(ctx: Context) -> str | None:
-    """Handle our bot ingame"""
+    """Handle the bot ingame."""
     if not ctx.reciever.bot:
         return
 
@@ -888,13 +888,13 @@ async def approve_map(ctx: Context) -> str | None:
             services.beatmaps[hash].approved = ranked_status
     else:
         # do i even need this check?
-        if ctx.author.last_np.hash_md5 in services.beatmaps:
-            services.beatmaps[ctx.author.last_np.hash_md5].approved = ranked_status
+        if ctx.author.last_np.map_md5 in services.beatmaps:
+            services.beatmaps[ctx.author.last_np.map_md5].approved = ranked_status
 
     return resp
 
 
-@register_command("recalc", category="Staff", required_perms=Privileges.ADMIN)
+@register_command("recalc", category="Admin", required_perms=Privileges.ADMIN)
 async def recalc_scores(ctx: Context) -> str | None:
     """Recalculate all the scores on either relax or vanilla."""
 
@@ -914,7 +914,7 @@ async def recalc_scores(ctx: Context) -> str | None:
         "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
         "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
         "b.version, b.artist FROM scores s "
-        "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+        "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
         "WHERE s.relax = %s AND s.mode = 0 AND s.status = 3",  # 3: best
         (1 if ctx.args[0].lower() == "relax" else 0),
     ):
@@ -1009,6 +1009,46 @@ async def beta_keys(ctx: Context) -> str | None:
         return f"Deleted key {key_id}"
 
     return "Usage: !key <create/delete> <name if create (OPTIONAL) / id if delete>"
+
+
+@register_command("system", aliases=["sys"], category="Admin", required_perms=Privileges.ADMIN)
+@ensure_channel
+async def system(ctx: Context) -> str:
+    """Control the server system from ingame!"""
+    if not ctx.args:
+        return f"Wrong usage: !{ctx.cmd} [restart | shutdown | reload | maintenance]"
+
+    match ctx.args[0].lower():
+        case "restart":
+            # TODO: add timer
+            await ctx.reciever.send(
+                message="Restarting server...",
+                sender=services.bot
+            )
+            os.execl(sys.executable, sys.executable, *sys.argv)
+
+        case "shutdown":
+            await ctx.reciever.send(
+                message="Shutting down server...",
+                sender=services.bot
+            )
+            os.kill(os.getpid(), signal.SIGTERM)
+
+        case "reload":
+            async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
+                services.osu_settings[setting["name"]] = {
+                    key: item
+                    for key, item in setting.items() if key != "name"
+                }
+
+            return "Succesfully reloaded all osu settings"
+
+        case "maintenance":
+            # TODO: this
+            return "beep boop"
+
+        case _:
+            return "Argument is invalid."
 
 
 # group commands

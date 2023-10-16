@@ -157,7 +157,7 @@ class Beatmaps:
             log.fail(f"Failed to get beatmaps with map_id {map_id}")
             return
 
-        self.beatmaps[b.hash_md5] = b
+        self.beatmaps[b.map_md5] = b
         return b
 
     async def get_by_set_id(self, set_id: int) -> Beatmap | None:
@@ -165,7 +165,7 @@ class Beatmaps:
             log.fail(f"Failed to get beatmaps with map_id {set_id}")
             return
 
-        self.beatmaps[b.hash_md5] = b
+        self.beatmaps[b.map_md5] = b
         return b
 
     def get_maps_from_set_id(self, set_id: int) -> list[str]:

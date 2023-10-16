@@ -209,7 +209,7 @@ async def get_scores(req: Request, p: Player) -> Response:
 
     # don't cache maps that doesn't have leaderboard
     if not b.approved & Approved.HAS_LEADERBOARD:
-        services.beatmaps.remove(b.hash_md5)
+        services.beatmaps.remove(b.map_md5)
 
         return Response(content=f"{b.approved.to_osu}|false".encode())
 
@@ -237,7 +237,7 @@ async def get_scores(req: Request, p: Player) -> Response:
         f"SELECT s.id as id_, u.username, CAST(s.{order} as INT) as score, s.submitted, s.max_combo, "
         "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
-        f"INNER JOIN users u ON u.id = s.user_id WHERE s.hash_md5 = '{hash}' "
+        f"INNER JOIN users u ON u.id = s.user_id WHERE s.map_md5 = '{hash}' "
         f"AND s.status = 3 AND u.privileges & 4 AND s.relax = {int(p.relax)} "
         f"AND mode = {mode} "
     )
@@ -261,8 +261,8 @@ async def get_scores(req: Request, p: Player) -> Response:
         f"SELECT s.id as id_, CAST(s.{order} as INT) as score, s.max_combo, "
         "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
-        "AND s.hash_md5 = %s AND s.relax = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
-        (b.hash_md5, p.relax, mode, p.id)
+        "AND s.map_md5 = %s AND s.relax = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
+        (b.map_md5, p.relax, mode, p.id)
     )
 
     if not personal_best:
@@ -270,13 +270,13 @@ async def get_scores(req: Request, p: Player) -> Response:
     else:
         pb_position = await services.sql.fetch(
             "SELECT COUNT(*) FROM scores s "
-            "INNER JOIN beatmaps b ON b.hash = s.hash_md5 "
+            "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
             f"WHERE s.{order} > {personal_best['score']} "
-            "AND s.relax = %s AND b.hash = %s  "
+            "AND s.relax = %s AND b.map_md5 = %s  "
             "AND u.privileges & 4 AND s.status = 3 "
             "AND s.mode = %s",
-            (p.relax, b.hash_md5, mode),
+            (p.relax, b.map_md5, mode),
             _dict=False
         )
 
@@ -351,8 +351,10 @@ async def score_submission(req: Request) -> Response:
         return Response(content=b"error: disabled")
 
     passed = s.status >= SubmitStatus.PASSED
-    s.play_time = form["st" if passed else "ft"]
+
+    s.playtime = int(form["st" if passed else "ft"]) // 1000  # milliseconds
     s.id = await s.save_to_db()
+    s.player.last_score = s
 
     if passed:
         stats = s.player
@@ -381,7 +383,7 @@ async def score_submission(req: Request) -> Response:
 
             await services.sql.execute(
                 "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
-                (s.map.plays, s.map.passes, s.map.hash_md5),
+                (s.map.plays, s.map.passes, s.map.map_md5),
             )
 
             stats.playcount += 1
@@ -570,7 +572,6 @@ async def score_submission(req: Request) -> Response:
                     )
                 )
 
-                stats.last_score = s
                 return Response(content="\n".join(ret).encode())
 
             return Response(content=b"error: no")

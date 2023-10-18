@@ -89,6 +89,9 @@ async def leaderboard(
     page: int = 1,
     order: str = "pp",
 ) -> JSONResponse:
+    if mode == Mode.MANIA and relax:
+        return error(400, "Mania doesn't exist on relax...")
+
     if page <= 0:
         page = 1
 
@@ -130,6 +133,9 @@ async def leaderboard(
 async def get_profile_stats(
     req: Request, /, id: int, mode: Mode = Mode.OSU, relax: bool = False
 ) -> ORJSONResponse:
+    if mode == Mode.MANIA and relax:
+        return error(400, "Mania doesn't exist on relax...")
+
     # get_offline always checks cache first
     p = await services.players.get_offline(id)
 
@@ -196,8 +202,8 @@ async def get_beatmapset(req: Request, /, sid: int) -> ORJSONResponse:
         return error(204, f"No beatmap with map id {sid} found")
 
     data = {
-        "map_id": bid,
-        "set_id": bmap.set_id,
+        "map_id": bmap.map_id,
+        "set_id": sid,
         "map_md5": bmap.map_md5,
         "title": bmap.title,
         "artist": bmap.artist,

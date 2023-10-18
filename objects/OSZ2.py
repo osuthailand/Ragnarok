@@ -6,7 +6,8 @@ import hashlib
 import math
 import os
 
-# from pep272_encryption import MODE_ECB
+import io # test
+from packets import writer #test 2
 
 from packets.reader import Reader
 from datetime import datetime
@@ -199,6 +200,26 @@ def generate_known_plain() -> bytearray:
 
     return b
 
+#Just a wrapper class that logs all operations.
+class BytesIOWrapper(io.BytesIO):
+    def read(self, __size: int | None = None) -> bytes:
+        logging.debug(f"Reading {__size} bytes")
+        return super().read(__size)
+
+    def write(self, __buffer) -> int:
+        logging.debug(f"Writing {len(__buffer)} bytes")
+        return super().write(__buffer)
+
+    def seek(self, __offset: int, __whence: int = 0) -> int:
+        logging.debug(f"Seeking by {__offset} from {__whence}")
+        newPos = super().seek(__offset, __whence)
+        logging.debug(f"Seeked to {newPos}")
+        return newPos
+
+    def tell(self) -> int:
+        curPos = super().tell()
+        logging.debug(f"Telling current position: {curPos}")
+        return curPos
 
 class OSZ2:
     def __init__(self) -> None:
@@ -206,6 +227,7 @@ class OSZ2:
         self.files: FileInfo
 
         self._raw: bytes = b""
+        self.bwriter = BytesIOWrapper()  # Create an instance of BytesIOWrapper
 
     @classmethod
     def parse(cls, filepath: str = "", raw: bytes = b"") -> "OSZ2":
@@ -232,13 +254,21 @@ class OSZ2:
         oszhash_file = reader.read_bytes(16)
         oszhash_data = reader.read_bytes(16)
 
+        #save into block
+        metadata_entries_bytes = reader.read_bytes(4)
+        self.bwriter.write(metadata_entries_bytes)
+
         # metadata block
-        metadata_entries = reader.read_int32()
+        #metadata_entries = reader.read_int32()
+        metadata_entries = int.from_bytes(metadata_entries_bytes, byteorder='little')
 
         metadata_info = []
         for _ in range(metadata_entries):
-            type = reader.read_int16()
+            #type = reader.read_int16()
+            type_bytes = reader.read_bytes(2)
             value = reader.read_str(retarded=True)
+
+            type = int.from_bytes(type_bytes, byteorder='little')
 
             match MetadataType(type):
                 case MetadataType.Creator:
@@ -255,6 +285,15 @@ class OSZ2:
 
                 case MetadataType.BeatmapSetID:
                     c.metadata.set_id = int(value)
+
+            self.bwriter.write(type_bytes)
+            self.bwriter.write(write_str(value))
+
+        with bwriter.getbuffer() as buffer:
+            hash = compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
+            print(hash)
+            if hash_bytes != oszhash_meta:
+                log.fail("bad hashes")
 
         # can't check hash because i dont know how to make this block into bytes array :(
         # hash_bytes = c.compute_osz_hash(writer.getvalue(), metadata_entries * 3, 0xA7)

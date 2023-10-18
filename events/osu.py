@@ -132,7 +132,13 @@ async def registration(req: Request) -> Response:
     # TODO: website registration config
     if services.osu_settings["allow_game_registration"]["boolean_value"]:
         # osu! will attempt to go to https://url?username={username}&email={email}
-        return general.ORJSONResponse(status_code=403, content={"error": "please register from Rina website", "url": f"https:\/\/{services.domain}\/register"})
+        return general.ORJSONResponse(
+            status_code=403,
+            content={
+                "error": "please register from Rina website",
+                "url": f"https:\/\/{services.domain}\/register",
+            },
+        )
 
     if form["check"] == "0":
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
@@ -248,7 +254,7 @@ async def get_scores(req: Request, p: Player) -> Response:
         case LeaderboardType.MODS:
             query += f"AND mods = {mods} "
         case LeaderboardType.COUNTRY:
-            query += f"AND u.country = {p.country} "
+            query += f"AND u.country = '{p.country}' "
         case LeaderboardType.FRIENDS:
             # this is absolutely so fucking ugly
             # but i dont know what else works rn
@@ -262,7 +268,7 @@ async def get_scores(req: Request, p: Player) -> Response:
         "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
         "AND s.map_md5 = %s AND s.relax = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
-        (b.map_md5, p.relax, mode, p.id)
+        (b.map_md5, p.relax, mode, p.id),
     )
 
     if not personal_best:
@@ -277,22 +283,27 @@ async def get_scores(req: Request, p: Player) -> Response:
             "AND u.privileges & 4 AND s.status = 3 "
             "AND s.mode = %s",
             (p.relax, b.map_md5, mode),
-            _dict=False
+            _dict=False,
         )
 
         if pb_position:
-            ret.append(SCORES_FORMAT.format(**personal_best,
-                                            user_id=p.id, username=p.username, position=pb_position[0] + 1))  # type: ignore
+            ret.append(
+                SCORES_FORMAT.format(
+                    **personal_best,
+                    user_id=p.id,
+                    username=p.username,
+                    position=pb_position[0] + 1,
+                )
+            )  # type: ignore
 
     top_scores = await services.sql.fetchall(query, _dict=True)
 
-    ret.extend([
-        SCORES_FORMAT.format(
-            **score,
-            position=idx + 1
-        )
-        for idx, score in enumerate(top_scores)
-    ])
+    ret.extend(
+        [
+            SCORES_FORMAT.format(**score, position=idx + 1)
+            for idx, score in enumerate(top_scores)
+        ]
+    )
 
     asyncio.create_task(save_beatmap_file(b.map_id))
 
@@ -336,12 +347,7 @@ async def score_submission(req: Request) -> Response:
         int(form["x"]),
     )
 
-    if (
-        not s or
-        not s.player or
-        not s.map or
-        s.player.is_restricted
-    ):
+    if not s or not s.player or not s.map or s.player.is_restricted:
         return Response(content=b"error: no")
 
     if not s.player.privileges & Privileges.VERIFIED:
@@ -382,7 +388,7 @@ async def score_submission(req: Request) -> Response:
                 return Response(content=b"error: invalid")
 
             await services.sql.execute(
-                "UPDATE beatmaps SET plays = %s, passes = %s WHERE hash = %s",
+                "UPDATE beatmaps SET plays = %s, passes = %s WHERE map_md5 = %s",
                 (s.map.plays, s.map.passes, s.map.map_md5),
             )
 
@@ -400,13 +406,16 @@ async def score_submission(req: Request) -> Response:
                 scores = await services.sql.fetchall(
                     "SELECT pp, accuracy FROM scores "
                     "WHERE user_id = %s AND mode = %s "
-                    "AND status = 3 AND relax = %s",
+                    "AND status = 3 AND relax = %s "
+                    "ORDER BY pp DESC",
                     (stats.id, s.mode.value, s.relax),
                 )
 
-                avg_accuracy = np.array([x[1] for x in scores])
-
-                stats.accuracy = float(np.mean(avg_accuracy))
+                stats.accuracy = np.sum(
+                    [score[1] * 0.95**place for place, score in enumerate(scores)]
+                )
+                stats.accuracy *= 100 / (20 * (1 - 0.95 ** len(scores)))
+                stats.accuracy /= 100
 
                 if s.map.approved & Approved.AWARDS_PP:
                     weighted = np.sum(
@@ -482,18 +491,12 @@ async def score_submission(req: Request) -> Response:
                             "chartName:Beatmap Ranking",
                             *(
                                 (
-                                    Beatmap.add_chart(
-                                        "rank", after=s.position),
-                                    Beatmap.add_chart(
-                                        "accuracy", after=s.accuracy),
-                                    Beatmap.add_chart(
-                                        "maxCombo", after=s.max_combo),
-                                    Beatmap.add_chart(
-                                        "rankedScore", after=s.score),
-                                    Beatmap.add_chart(
-                                        "totalScore", after=s.score),
-                                    Beatmap.add_chart(
-                                        "pp", after=math.ceil(s.pp)),
+                                    Beatmap.add_chart("rank", after=s.position),
+                                    Beatmap.add_chart("accuracy", after=s.accuracy),
+                                    Beatmap.add_chart("maxCombo", after=s.max_combo),
+                                    Beatmap.add_chart("rankedScore", after=s.score),
+                                    Beatmap.add_chart("totalScore", after=s.score),
+                                    Beatmap.add_chart("pp", after=math.ceil(s.pp)),
                                 )
                                 if not s.pb
                                 else (
@@ -513,8 +516,7 @@ async def score_submission(req: Request) -> Response:
                                         "totalScore", s.pb.score, s.score
                                     ),
                                     Beatmap.add_chart(
-                                        "pp", math.ceil(
-                                            s.pb.pp), math.ceil(s.pp)
+                                        "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
                                     ),
                                 )
                             ),
@@ -531,10 +533,8 @@ async def score_submission(req: Request) -> Response:
                             "chartName:Overall Ranking",
                             *(
                                 (
-                                    Beatmap.add_chart(
-                                        "rank", after=stats.rank),
-                                    Beatmap.add_chart(
-                                        "accuracy", after=stats.accuracy),
+                                    Beatmap.add_chart("rank", after=stats.rank),
+                                    Beatmap.add_chart("accuracy", after=stats.accuracy),
                                     Beatmap.add_chart("maxCombo", after=0),
                                     Beatmap.add_chart(
                                         "rankedScore", prev=stats.ranked_score
@@ -563,8 +563,7 @@ async def score_submission(req: Request) -> Response:
                                         prev_stats.total_score,
                                         stats.total_score,
                                     ),
-                                    Beatmap.add_chart(
-                                        "pp", prev_stats.pp, stats.pp),
+                                    Beatmap.add_chart("pp", prev_stats.pp, stats.pp),
                                 )
                             ),
                             f"achievements-new:{achievements}",
@@ -582,7 +581,7 @@ async def score_submission(req: Request) -> Response:
 @osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
 async def get_replay(req: Request, p: Player) -> Response:
-    if not os.path.isfile((path := f".data/replays/{req.query_params['c']}.osr")):
+    if not os.path.isfile(path := f".data/replays/{req.query_params['c']}.osr"):
         log.info(
             f"Replay ID {req.query_params['c']} cannot be loaded! (File not found?)"
         )
@@ -626,7 +625,11 @@ async def get_seasonal(req: Request) -> Response:
     # hmmm... it seems like there's nothing special yet
     # TODO: make a config file for this?
     log.debug("getting seasonal background")
-    return general.ORJSONResponse(["https://steamuserimages-a.akamaihd.net/ugc/1756934458426121120/870EB09212BCB5CC5FEFA9619BE83242DAECE498/?imw=637&imh=358&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=true"])
+    return general.ORJSONResponse(
+        [
+            "https://steamuserimages-a.akamaihd.net/ugc/1756934458426121120/870EB09212BCB5CC5FEFA9619BE83242DAECE498/?imw=637&imh=358&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=true"
+        ]
+    )
 
 
 @osu.route("/web/osu-error.php", methods=["POST"])
@@ -657,7 +660,7 @@ async def post_screenshot(req: Request, p: Player) -> Response:
 
 @osu.route("/ss/{ssid:str}.png")
 async def get_screenshot(req: Request) -> FileResponse | Response:
-    if os.path.isfile((path := f".data/ss/{req.path_params['ssid']}.png")):
+    if os.path.isfile(path := f".data/ss/{req.path_params['ssid']}.png"):
         return FileResponse(path=path)
 
     return Response(content=b"no screenshot with that id.")
@@ -731,7 +734,7 @@ async def osu_direct(req: Request, p: Player) -> Response:
                     else:
                         directList += "\n"
 
-    return Response(content=str(bmCount).encode() + "\n".encode() + directList.encode())
+    return Response(content=str(bmCount).encode() + b"\n" + directList.encode())
 
 
 @osu.route("/web/osu-search-set.php")
@@ -749,8 +752,7 @@ async def osu_search_set(req: Request, p: Player) -> Response:
             bmap = None
 
     if not bmap:  # if beatmap doesn't exists in db then fetch!
-        log.fail(
-            "/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
+        log.fail("/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
         return Response(content=b"xoxo gossip girl")
 
     return Response(

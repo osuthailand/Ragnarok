@@ -91,13 +91,17 @@ class Beatmap:
         return f"{name}Before:{prev if prev else ''}|{name}After:{after}"
 
     @classmethod
-    async def _get_beatmap_from_sql(cls, hash: str, beatmap_id: int, set_id: int) -> "Beatmap":
+    async def _get_beatmap_from_sql(
+        cls, hash: str, beatmap_id: int, set_id: int
+    ) -> "Beatmap":
         b = cls()
 
         params = (
-            ("set_id", set_id) if set_id else
-            ("map_md5", hash) if hash else
-            ("map_id", beatmap_id)
+            ("set_id", set_id)
+            if set_id
+            else ("map_md5", hash)
+            if hash
+            else ("map_id", beatmap_id)
         )
 
         ret = await services.sql.fetch(
@@ -174,15 +178,19 @@ class Beatmap:
         log.info(f"Saved {self.full_title} ({self.map_md5}) into database")
 
     @classmethod
-    async def _get_beatmap_from_osuapi(cls, hash: str, beatmap_id: int, set_id: int) -> "Beatmap":
+    async def _get_beatmap_from_osuapi(
+        cls, hash: str, beatmap_id: int, set_id: int
+    ) -> "Beatmap":
         b = cls()
 
         async with aiohttp.ClientSession() as session:
             # get the beatmap with its hash
             params = (
-                ("s", set_id) if set_id else
-                ("b", beatmap_id) if beatmap_id else
-                ("h", hash)
+                ("s", set_id)
+                if set_id
+                else ("b", beatmap_id)
+                if beatmap_id
+                else ("h", hash)
             )
 
             async with session.get(
@@ -251,11 +259,15 @@ class Beatmap:
         return b
 
     @classmethod
-    async def get_beatmap(cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0) -> "Beatmap":
+    async def get_beatmap(
+        cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0
+    ) -> "Beatmap":
         self = cls()  # trollface
 
         if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id, set_id)):
-            if not (ret := await self._get_beatmap_from_osuapi(hash, beatmap_id, set_id)):
+            if not (
+                ret := await self._get_beatmap_from_osuapi(hash, beatmap_id, set_id)
+            ):
                 return
 
         return ret

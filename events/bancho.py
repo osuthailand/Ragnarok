@@ -31,15 +31,14 @@ from starlette.requests import Request, ClientDisconnect
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
         services.packets |= {
-            packet.value: Packet(
-                packet=packet, callback=cb, restricted=restricted)
+            packet.value: Packet(packet=packet, callback=cb, restricted=restricted)
         }
 
     return decorator
 
 
 bancho = Router()
-IGNORED_PACKETS = (79)
+IGNORED_PACKETS = 79
 
 
 @bancho.route("/", methods=["POST", "GET"])
@@ -214,10 +213,7 @@ async def login(req: Request) -> Response:
             reciever=p,
         )
 
-    if (
-        not (user_info["lon"] or user_info["lat"])
-        or user_info["country"] == "XX"
-    ):
+    if not (user_info["lon"] or user_info["lat"]) or user_info["country"] == "XX":
         await p.set_location()
         await p.save_location()
 
@@ -229,7 +225,8 @@ async def login(req: Request) -> Response:
     if services.osu_settings["osu_menu_icon"]["boolean_value"]:
         data += await writer.MainMenuIcon(
             image_url=services.osu_settings["osu_menu_icon"]["string_value"],
-            url=f"https://{services.domain}")
+            url=f"https://{services.domain}",
+        )
 
     data += await writer.FriendsList(*p.friends)
     data += await writer.UserPresence(p, spoof=True)
@@ -269,7 +266,9 @@ async def login(req: Request) -> Response:
 
     if services.osu_settings["welcome_message"]["boolean_value"]:
         # maybe add formatting to message?
-        data += await writer.Notification(services.osu_settings["welcome_message"]["string_value"])
+        data += await writer.Notification(
+            services.osu_settings["welcome_message"]["string_value"]
+        )
 
     data += await writer.Notification(f"Authorization took {et:.2f} ms.")
 
@@ -410,10 +409,7 @@ async def spectating_frames(p: Player, sr: Reader) -> None:
     frame = sr.read_raw()
 
     # packing manually seems to be faster, so let's use that.
-    data = (
-        struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame))
-        + frame
-    )
+    data = struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame)) + frame
 
     for t in p.spectators:
         t.enqueue(data)
@@ -631,8 +627,7 @@ async def mp_start(p: Player, sr: Reader) -> None:
         return
 
     if p.id != m.host:
-        log.warn(
-            f"{p.username} tried to start the match, while not being the host.")
+        log.warn(f"{p.username} tried to start the match, while not being the host.")
         return
 
     for slot in m.slots:
@@ -684,8 +679,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
     slot_id = m.find_user_slot(p)
 
     if services.debug:
-        log.debug(
-            f"{p.username} has slot id {slot_id} and has incoming score update.")
+        log.debug(f"{p.username} has slot id {slot_id} and has incoming score update.")
 
     m.enqueue(await writer.MatchScoreUpdate(s, slot_id, raw))
 
@@ -889,9 +883,8 @@ async def remove_friend(p: Player, sr: Reader) -> None:
 async def add_friend(p: Player, sr: Reader) -> None:
     await p.handle_friend(sr.read_int32())
 
+
 # id: 77
-
-
 @register_event(BanchoPackets.OSU_MATCH_CHANGE_TEAM)
 async def mp_change_team(p: Player, sr: Reader) -> None:
     if not (m := p.match) or m.in_progress:
@@ -932,8 +925,7 @@ async def leave_osu_channel(p: Player, sr: Reader) -> None:
     #     _chan = p.match.chat._name
 
     if not (chan := services.channels.get(_chan)):
-        log.warn(
-            f"{p.username} tried to part from {_chan}, but channel doesn't exist.")
+        log.warn(f"{p.username} tried to part from {_chan}, but channel doesn't exist.")
         return
 
     if not chan.is_dm:

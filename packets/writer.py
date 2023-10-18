@@ -325,7 +325,7 @@ async def ChanAutoJoin(chan: str) -> bytes:
 
 async def ChanInfo(name: str) -> bytes:
     if not (c := services.channels.get(name)):
-        return bytes()
+        return b''
 
     return await write(
         BanchoPackets.CHO_CHANNEL_INFO,

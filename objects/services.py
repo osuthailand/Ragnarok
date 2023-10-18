@@ -39,9 +39,9 @@ title_card: str = '''
                     o . o o.o
                         ...oo.
                    ________[]_
-            _______|_o_o_o_o_o\___
+            _______|_o_o_o_o_o\\___
             \\""""""""""""""""""""/
-             \ ...  .    . ..  ./
+             \\ ...  .    . ..  ./
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 osu!ragnarok, an osu!bancho & /web/ emulator.
 Authored by Simon & Aoba

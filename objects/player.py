@@ -166,15 +166,18 @@ class Player:
 
         # fake channel to make client aware of #spectator
         generic_spectator_chat = Channel(
-            **{"name": "#spectator", "public": False, "auto_join": True})
+            **{"name": "#spectator", "public": False, "auto_join": True}
+        )
         spec_channel = services.channels.get(spec_name)
 
         if not spec_channel:
-            spec_channel = services.channels.add({
-                "name": spec_name,
-                "description": f"spectator chat for {self.username}",
-                "public": False,
-            })
+            spec_channel = services.channels.add(
+                {
+                    "name": spec_name,
+                    "description": f"spectator chat for {self.username}",
+                    "public": False,
+                }
+            )
 
             await self.join_channel(generic_spectator_chat)
             await self.join_channel(spec_channel)
@@ -390,10 +393,15 @@ class Player:
         )
 
         # remove player from leaderboards
-        for rv in ("_rx", ""):
+        for mod in ("relax", "vanilla"):
             for mode in Mode:
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard{rv}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{mod}:{mode.value}", self.id
+                )
+
+                # country rank
+                await services.redis.zrem(
+                    f"ragnarok:leaderboard:{mod}:{self.country}:{mode.value}", self.id
                 )
 
         # notify user
@@ -491,29 +499,46 @@ class Player:
         se = ("std", "taiko", "catch", "mania")[mode]
 
         ret = await services.sql.fetch(
-            f"SELECT ranked_score_{se} AS ranked_score, "
-            f"total_score_{se} AS total_score, accuracy_{se} AS accuracy, "
-            f"playcount_{se} AS playcount, pp_{se} AS pp, "
-            f"level_{se} AS level FROM {table} "
+            f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
+            f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
+            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
+            f" FROM {table} "
             "WHERE id = %s",
             (self.id),
         )
 
         ret["rank"] = await self.get_rank(relax, mode)
+        ret["country_rank"] = await self.get_country_rank(relax, mode)
 
         return ret
 
     async def get_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
+        mod = "relax" if relax else "vanilla"
         _rank: int = await services.redis.zrevrank(
-            f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode.value}",
+            f"ragnarok:leaderboard:{mod}:{mode}",
+            str(self.id),
+        )
+        return _rank + 1 if _rank is not None else 0
+
+    async def get_country_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
+        mod = "relax" if relax else "vanilla"
+        _rank: int = await services.redis.zrevrank(
+            f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
             str(self.id),
         )
         return _rank + 1 if _rank is not None else 0
 
     async def update_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
         if not self.is_restricted:
+            mod = "relax" if relax else "vanilla"
             await services.redis.zadd(
-                f"ragnarok:{'leaderboard' if not relax else 'leaderboard_rx'}:{mode}",
+                f"ragnarok:leaderboard:{mod}:{mode}",
+                {str(self.id): self.pp},
+            )
+
+            # country rank
+            await services.redis.zadd(
+                f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
                 {str(self.id): self.pp},
             )
 

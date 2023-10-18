@@ -11,7 +11,7 @@ from objects import services
 
 @osu.route("/web/osu-osz2-bmsubmit-getid.php")
 @check_auth(
-    "u", "h", custom_resp=b"5\nAuthentication failure. Please check your login details."
+    "u", "h", custom_resp="5\nAuthentication failure. Please check your login details."
 )
 async def get_last_id(req: Request) -> Response:
     # arguments:

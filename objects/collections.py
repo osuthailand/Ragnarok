@@ -47,7 +47,7 @@ class Tokens:
 
     async def from_sql_by_name(self, value: str | int) -> Player | None:
         data = await services.sql.fetch(
-            "SELECT username, id, privileges, passhash FROM users "
+            "SELECT username, id, privileges, passhash, country FROM users "
             "WHERE (username = %s OR safe_username = %s)",
             (value, value),
         )
@@ -61,7 +61,8 @@ class Tokens:
 
     async def from_sql_by_id(self, value: str | int) -> Player | None:
         data = await services.sql.fetch(
-            "SELECT username, id, privileges, passhash FROM users " "WHERE id = %s",
+            "SELECT username, id, privileges, passhash, country FROM users "
+            "WHERE id = %s",
             (value),
         )
 
@@ -134,11 +135,6 @@ class Beatmaps:
     def remove(self, map_md5: str) -> None:
         if map_md5 in self.beatmaps:
             self.beatmaps.pop(map_md5)
-
-    # is this really needed, when ``get()`` already saves the beatmap?
-    def add(self, map_md5: str, b: Beatmap) -> None:
-        # even if it gets added again, it'll overwrite the current save
-        self.beatmaps[map_md5] = b
 
     async def get(self, map_md5: str) -> Beatmap | None:
         if map_md5 in self.beatmaps:

@@ -43,12 +43,12 @@ class Mode(IntEnum):
     def to_db(self, s: str) -> str:
         match self.name:
             case "OSU":
-                return s + "_std"
+                return s + "_std as " + s
             case "TAIKO":
-                return s + "_taiko"
+                return s + "_taiko as " + s
             case "CATCH":
-                return s + "_catch"
+                return s + "_catch as " + s
             case "MANIA":
-                return s + "_mania"
+                return s + "_mania as " + s
             case _:
                 return "undefined"

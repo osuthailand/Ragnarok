@@ -12,7 +12,7 @@ from rina_pp_pyb import Calculator, Beatmap as BMap
 from constants.mods import Mods
 from objects.player import Player
 from objects.beatmap import Beatmap
-from constants.playmode import Mode
+from constants.playmode import Gamemode, Mode
 from constants.playmode import Mode
 from constants.beatmap import Approved
 from py3rijndael.rijndael import RijndaelCbc
@@ -69,6 +69,7 @@ class Score:
         self.count_katu: int = 0
         self.count_miss: int = 0
 
+        self.total_hits: int = 0
         self.max_combo: int = 0
         self.accuracy: float = 0.0
 
@@ -85,17 +86,19 @@ class Score:
 
         self.submitted: int = math.ceil(time.time())
 
-        self.relax: bool = False
+        self.gamemode: Gamemode = Gamemode.VANILLA
 
         self.position: int = 0
 
         # previous_best
         self.pb: "Score" = None  # type: ignore
 
+        self._awards_pp: bool = False
+
     @property
     def web_format(self) -> str:
         return (
-            f"\n{self.id}|{self.player.username}|{self.score if not self.relax else math.ceil(self.pp)}|"
+            f"\n{self.id}|{self.player.username}|{self.score if self.gamemode == Gamemode.VANILLA else math.ceil(self.pp)}|"
             f"{self.max_combo}|{self.count_50}|{self.count_100}|{self.count_300}|{self.count_miss}|"
             f"{self.count_katu}|{self.count_geki}|{self.perfect}|{self.mods}|{self.player.id}|"
             f"{self.position}|{self.submitted}|1"
@@ -117,6 +120,8 @@ class Score:
         s.count_katu = data["count_katu"]
         s.count_miss = data["count_miss"]
 
+        s.total_hits = s.count_300 + s.count_100 + s.count_50
+
         s.max_combo = data["max_combo"]
         s.accuracy = data["accuracy"]
 
@@ -132,7 +137,7 @@ class Score:
 
         s.submitted = data["submitted"]
 
-        s.relax = data["relax"]
+        s.gamemode = Gamemode(data["gamemode"])
 
         return s
 
@@ -190,6 +195,8 @@ class Score:
             s.count_miss,
         )
 
+        s.total_hits = s.count_300 + s.count_100 + s.count_50
+
         s.perfect = s.max_combo == s.map.max_combo
 
         s.rank = data[12]
@@ -200,17 +207,19 @@ class Score:
         if exited:
             s.status = SubmitStatus.QUIT
 
-        s.relax = bool(int(data[13]) & Mods.RELAX)
+        mods = int(data[13])
+        s.gamemode = (
+            Gamemode.RELAX
+            if mods & Mods.RELAX
+            else Gamemode.AUTOPILOT
+            if mods & Mods.AUTOPILOT
+            else Gamemode.VANILLA
+        )
 
         if passed:
             await s.calculate_position()
 
-            if s.map.approved not in (
-                Approved.LOVED,
-                Approved.PENDING,
-                Approved.WIP,
-                Approved.GRAVEYARD,
-            ):
+            if s.map.approved & Approved.HAS_LEADERBOARD:
                 bmap = BMap(path=f".data/beatmaps/{s.map.file}")
 
                 calc = Calculator(
@@ -230,15 +239,17 @@ class Score:
                 if math.isnan(s.pp) or math.isinf(s.pp):
                     s.pp = 0
 
+                s._awards_pp = s.map.approved & Approved.AWARDS_PP
+
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(
                 "SELECT id, user_id, map_md5, score, pp, count_300, count_100, "
                 "count_50, count_geki, count_katu, count_miss, "
                 "max_combo, accuracy, perfect, rank, mods, status, "
-                "playtime, mode, submitted, relax FROM scores "
-                "WHERE user_id = %s AND relax = %s AND map_md5 = %s "
+                "playtime, mode, submitted, gamemode FROM scores "
+                "WHERE user_id = %s AND gamemode = %s AND map_md5 = %s "
                 "AND mode = %s AND status = 3 LIMIT 1",
-                (s.player.id, s.relax, s.map.map_md5, s.mode.value),
+                (s.player.id, s.gamemode, s.map.map_md5, s.mode.value),
             ):
                 s.pb = await Score.set_data_from_sql(prev_best)
 
@@ -247,25 +258,29 @@ class Score:
                     "SELECT COUNT(*) AS rank FROM scores s "
                     "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
                     "INNER JOIN users u ON u.id = s.user_id "
-                    "WHERE s.score > %s AND s.relax = %s "
+                    "WHERE s.score > %s AND s.gamemode = %s "
                     "AND b.map_md5 = %s AND u.privileges & 4 "
                     "AND s.status = 3 AND s.mode = %s "
                     "ORDER BY s.score DESC, s.submitted DESC",
-                    (s.pb.score, s.pb.relax, s.map.map_md5, s.pb.mode.value),
+                    (s.pb.score, s.pb.gamemode, s.map.map_md5, s.pb.mode.value),
                 )
                 s.pb.position = position["rank"] + 1
 
                 # if we found a personal best score
                 # that has more score on the map,
                 # we set it to passed.
-                if s.pb.pp < s.pp if s.relax else s.pb.score < s.score:
+                if (
+                    s.pb.pp < s.pp
+                    if s.gamemode != Gamemode.VANILLA
+                    else s.pb.score < s.score
+                ):
                     s.status = SubmitStatus.BEST
                     s.pb.status = SubmitStatus.PASSED
 
                     await services.sql.execute(
-                        "UPDATE scores SET status = 2 WHERE user_id = %s AND relax = %s "
+                        "UPDATE scores SET status = 2 WHERE user_id = %s AND gamemode = %s "
                         "AND map_md5 = %s AND mode = %s AND status = 3",
-                        (s.player.id, s.relax, s.map.map_md5, s.mode.value),
+                        (s.player.id, s.gamemode, s.map.map_md5, s.mode.value),
                     )
                 else:
                     s.status = SubmitStatus.PASSED
@@ -304,11 +319,11 @@ class Score:
             "SELECT COUNT(*) AS rank FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
-            "WHERE s.score > %s AND s.relax = %s "
+            "WHERE s.score > %s AND s.gamemode = %s "
             "AND b.map_md5 = %s AND u.privileges & 4 "
             "AND s.status = 3 AND s.mode = %s "
             "ORDER BY s.score DESC, s.submitted DESC",
-            (self.score, self.relax, self.map.map_md5, self.mode.value),
+            (self.score, self.gamemode, self.map.map_md5, self.mode.value),
         )
 
         self.position = ret["rank"] + 1
@@ -319,9 +334,9 @@ class Score:
             "count_300, count_100, count_50, count_geki, "
             "count_katu, count_miss, max_combo, accuracy, "
             "perfect, rank, mods, status, playtime, "
-            " mode, submitted, relax) VALUES "
+            " mode, submitted, gamemode, awards_pp) VALUES "
             "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s, %s, %s, %s, %s)",
+            "%s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 self.map.map_md5,
                 self.player.id,
@@ -342,6 +357,7 @@ class Score:
                 self.playtime,
                 self.mode.value,
                 self.submitted,
-                self.relax,
+                self.gamemode.value,
+                self._awards_pp,
             ),
         )

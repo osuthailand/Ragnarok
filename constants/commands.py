@@ -145,6 +145,7 @@ def ensure_player(cb: Callable) -> Callable:
 
     return wrapper
 
+
 #
 # Normal user commands
 #
@@ -195,33 +196,6 @@ async def roll(ctx: Context) -> str | None:
     return f"{ctx.author.username} rolled {random.randint(0, x)} point(s)"
 
 
-# rewrite this
-@register_command("stats", category="Player")
-async def user_stats(ctx: Context) -> str | None:
-    """Display a users stats both vanilla or relax."""
-
-    if len(ctx.args) < 1:
-        return "Usage: !stats <username>"
-
-    if not (t := await services.players.get_offline(ctx.args[0])):
-        return "Player isn't online or couldn't be found in the database"
-
-    relax = 0
-
-    if len(ctx.args) == 2:
-        if ctx.args[1] == "rx":
-            relax = 1
-
-    ret = await t.get_stats(relax)
-
-    return (
-        f"Stats for {t.username}:\n"
-        f"PP: {ret['pp']} (#{ret['rank']})\n"
-        f"Plays: {ret['playcount']} (lv{ret['level']})\n"
-        f"Accuracy: {ret['level']}%"
-    )
-
-
 @register_command(
     "verify", category="Player", hidden=True, required_perms=Privileges.PENDING
 )
@@ -238,8 +212,7 @@ async def verify_with_key(ctx: Context) -> str | None:
 
     if not (
         key_info := await services.sql.fetch(
-            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (
-                key)
+            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (key)
         )
     ):
         return "Invalid key"
@@ -252,8 +225,7 @@ async def verify_with_key(ctx: Context) -> str | None:
     )
 
     asyncio.create_task(
-        services.sql.execute(
-            "DELETE FROM beta_keys WHERE id = %s", key_info["id"])
+        services.sql.execute("DELETE FROM beta_keys WHERE id = %s", key_info["id"])
     )
 
     ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
@@ -266,8 +238,7 @@ async def verify_with_key(ctx: Context) -> str | None:
         )
     )
 
-    log.info(
-        f"{ctx.author.username} successfully verified their account with a key")
+    log.info(f"{ctx.author.username} successfully verified their account with a key")
 
     return "Successfully verified your account."
 
@@ -283,7 +254,7 @@ class PPBuilder:
     def message(self, calculator: Calculator, bmap: BMap):
         if not self.accuracy and not (self.x100 or self.x50):
             pp_values = []
-            for acc in range(95, 101):
+            for acc in (95, 98, 99, 100):
                 calculator.set_acc(acc)
                 pp = calculator.performance(bmap).pp
                 pp_values.append(f"{acc}%: {pp:.2f}pp")
@@ -344,7 +315,14 @@ def pp_message_format(
 @register_command("pp", category="Tillerino-like")
 async def calc_pp_for_map(ctx: Context) -> str | None:
     """Show PP for the previous requested beatmap with requested info (Don't use spaces for multiple mods (eg: !pp +HDHR))"""
-    if not (_map := ctx.author.last_np):
+    executed_from_match = False
+    if "[MULTI]" in ctx.args and ctx.author.match:
+        executed_from_match = True
+        _map = ctx.author.match.map
+    else:
+        _map = ctx.author.last_np
+
+    if not _map:
         return "Please /np a map first."
 
     if not ctx.args:
@@ -359,32 +337,33 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
     if mode == Mode.OSU and mode != ctx.author.play_mode:
         mode = ctx.author.play_mode
 
-    calc = Calculator(
-        mode=mode
-    )
+    calc = Calculator(mode=mode)
 
     pp_builder = PPBuilder()
     mods = Mods.NONE
 
     # maybe regex would be better to use for this case?
-    for arg in ctx.args:
-        if arg.startswith("+"):
-            mods = Mods.from_str(arg[1:])
+    if executed_from_match:
+        mods = ctx.author.match.mods
+    else:
+        for arg in ctx.args:
+            if arg.startswith("+"):
+                mods = Mods.from_str(arg[1:])
 
-        elif arg.endswith("%"):
-            pp_builder.accuracy = float(arg[:-1])
+            elif arg.endswith("%"):
+                pp_builder.accuracy = float(arg[:-1])
 
-        elif arg.endswith("x"):
-            pp_builder.combo = int(arg[:-1])
+            elif arg.endswith("x"):
+                pp_builder.combo = int(arg[:-1])
 
-        elif arg.endswith("x100"):
-            pp_builder.x100 = int(arg[:-4])
+            elif arg.endswith("x100"):
+                pp_builder.x100 = int(arg[:-4])
 
-        elif arg.endswith("x50"):
-            pp_builder.x50 = int(arg[:-3])
+            elif arg.endswith("x50"):
+                pp_builder.x50 = int(arg[:-3])
 
-        elif arg.endswith("m"):
-            pp_builder.misses = int(arg[:-1])
+            elif arg.endswith("m"):
+                pp_builder.misses = int(arg[:-1])
 
     return pp_message_format(bmap, _map, pp_builder, calc, mods)
 
@@ -400,8 +379,7 @@ async def last_score(ctx: Context) -> str:
     bmap = score.map
 
     initial_response = (
-        bmap.embed +
-        f"{Mods(score.mods).short_name if score.mods else ''} "
+        bmap.embed + f"{Mods(score.mods).short_name if score.mods else ''} "
         f"({score.accuracy:.2f}%, {score.rank}) "
         f"{score.max_combo}x/{bmap.max_combo}x | "
         # TODO: difficulty changing mods changes stars
@@ -413,14 +391,16 @@ async def last_score(ctx: Context) -> str:
 
     return initial_response
 
+
 #
 # Multiplayer commands
 #
 
 
 def ensure_match(host: bool):
-    """ Ensures that the command is being executed in a multiplayer match 
+    """Ensures that the command is being executed in a multiplayer match
     also gives the user the option to make the command only executable by the host"""
+
     def decorator(cb: Callable) -> Callable:
         @wraps(cb)
         async def wrapper(ctx: Context, *args, **kwargs):
@@ -428,7 +408,9 @@ def ensure_match(host: bool):
                 if not ctx.reciever.is_multi:
                     return "This command can only be performed in a multiplayer match"
 
-                if host and ctx.author.match.host != ctx.author.id:
+                if (
+                    host and ctx.author.match.host != ctx.author.id
+                ) or not ctx.author.privileges & Privileges.MODERATOR:
                     return "Only the host can perform this command."
 
                 return await cb(ctx, *args, **kwargs)
@@ -699,6 +681,32 @@ async def invite_people(ctx: Context) -> str | None:
     return f"Invited {target.username}"
 
 
+@rmp_command("host")
+@ensure_match(host=True)
+async def change_host(ctx: Context) -> str | None:
+    m = ctx.author.match
+
+    if not ctx.args:
+        await ctx.reciever.send(
+            message="Who do you want to invite?", sender=services.bot
+        )
+
+        response = await ctx.await_response()
+
+        if not (target := services.players.get(response)):
+            return "The user either is not online or doesn't exist."
+    else:
+        if not (target := services.players.get(ctx.args[0])):
+            return "The user either is not online or doesn't exist."
+
+    target_slot = m.find_user(target)
+
+    if not target_slot:
+        return "The user isn't in your match."
+
+    await m.transfer_host(target_slot)
+
+
 #
 # Staff commands
 #
@@ -769,8 +777,7 @@ async def restrict_user(ctx: Context) -> str | None:
 
     asyncio.create_task(
         services.sql.execute(
-            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (
-                t.id)
+            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (t.id)
         )
     )
 
@@ -915,7 +922,7 @@ async def recalc_scores(ctx: Context) -> str | None:
         "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
         "b.version, b.artist FROM scores s "
         "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
-        "WHERE s.relax = %s AND s.mode = 0 AND s.status = 3",  # 3: best
+        "WHERE s.gamemode = %s AND s.mode = 0 AND s.status = 3",  # 3: best
         (1 if ctx.args[0].lower() == "relax" else 0),
     ):
         try:
@@ -1002,8 +1009,7 @@ async def beta_keys(ctx: Context) -> str | None:
             return "Key doesn't exist"
 
         asyncio.create_task(
-            services.sql.execute(
-                "DELETE FROM beta_keys WHERE id = %s", (key_id))
+            services.sql.execute("DELETE FROM beta_keys WHERE id = %s", (key_id))
         )
 
         return f"Deleted key {key_id}"
@@ -1011,7 +1017,9 @@ async def beta_keys(ctx: Context) -> str | None:
     return "Usage: !key <create/delete> <name if create (OPTIONAL) / id if delete>"
 
 
-@register_command("system", aliases=["sys"], category="Admin", required_perms=Privileges.ADMIN)
+@register_command(
+    "system", aliases=["sys"], category="Admin", required_perms=Privileges.ADMIN
+)
 @ensure_channel
 async def system(ctx: Context) -> str:
     """Control the server system from ingame!"""
@@ -1021,24 +1029,19 @@ async def system(ctx: Context) -> str:
     match ctx.args[0].lower():
         case "restart":
             # TODO: add timer
-            await ctx.reciever.send(
-                message="Restarting server...",
-                sender=services.bot
-            )
+            await ctx.reciever.send(message="Restarting server...", sender=services.bot)
             os.execl(sys.executable, sys.executable, *sys.argv)
 
         case "shutdown":
             await ctx.reciever.send(
-                message="Shutting down server...",
-                sender=services.bot
+                message="Shutting down server...", sender=services.bot
             )
             os.kill(os.getpid(), signal.SIGTERM)
 
         case "reload":
             async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
                 services.osu_settings[setting["name"]] = {
-                    key: item
-                    for key, item in setting.items() if key != "name"
+                    key: item for key, item in setting.items() if key != "name"
                 }
 
             return "Succesfully reloaded all osu settings"

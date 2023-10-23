@@ -381,9 +381,9 @@ def get_match_struct(m: "Match", send_pass: bool = False) -> bytes:
 
     struct.extend(
         (
-            (m.map_title, Types.string),
-            (m.map_id, Types.int32),
-            (m.map_md5, Types.string),
+            (m.map.title, Types.string),
+            (m.map.map_id, Types.int32),
+            (m.map.map_md5, Types.string),
             (m.slots, Types.multislots),
             (m.host, Types.int32),
             (m.mode.value, Types.byte),

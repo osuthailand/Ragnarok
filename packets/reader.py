@@ -67,7 +67,7 @@ class Reader:
         while self.data:
             self.packet, self.plen = self.read_headers()
 
-            if self.packet not in services.packets and (not self.packet > 109):
+            if self.packet not in services.packets:
                 if services.debug and self.packet not in IGNORED_PACKETS:
                     log.warn(
                         f"Packet <{BanchoPackets(self.packet)} | {BanchoPackets(self.packet).name}> has been requested although it's an unregistered packet."
@@ -94,7 +94,7 @@ class Reader:
 
     @property
     def data(self):
-        return self.packet_data[self.offset:]
+        return self.packet_data[self.offset :]
 
     def read_bytes(self, size: int):
         ret = struct.unpack("<" + "B" * size, self.data[:size])
@@ -206,7 +206,7 @@ class Reader:
         self.offset += self.plen
         return ret
 
-    def read_match(self) -> Match:
+    async def read_match(self) -> Match:
         m = Match()
 
         m.match_id = len(services.matches)
@@ -222,9 +222,15 @@ class Reader:
         m.match_name = self.read_str()
         m.match_pass = self.read_str()
 
-        m.map_title = self.read_str()
-        m.map_id = self.read_int32()
-        m.map_md5 = self.read_str()
+        self.read_str() # map title
+        map_id = self.read_int32() # map id
+        map_md5 = self.read_str()
+
+        m.map = await services.beatmaps.get(map_md5)
+        
+        if not m.map:
+            m.map = await services.beatmaps.get_by_map_id(map_id)
+
 
         for slot in m.slots:
             slot.status = SlotStatus(self.read_int8())

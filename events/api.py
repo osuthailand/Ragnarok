@@ -3,7 +3,7 @@ from typing import Any, Callable
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Router
-from constants.playmode import Mode
+from constants.playmode import Gamemode, Mode
 from objects import services
 from objects.beatmap import Beatmap
 from utils import log
@@ -76,7 +76,7 @@ async def dash(req: Request) -> JSONResponse:
 @ensure_parameters(
     country=str | None,
     mode=Mode | None,
-    relax=bool | None,
+    gamemode=Gamemode | None,
     page=int | None,
     order=str | None,
 )
@@ -85,12 +85,15 @@ async def leaderboard(
     /,
     country: str = "XX",
     mode: Mode = Mode.OSU,
-    relax: bool = False,
+    gamemode: Gamemode = Gamemode.VANILLA,
     page: int = 1,
     order: str = "pp",
 ) -> JSONResponse:
-    if mode == Mode.MANIA and relax:
+    if mode == Mode.MANIA and gamemode == Gamemode.RELAX:
         return error(400, "Mania doesn't exist on relax...")
+
+    if mode != Mode.OSU and gamemode == Gamemode.AUTOPILOT:
+        return error(400, "That mode doesn't exist on autopilot...")
 
     if page <= 0:
         page = 1
@@ -105,21 +108,23 @@ async def leaderboard(
     ):
         return error(400, "Invalid `order` value")
 
-    table = "stats_rx" if relax else "stats"
-
     query = (
         f"SELECT us.id, us.{mode.to_db('pp')}, us.{mode.to_db('ranked_score')}, "
         f"us.{mode.to_db('total_score')}, us.{mode.to_db('accuracy')}, us.{mode.to_db('level')}, "
-        f"us.{mode.to_db('playcount')}, u.username, u.country FROM {table} us "
+        f"us.{mode.to_db('playcount')}, u.username, u.country FROM {gamemode.table} us "
         "JOIN users u ON u.id = us.id WHERE u.privileges & 4 "
     )
 
+    params: list[int | str] = []
+
     if country != "XX":
-        query += f"AND u.country = '{country}' "
+        query += f"AND u.country = %s "
+        params.append(country)
 
-    query += f"ORDER BY {order} DESC LIMIT 50 OFFSET {(page - 1) * 50}"
+    query += f"ORDER BY {order} DESC LIMIT 50 OFFSET %s"
+    params.append((page - 1) * 50)
 
-    leaderboard = await services.sql.fetchall(query, _dict=True)
+    leaderboard = await services.sql.fetchall(query, params, _dict=True)
 
     return ORJSONResponse(content={"data": leaderboard})
 
@@ -128,13 +133,20 @@ async def leaderboard(
 @ensure_parameters(
     id=int,
     mode=Mode | None,
-    relax=bool | None,
+    gamemode=Gamemode | None,
 )
 async def get_profile_stats(
-    req: Request, /, id: int, mode: Mode = Mode.OSU, relax: bool = False
+    req: Request,
+    /,
+    id: int,
+    mode: Mode = Mode.OSU,
+    gamemode: Gamemode = Gamemode.VANILLA,
 ) -> ORJSONResponse:
-    if mode == Mode.MANIA and relax:
+    if mode == Mode.MANIA and gamemode == Gamemode.RELAX:
         return error(400, "Mania doesn't exist on relax...")
+
+    if mode != Mode.OSU and gamemode == Gamemode.AUTOPILOT:
+        return error(400, "That mode doesn't exist on autopilot...")
 
     # get_offline always checks cache first
     p = await services.players.get_offline(id)
@@ -142,7 +154,7 @@ async def get_profile_stats(
     if not p:
         return error(400, f"No player with the id {id} was found.")
 
-    stats = await p.get_stats(relax, mode)
+    stats = await p.get_stats(gamemode, mode)
 
     # players who is already in the cache
     # already has achievements cached.

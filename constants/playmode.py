@@ -52,3 +52,28 @@ class Mode(IntEnum):
                 return s + "_mania as " + s
             case _:
                 return "undefined"
+
+
+@unique
+class Gamemode(IntEnum):
+    UNKNOWN = -1
+
+    VANILLA = 0
+    RELAX = 1
+    AUTOPILOT = 2
+
+    @property
+    def table(self):
+        return (
+            "stats"
+            if self == self.VANILLA
+            else "stats_rx"
+            if self == self.RELAX
+            else "stats_ap"
+            if self == self.AUTOPILOT
+            else "error"
+        )
+
+    @property
+    def score_order(self):
+        return "score" if self == self.VANILLA else "pp"

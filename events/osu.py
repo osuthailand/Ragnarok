@@ -9,6 +9,7 @@ import hashlib
 import asyncio
 import aiofiles
 import numpy as np
+from constants.playmode import Gamemode
 from packets import writer
 
 from utils import log
@@ -129,14 +130,13 @@ async def registration(req: Request) -> Response:
             status_code=400, content={"form_error": {"user": error_response}}
         )
 
-    # TODO: website registration config
-    if services.osu_settings["allow_game_registration"]["boolean_value"]:
+    if not services.osu_settings["allow_game_registration"]["boolean_value"]:
         # osu! will attempt to go to https://url?username={username}&email={email}
         return general.ORJSONResponse(
             status_code=403,
             content={
                 "error": "please register from Rina website",
-                "url": f"https:\/\/{services.domain}\/register",
+                "url": f"https://{services.domain}/register",
             },
         )
 
@@ -221,54 +221,56 @@ async def get_scores(req: Request, p: Player) -> Response:
 
     mods = int(req.query_params["mods"])
 
-    # switch user to relax, when they have the relax mod enabled
-    if not mods & Mods.RELAX and p.relax:
-        p.relax = 0
+    # switch user to  the respective gamemode based on leaderboard mods.
+    prev_gamemode = p.gamemode
+    p.gamemode = (
+        Gamemode.RELAX
+        if mods & Mods.RELAX
+        else Gamemode.AUTOPILOT
+        if mods & Mods.AUTOPILOT
+        else Gamemode.VANILLA
+    )
 
-        await p.update_stats_cache()
-        services.players.enqueue(await writer.UpdateStats(p))
-    elif mods & Mods.RELAX and not p.relax:
-        p.relax = 1
-
+    # enqueue respective stats if gamemode has changed
+    if prev_gamemode != p.gamemode:
         await p.update_stats_cache()
         services.players.enqueue(await writer.UpdateStats(p))
 
     ret = [b.web_format]
 
-    order = ("score", "pp")[p.relax]
-
     mode = int(req.query_params["m"])
 
     query = (
-        f"SELECT s.id as id_, u.username, CAST(s.{order} as INT) as score, s.submitted, s.max_combo, "
-        "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
-        "s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
-        f"INNER JOIN users u ON u.id = s.user_id WHERE s.map_md5 = '{hash}' "
-        f"AND s.status = 3 AND u.privileges & 4 AND s.relax = {int(p.relax)} "
-        f"AND mode = {mode} "
+        f"SELECT s.id as id_, u.username, CAST(s.{p.gamemode.score_order} as INT) as score, "
+        "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
+        " s.submitted, s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
+        "INNER JOIN users u ON u.id = s.user_id WHERE s.map_md5 = %s AND mode = %s "
+        "AND s.status = 3 AND u.privileges & 4 AND s.gamemode = %s "
     )
+    params = [hash, mode, p.gamemode.value]
 
     board_type = LeaderboardType(int(req.query_params["v"]))
 
     match board_type:
         case LeaderboardType.MODS:
-            query += f"AND mods = {mods} "
+            query += f"AND mods = %s "
+            params.append(mods)
         case LeaderboardType.COUNTRY:
             query += f"AND u.country = '{p.country}' "
         case LeaderboardType.FRIENDS:
             # this is absolutely so fucking ugly
             # but i dont know what else works rn
             friends = f"({', '.join(str(x) for x in (p.friends | {p.id}))})"
-            query += f"AND s.user_id IN {friends} "
+            query += f"AND s.user_id IN %s "
+            params.append(friends)
 
     query += f"ORDER BY score DESC, s.submitted ASC LIMIT 50"
-
     personal_best = await services.sql.fetch(
-        f"SELECT s.id as id_, CAST(s.{order} as INT) as score, s.max_combo, "
+        f"SELECT s.id as id_, CAST(s.{p.gamemode.score_order} as INT) as score, s.max_combo, "
         "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
-        "AND s.map_md5 = %s AND s.relax = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
-        (b.map_md5, p.relax, mode, p.id),
+        "AND s.map_md5 = %s AND s.gamemode = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
+        (b.map_md5, p.gamemode.value, mode, p.id),
     )
 
     if not personal_best:
@@ -278,11 +280,11 @@ async def get_scores(req: Request, p: Player) -> Response:
             "SELECT COUNT(*) FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
-            f"WHERE s.{order} > {personal_best['score']} "
-            "AND s.relax = %s AND b.map_md5 = %s  "
+            f"WHERE s.{p.gamemode.score_order} > {personal_best['score']} "
+            "AND s.gamemode = %s AND b.map_md5 = %s  "
             "AND u.privileges & 4 AND s.status = 3 "
             "AND s.mode = %s",
-            (p.relax, b.map_md5, mode),
+            (p.gamemode.value, b.map_md5, mode),
             _dict=False,
         )
 
@@ -296,7 +298,7 @@ async def get_scores(req: Request, p: Player) -> Response:
                 )
             )  # type: ignore
 
-    top_scores = await services.sql.fetchall(query, _dict=True)
+    top_scores = await services.sql.fetchall(query, params, _dict=True)
 
     ret.extend(
         [
@@ -404,11 +406,11 @@ async def score_submission(req: Request) -> Response:
                 stats.ranked_score += sus
 
                 scores = await services.sql.fetchall(
-                    "SELECT pp, accuracy FROM scores "
-                    "WHERE user_id = %s AND mode = %s "
-                    "AND status = 3 AND relax = %s "
-                    "ORDER BY pp DESC",
-                    (stats.id, s.mode.value, s.relax),
+                    "SELECT s.pp, s.accuracy FROM scores s "
+                    "WHERE s.user_id = %s AND s.mode = %s "
+                    "AND s.status = 3 AND s.gamemode = %s "
+                    "ORDER BY s.pp DESC",
+                    (stats.id, s.mode.value, s.gamemode.value),
                 )
 
                 stats.accuracy = np.sum(
@@ -427,9 +429,9 @@ async def score_submission(req: Request) -> Response:
                     weighted += 416.6667 * (1 - 0.9994 ** len(scores))
                     stats.pp = math.ceil(weighted)
 
-                    stats.rank = await stats.update_rank(s.relax, s.mode)
+                    stats.rank = await stats.update_rank(s.gamemode, s.mode)
 
-                await stats.update_stats(s.mode, s.relax)
+                await stats.update_stats(s)
                 services.players.enqueue(await writer.UpdateStats(stats))
 
                 # if the player got a position on
@@ -439,8 +441,16 @@ async def score_submission(req: Request) -> Response:
                     chan = services.channels.get("#announce")
                     assert chan is not None
 
+                    gamemode = (
+                        "[Relax]"
+                        if s.gamemode == Gamemode.RELAX
+                        else "[Autopilot]"
+                        if s.gamemode == Gamemode.AUTOPILOT
+                        else ""
+                    )
+
                     await chan.send(
-                        f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({s.mode.to_string()}) [{'RX' if s.relax else 'VN'}]",
+                        f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({s.mode.to_string()}) {gamemode}",
                         sender=services.bot,
                     )
 
@@ -462,15 +472,22 @@ async def score_submission(req: Request) -> Response:
                     _achievements.append(ach)
 
             achievements = "/".join(str(ach) for ach in _achievements)
+            gamemode = (
+                "[Relax]"
+                if s.gamemode == Gamemode.RELAX
+                else "[Autopilot]"
+                if s.gamemode == Gamemode.AUTOPILOT
+                else ""
+            )
 
             log.info(
-                f"{stats.username} submitted a score on {s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) [{'RELAX' if s.relax else 'VANILLA'}]"
+                f"{stats.username} submitted a score on {s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) [gamemode]"
             )
 
             # only do charts if the score isn't relax
             # but do charts if the user is playing on rina
             ret: list = []
-            if not s.relax and not stats.on_rina:
+            if s.gamemode != Gamemode.VANILLA and not stats.on_rina:
                 ret.append(
                     "|".join(
                         (
@@ -742,7 +759,7 @@ async def osu_direct(req: Request, p: Player) -> Response:
 async def osu_search_set(req: Request, p: Player) -> Response:
     match req.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
-        case {"s": sid}:  # TODO: Beatmap Set
+        case {"s": sid}:  # Beatmap Set
             bmap = await services.beatmaps.get_by_set_id(sid)
         case {"b": bid}:  # Beatmap ID
             bmap = await services.beatmaps.get_by_map_id(bid)  # type: ignore

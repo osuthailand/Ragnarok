@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import math
 import time
 import uuid
@@ -15,7 +16,7 @@ from constants.mods import Mods
 from objects.match import Match
 from objects.channel import Channel
 from constants.levels import levels
-from constants.playmode import Mode
+from constants.playmode import Gamemode, Mode
 from constants.match import SlotStatus
 from objects.achievement import Achievement
 from constants.player import PresenceFilter, bStatus, Privileges, country_codes
@@ -79,7 +80,7 @@ class Player:
         self.rank: int = 0
         self.pp: int = 0
 
-        self.relax: int = 0  # 0 for vn / 1 for rx
+        self.gamemode: Gamemode = Gamemode.VANILLA
 
         self.block_unknown_pms: bool = kwargs.get("block_nonfriend", False)
 
@@ -334,14 +335,14 @@ class Player:
 
     async def get_achievements(self) -> None:
         async for achievement in services.sql.iterall(
-            "SELECT a.id FROM users_achievements ua "
-            "INNER JOIN achievements a ON ua.achievement_id = a.id "
-            "WHERE ua.user_id = %s",
+            "SELECT achievement_id, mode, relax FROM users_achievements "
+            "WHERE user_id = %s",
             (self.id),
         ):
-            if not (ach := services.get_achievement_by_id(achievement["id"])):
+            # TODO: make mode and relax for user achievements
+            if not (ach := services.get_achievement_by_id(achievement["achievement_id"])):
                 log.fail(
-                    f"user_achievements: Failed to fetch achievements (id: {achievement['id']})"
+                    f"user_achievements: Failed to fetch achievements (id: {achievement['achievement_id']})"
                 )
                 return
 
@@ -393,15 +394,15 @@ class Player:
         )
 
         # remove player from leaderboards
-        for mod in ("relax", "vanilla"):
+        for mod in Gamemode:
             for mode in Mode:
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{mod.value}:{mode.value}", self.id
                 )
 
                 # country rank
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod}:{self.country}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{mod.value}:{self.country}:{mode.value}", self.id
                 )
 
         # notify user
@@ -409,20 +410,13 @@ class Player:
 
         log.info(f"{self.username} has been put in restricted mode!")
 
-    async def update_stats(self, mode: Mode = Mode.NONE, relax: int = -1) -> None:
-        if (m := mode) == Mode.NONE:
-            m = self.play_mode
-
-        if (rx := relax) == -1:
-            rx = self.relax
-
-        spec_tables = ("stats", "stats_rx")[rx]
-        se = ("std", "taiko", "catch", "mania")[m]
-
+    async def update_stats(self, s: "Score") -> None:
+        se = ("std", "taiko", "catch", "mania")[s.mode]
         self.get_level()
 
+        # important stuff
         await services.sql.execute(
-            f"UPDATE {spec_tables} SET pp_{se} = %s, playcount_{se} = %s, "
+            f"UPDATE {s.gamemode.table} SET pp_{se} = %s, playcount_{se} = %s, "
             f"accuracy_{se} = %s, total_score_{se} = %s, "
             f"ranked_score_{se} = %s, level_{se} = %s WHERE id = %s",
             (
@@ -434,6 +428,14 @@ class Player:
                 self.level,
                 self.id,
             ),
+        )
+        log.debug(s.total_hits)
+        # less important
+        await services.sql.execute(
+            f"UPDATE {s.gamemode.table} SET total_hits_{se} = total_hits_{se} + %s, "
+            f"playtime_{se} = playtime_{se} + %s, max_combo_{se} = IF(max_combo_{se}<%s, %s, max_combo_{se}) "
+            "WHERE id = %s",
+            (s.total_hits, s.playtime, s.max_combo, s.max_combo, self.id)
         )
 
     def get_level(self):
@@ -494,43 +496,52 @@ class Player:
             (self.longitude, self.latitude, self.country, self.id),
         )
 
-    async def get_stats(self, relax: int = 0, mode: Mode = Mode.OSU) -> dict:
-        table = ("stats", "stats_rx")[relax]
-        se = ("std", "taiko", "catch", "mania")[mode]
-
+    async def get_stats(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> dict:
         ret = await services.sql.fetch(
             f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
             f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
             f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
-            f" FROM {table} "
+            f"FROM {gamemode.table} "
             "WHERE id = %s",
             (self.id),
         )
 
-        ret["rank"] = await self.get_rank(relax, mode)
-        ret["country_rank"] = await self.get_country_rank(relax, mode)
+        ret["rank"] = await self.get_rank(gamemode, mode)
+        ret["country_rank"] = await self.get_country_rank(gamemode, mode)
 
         return ret
 
-    async def get_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
-        mod = "relax" if relax else "vanilla"
+    async def get_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
+        mod = (
+            "vanilla" if gamemode == Gamemode.VANILLA else
+            "relax" if gamemode == Gamemode.RELAX else
+            "autopilot" # gamemode == Gamemode.AUTOPILOT
+        )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{mode}",
             str(self.id),
         )
         return _rank + 1 if _rank is not None else 0
 
-    async def get_country_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
-        mod = "relax" if relax else "vanilla"
+    async def get_country_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
+        mod = (
+            "vanilla" if gamemode == Gamemode.VANILLA else
+            "relax" if gamemode == Gamemode.RELAX else
+            "autopilot" # gamemode == Gamemode.AUTOPILOT
+        )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
             str(self.id),
         )
         return _rank + 1 if _rank is not None else 0
 
-    async def update_rank(self, relax: int = 0, mode: Mode = Mode.OSU) -> int:
+    async def update_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
         if not self.is_restricted:
-            mod = "relax" if relax else "vanilla"
+            mod = (
+                "vanilla" if gamemode == Gamemode.VANILLA else
+                "relax" if gamemode == Gamemode.RELAX else
+                "autopilot" # gamemode == Gamemode.AUTOPILOT
+            )
             await services.redis.zadd(
                 f"ragnarok:leaderboard:{mod}:{mode}",
                 {str(self.id): self.pp},
@@ -542,10 +553,10 @@ class Player:
                 {str(self.id): self.pp},
             )
 
-        return await self.get_rank(relax, mode)
+        return await self.get_rank(gamemode, mode)
 
     async def update_stats_cache(self) -> bool:
-        ret = await self.get_stats(self.relax, self.play_mode)
+        ret = await self.get_stats(self.gamemode, self.play_mode)
 
         self.ranked_score = ret["ranked_score"]
         self.accuracy = ret["accuracy"]

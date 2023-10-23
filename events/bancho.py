@@ -19,7 +19,7 @@ from constants.mods import Mods
 from objects.player import Player
 from objects.channel import Channel
 from objects.beatmap import Beatmap
-from constants.playmode import Mode
+from constants.playmode import Gamemode, Mode
 from starlette.routing import Router
 from starlette.responses import Response
 from packets.reader import Reader, Packet
@@ -287,7 +287,12 @@ async def change_action(p: Player, sr: Reader) -> None:
     p.play_mode = Mode(sr.read_byte())
     p.beatmap_id = sr.read_int32()
 
-    p.relax = int(bool(p.current_mods & Mods.RELAX))
+    p.gamemode = (
+        Gamemode.RELAX if p.current_mods & Mods.RELAX else
+        Gamemode.AUTOPILOT if p.current_mods & Mods.AUTOPILOT else
+        Gamemode.VANILLA
+    )
+    
     asyncio.create_task(p.update_stats_cache())
 
     if not p.is_restricted:
@@ -338,11 +343,12 @@ async def send_public_message(p: Player, sr: Reader) -> None:
         )
         return
 
+    await chan.send(msg, p)
+
     if np := services.regex["np"].search(msg):
         log.info(np.groups())
         p.last_np = await Beatmap._get_beatmap_from_sql("", np.groups(0), 0)
-
-    await chan.send(msg, p)
+        asyncio.create_task(_handle_command(chan, "!pp ", p))
 
     if p.token in services.await_response and not services.await_response[p.token]:
         services.await_response[p.token] = msg
@@ -486,7 +492,7 @@ async def lobby_join(p: Player, sr: Reader) -> None:
 # id: 31
 @register_event(BanchoPackets.OSU_CREATE_MATCH)
 async def mp_create_match(p: Player, sr: Reader) -> None:
-    m = sr.read_match()
+    m = await sr.read_match()
 
     services.matches.add(m)
 
@@ -579,24 +585,18 @@ async def mp_change_settings(p: Player, sr: Reader) -> None:
     if not (m := p.match) or m.in_progress:
         return
 
-    new_match = sr.read_match()
+    new_match = await sr.read_match()
 
     if m.host != p.id:
         return
 
-    if new_match.map_md5 != m.map_md5:
-        map = await Beatmap.get_beatmap(new_match.map_md5)
-
-        if map:
-            m.map_md5 = map.map_md5
-            m.map_title = map.full_title
-            m.map_id = map.map_id
-            m.mode = Mode(map.mode)
-        else:
-            m.map_md5 = new_match.map_md5
-            m.map_title = new_match.map_title
-            m.map_id = new_match.map_id
+    if new_match.map is not None:
+        if new_match.map.map_md5 != m.map.map_md5:
+            m.map = new_match.map
             m.mode = Mode(new_match.mode)
+
+            # announce the pp for 100%, 99%, etc. for the chosen map with chosen mods.
+            await _handle_command(m.chat, f"!pp [MULTI]", p)
 
     if new_match.match_name != m.match_name:
         m.match_name = new_match.match_name
@@ -649,26 +649,31 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
 
     raw_sr = copy.copy(sr)
 
-    print(sr.packet_data)
     raw = raw_sr.read_raw()
-
     s = sr.read_scoreframe()
 
     if m.mods & Mods.RELAX or (
         m.pp_win_condition and m.scoring_type == ScoringType.SCORE
     ):
-        if os.path.isfile(f".data/beatmaps/{m.map_id}.osu"):
-            bmap = BMap(path=f".data/beatmaps/{m.map_id}.osu")
+        if os.path.isfile(f".data/beatmaps/{m.map.map_id}.osu"):
+            bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
+            log.debug(
+                f"{s.count_300=}x300 "
+                f"{s.count_100=}x100 "
+                f"{s.count_50=}x50 "
+                f"{s.count_miss=}m "
+                f"{s.max_combo=}x "
+            )
 
             calc = Calculator(
                 mode=m.mode,
                 n300=s.count_300,
                 n100=s.count_100,
                 n50=s.count_50,
-                n_misses=s.count_miss,
                 n_geki=s.count_geki,
                 n_katu=s.count_katu,
                 combo=s.max_combo,
+                n_misses=s.count_miss,
                 mods=m.mods,
             )
 
@@ -975,7 +980,7 @@ async def change_pass(p: Player, sr: Reader) -> None:
     if not (m := p.match) or m.in_progress:
         return
 
-    new_data = sr.read_match()
+    new_data = await sr.read_match()
 
     if m.match_pass == new_data.match_pass:
         return

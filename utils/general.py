@@ -52,35 +52,3 @@ def compare_byte_sequence(a1: bytes, a2: bytes) -> bool:
             return False
 
     return True
-
-
-def compare_byte_sequence_test(a1: bytes, a2: bytes) -> bool:
-    if a1 is None or a2 is None or len(a1) != len(a2):
-        return False
-
-    l = len(a1)
-    x1, x2 = 0, 0
-
-    while x1 < l:
-        if l - x1 >= 8:
-            if a1[x1: x1 + 8] != a2[x2: x2 + 8]:
-                return False
-            x1 += 8
-            x2 += 8
-        elif l - x1 >= 4:
-            if a1[x1: x1 + 4] != a2[x2: x2 + 4]:
-                return False
-            x1 += 4
-            x2 += 4
-        elif l - x1 >= 2:
-            if a1[x1: x1 + 2] != a2[x2: x2 + 2]:
-                return False
-            x1 += 2
-            x2 += 2
-        else:
-            if a1[x1] != a2[x2]:
-                return False
-            x1 += 1
-            x2 += 1
-
-    return True

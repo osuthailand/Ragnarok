@@ -1,5 +1,6 @@
 from constants.match import SlotStatus, SlotTeams, TeamType, ScoringType
 from objects.channel import Channel
+from objects.beatmap import Beatmap
 from constants.playmode import Mode
 from constants.mods import Mods
 from packets import writer
@@ -48,9 +49,7 @@ class Match:
         self.host: int = 0
         self.in_progress: bool = False
 
-        self.map_id: int = 0
-        self.map_title: str = ""
-        self.map_md5: str = ""
+        self.map: Beatmap = None
 
         self.slots: list[Players] = [Players() for _ in range(0, 16)]
 
@@ -103,7 +102,7 @@ class Match:
             if id == slot_id:
                 return slot
 
-    async def transfer_host(self, slot) -> None:
+    async def transfer_host(self, slot: Players) -> None:
         self.host = slot.p.id
 
         slot.p.enqueue(await writer.MatchTransferHost())

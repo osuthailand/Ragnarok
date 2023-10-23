@@ -1,4 +1,5 @@
 from objects.OSZ2 import OSZ2
+from objects.player import Player
 from utils import log
 from events.osu import osu, check_auth
 from constants.beatmap import Approved
@@ -8,12 +9,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 from objects import services
 
-
 @osu.route("/web/osu-osz2-bmsubmit-getid.php")
 @check_auth(
-    "u", "h", custom_resp="5\nAuthentication failure. Please check your login details."
+    "u", "h", b"5\nAuthentication failure. Please check your login details."
 )
-async def get_last_id(req: Request) -> Response:
+async def get_last_id(req: Request, p: Player) -> Response:
     # arguments:
     # s = BeatmapSetId (if available)
     # b = BeatmapIds (comma separated list)
@@ -40,7 +40,8 @@ async def get_last_id(req: Request) -> Response:
 
     if not (p := await services.players.get_offline(unquote(req.query_params["u"]))):
         return Response(content=b"5\nUser not found in system")
-    if p.username not in ("Aoba", "Simon"):
+    
+    if p.username not in ("Aoba", "real"):
         return Response(content=b"6\nNo permission to upload (yet)")
 
     set_id = int(req.query_params["s"])
@@ -115,7 +116,7 @@ async def get_last_id(req: Request) -> Response:
 
 @osu.route("/web/osu-get-beatmap-topic.php")
 @check_auth("u", "h")
-async def get_beatmap_topic(req: Request) -> Response:
+async def get_beatmap_topic(req: Request, p: Player) -> Response:
     # don't really know if this is nessecairyefoiweuijfjipenis
     res = ["0"]  # 0 = success, >0 = error
     res.append("1")  # thread id
@@ -125,7 +126,7 @@ async def get_beatmap_topic(req: Request) -> Response:
 
 
 @osu.route("/web/osu-osz2-bmsubmit-upload.php", methods=["POST"])
-# @check_auth("u", "h")
+#@check_auth("u", "h")
 async def beatmap_submission(req: Request) -> Response:
     form = await req.form()
 

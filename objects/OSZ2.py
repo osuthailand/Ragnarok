@@ -2,18 +2,19 @@ from base64 import b64decode
 
 from dataclasses import dataclass
 from enum import IntEnum, unique
+from typing import Union
 import hashlib
 import math
 import os
-
-import io # test
-from packets import writer #test 2
+import io
 
 from packets.reader import Reader
 from datetime import datetime
 
-# from objects.xtea import XTea
-import xtea as tiny_enc_algro
+# test stuff
+from cffi import FFI
+from objects.xxtea import decrypt
+#import xtea as tiny_enc_algro
 
 from struct import pack, unpack
 
@@ -21,7 +22,7 @@ from utils import log
 
 from Crypto.Cipher import AES
 
-from utils.general import compare_byte_sequence, compare_byte_sequence_test
+from utils.general import compare_byte_sequence
 
 
 @unique
@@ -103,62 +104,11 @@ def bytes_to_vector(b: bytearray):
         int.from_bytes(b[4:8], byteorder="big"),
     ]
 
-
-def decrypt_test(ciphertext: bytearray, key: bytearray):
-    blocks = math.ceil(len(ciphertext) / 4.0)
-    plaintext = ""
-    for index in range(0, blocks, 2):
-        # transform into vector
-        v = bytes_to_vector(ciphertext[index * 4 :])
-        p1, p2 = _decrypt_word(v, key)
-        plaintext += unhexlify(hex(p1)[2:]).decode()[::-1]
-        plaintext += unhexlify(hex(p2)[2:]).decode()[::-1]
-    return plaintext
-
-
-# this might be the most retarded thing that ive ever done ~Aoba
-def _encrypt_word(v, key):
-    v0, v1 = map(c_uint32, unpack(">2I", v))
-    k = tuple(map(c_uint32, unpack(">4I", key)))
-    sm, delta = c_uint32(0), c_uint32(0x9E3779B9)
-
-    for _ in range(32):
-        v0.value += (((v1.value << 4) ^ (v1.value >> 5)) + v1.value) ^ (
-            sm.value + k[sm.value & 3].value
-        )
-        # v0.value = v0.value & 0xFFFFFFFF
-        sm.value += delta.value
-        # s.value = s.value & 0xFFFFFFFF
-        v1.value += (((v0.value << 4) ^ (v0.value >> 5)) + v0.value) ^ (
-            sm.value + k[(sm.value >> 11) & 3].value
-        )
-        # v1.value = v1.value & 0xFFFFFFFF
-
-    return pack(">2I", v0.value, v1.value)
-
-
-def _decrypt_word(v, key):
-    v0, v1 = map(c_uint32, unpack(">2I", v))
-    k = tuple(map(c_uint32, unpack(">4I", key)))
-    sm, delta = c_uint32(0xC6EF3720), c_uint32(0x9E3779B9)
-
-    for i in range(32):
-        v1.value -= (((v0.value << 4) ^ (v0.value >> 5)) + v0.value) ^ (
-            sm.value + k[(sm.value >> 11) & 3].value
-        )
-        sm.value -= delta.value
-        v0.value -= (((v1.value << 4) ^ (v1.value >> 5)) + v1.value) ^ (
-            sm.value + k[sm.value & 3].value
-        )
-
-    return pack(">2I", v0.value, v1.value)
-
-
 def generate_known_plain() -> bytearray:
     b = bytearray(64)
 
     y = 842502087
-    x = 1990
+    x = 1990 # Seed for XTEA verification
     w = 273326509
     z = 3579807591
 
@@ -203,22 +153,22 @@ def generate_known_plain() -> bytearray:
 #Just a wrapper class that logs all operations.
 class BytesIOWrapper(io.BytesIO):
     def read(self, __size: int | None = None) -> bytes:
-        logging.debug(f"Reading {__size} bytes")
+        log.debug(f"Reading {__size} bytes")
         return super().read(__size)
 
     def write(self, __buffer) -> int:
-        logging.debug(f"Writing {len(__buffer)} bytes")
+        log.debug(f"Writing {len(__buffer)} bytes")
         return super().write(__buffer)
 
     def seek(self, __offset: int, __whence: int = 0) -> int:
-        logging.debug(f"Seeking by {__offset} from {__whence}")
+        log.debug(f"Seeking by {__offset} from {__whence}")
         newPos = super().seek(__offset, __whence)
-        logging.debug(f"Seeked to {newPos}")
+        log.debug(f"Seeked to {newPos}")
         return newPos
 
     def tell(self) -> int:
         curPos = super().tell()
-        logging.debug(f"Telling current position: {curPos}")
+        log.debug(f"Telling current position: {curPos}")
         return curPos
 
 class OSZ2:
@@ -227,7 +177,6 @@ class OSZ2:
         self.files: FileInfo
 
         self._raw: bytes = b""
-        self.bwriter = BytesIOWrapper()  # Create an instance of BytesIOWrapper
 
     @classmethod
     def parse(cls, filepath: str = "", raw: bytes = b"") -> "OSZ2":
@@ -254,21 +203,24 @@ class OSZ2:
         oszhash_file = reader.read_bytes(16)
         oszhash_data = reader.read_bytes(16)
 
-        #save into block
-        metadata_entries_bytes = reader.read_bytes(4)
-        self.bwriter.write(metadata_entries_bytes)
-
         # metadata block
+        writerMetaHash = BytesIOWrapper()
         #metadata_entries = reader.read_int32()
-        metadata_entries = int.from_bytes(metadata_entries_bytes, byteorder='little')
+        metadata_entries_bytes = reader.read_bytes(4) #i32
+        writerMetaHash.write(pack('4B', *metadata_entries_bytes)) # save buffer for verification
+
+        metadata_entries = int.from_bytes(pack('4B', *metadata_entries_bytes), byteorder='little')
 
         metadata_info = []
         for _ in range(metadata_entries):
             #type = reader.read_int16()
-            type_bytes = reader.read_bytes(2)
+            type_bytes = reader.read_bytes(2) #i16
             value = reader.read_str(retarded=True)
 
             type = int.from_bytes(type_bytes, byteorder='little')
+
+            log.debug(type)
+            log.debug(value)
 
             match MetadataType(type):
                 case MetadataType.Creator:
@@ -286,19 +238,17 @@ class OSZ2:
                 case MetadataType.BeatmapSetID:
                     c.metadata.set_id = int(value)
 
-            self.bwriter.write(type_bytes)
-            self.bwriter.write(write_str(value))
+            writerMetaHash.write(pack('2B', *type_bytes))
+            writerMetaHash.write((len(str(value).encode('utf-8'))).to_bytes(1, 'little') + str(value).encode()) #shouldve used write_str but er
 
-        with bwriter.getbuffer() as buffer:
-            hash = compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
-            print(hash)
-            if hash_bytes != oszhash_meta:
+        # verify if hash is matched with what osz2 reported
+        with writerMetaHash.getbuffer() as buffer:
+            hash_bytes = OSZ2().compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
+            if hash_bytes != pack('16B', *oszhash_meta):
+                log.fail(f"calculated: {hash_bytes.hex()}")
+                log.fail(f"osz2 report: {pack('16B', *oszhash_meta).hex()}")
                 log.fail("bad hashes")
-
-        # can't check hash because i dont know how to make this block into bytes array :(
-        # hash_bytes = c.compute_osz_hash(writer.getvalue(), metadata_entries * 3, 0xA7)
-        # if hash_bytes != oszhash_meta:
-        #    log.fail("bad hashes")
+                return
 
         log.debug(c.metadata)
 
@@ -310,48 +260,52 @@ class OSZ2:
 
             log.debug(f"{fileName=} {map_id=}")
 
+        # prepare key
         seed = f"{c.metadata.creator}yhxyfjo5{c.metadata.set_id}"
-
         log.debug(f"{seed=}")
-        # Aoba + yhxyfjo5 + 100000014
+
+        # save key for later uses
         KEY = hashlib.md5(seed.encode("ascii")).digest()
         KNOWN_PLAIN = b"\x00" * 64
 
-        # test if key is correct
-        # balls = _decrypt_word(b'\x00'*8, KEY)
-        # log.debug(f"{balls=}")
-        # cock = _decrypt_word(balls, KEY)
-        # log.debug(f"{cock=}")
-        empty_and_soulless_heart_of_suzukaze = tiny_enc_algro.new(
-            KEY, mode=1, rounds=32
-        )
-        balls = empty_and_soulless_heart_of_suzukaze.encrypt(b"\x00" * 64)
-        cocks = empty_and_soulless_heart_of_suzukaze.decrypt(b"\x00" * 64)
-        log.debug(f"{balls=}")
-        log.debug(f"{cocks=}")
-        #if cocks:
-        #    log.debug("YIPPEE")
+        log.debug(f"{KEY=}")
 
-        # if not compare_byte_sequence_test(balls, cock):
-        #    log.fail("no balls :(")
-        #    return
+        # TODO: Verify this magic block using XTEA
+        unknown_bytes = reader.read_bytes(64)
+        #bytes_crap = pack('64B', *unknown_bytes) # turn this 64 block into buffer
+        #XTEAKEY_UNCASTED = [int(KEY[i:i+8], 16) for i in range(0, len(KEY), 8)]
 
-        reader.read_bytes(64)  # placeholder for now?
-
+        # read encrypted length and decrypt it
         length = reader.read_int32()
-        # log.debug(f"{length=}")
         for i in range(0, 16, 2):
             length -= oszhash_file[i] | (oszhash_file[i + 1] << 17)
-        # log.debug(f"{length=}")
 
         fileInfo = reader.read_bytes(length)
-        # log.debug(f"{fileInfo=}")
+        fileOffset = reader.offset
+
+        log.debug(f"{fileInfo=}")
+        log.debug(f"{fileOffset=}")
+
+        # prepare the buffer for XXTEA verification and extraction
+        writerFileInfo = BytesIOWrapper()
+        writerFileInfo.write(pack(f'{len(fileInfo)}B', *fileInfo))
+
+        #almost good but not really...
+        # TODO: Finish peppy's custom XXTEA encryption
+        with writerFileInfo.getbuffer() as buffer:
+            decryptedxx = decrypt(buffer, KEY)
+            log.debug(f'{len(decryptedxx)=}')
+            log.debug(f'{decryptedxx.hex()=}')
+
+            # if everything went well, then this i32 should be readable
+            #encFileCount = reader.read_int32()
+            #log.debug(encFileCount)
 
         # decode iv
         for j in range(len(iv)):
             iv[j] ^= oszhash_file[j % 16]
 
-        # log.debug(f"{iv=}")
+        log.debug(f"{iv=}")
 
         # decrypted_data = new(KEY, mode=MODE_CBC, IV=iv).decrypt(fileInfo)
         # dreader = Reader(decrypted_data)
@@ -375,15 +329,39 @@ class OSZ2:
 
         return c
 
-    def compute_osz_hash(self, buffer, pos, swap) -> None:
+    @staticmethod
+    def compute_osz_hash(buffer: Union[memoryview, bytearray], pos: int, swap: int) -> bytes:
         buffer[pos] ^= swap
-        hash_bytes = hashlib.md5(buffer).digest()
+        hash = bytearray(hashlib.md5(buffer).digest())
         buffer[pos] ^= swap
 
         for i in range(8):
-            shit = hash_bytes[i]
-            hash_bytes[i] = hash_bytes[i + 8]
-            hash_bytes[i + 8] = shit
+            tmp = hash[i]
+            hash[i] = hash[i + 8]
+            hash[i + 8] = tmp
 
-        hash_bytes[5] ^= 0x2D
-        return hash_bytes
+        hash[5] ^= 0x2d
+
+        return bytes(hash)
+
+    @staticmethod
+    def compare_byte_sequence(a1, a2):
+        if a1 is None or a2 is None or len(a1) != len(a2):
+            return False
+
+        length = len(a1)
+        for i in range(0, length, 8):
+            if length - i >= 8:
+                if unpack('q', a1[i:i+8])[0] != unpack('q', a2[i:i+8])[0]:
+                    return False
+            elif length - i >= 4:
+                if unpack('i', a1[i:i+4])[0] != unpack('i', a2[i:i+4])[0]:
+                    return False
+            elif length - i >= 2:
+                if unpack('h', a1[i:i+2])[0] != unpack('h', a2[i:i+2])[0]:
+                    return False
+            else:
+                if a1[i] != a2[i]:
+                    return False
+
+        return True

@@ -17,7 +17,7 @@ class Mods(IntFlag):
     FLASHLIGHT = 1024
     AUTOPLAY = 2048
     SPUNOUT = 4096
-    RELAX2 = 8192
+    AUTOPILOT = 8192
     PERFECT = 16384
     KEY4 = 32768
     KEY5 = 65536
@@ -45,7 +45,7 @@ class Mods(IntFlag):
         | FLASHLIGHT
         | FADEIN
         | RELAX
-        | RELAX2
+        | AUTOPILOT
         | SPUNOUT
         | KEYMOD
     )
@@ -53,7 +53,7 @@ class Mods(IntFlag):
 
     MULTIPLAYER = DOUBLETIME | NIGHTCORE | HALFTIME
 
-    DISABLED = RELAX2 | CINEMA | TARGET | AUTOPLAY
+    DISABLED = CINEMA | TARGET | AUTOPLAY
 
     def __dict__(self) -> dict["Mods", str]:
         return {
@@ -71,7 +71,7 @@ class Mods(IntFlag):
             self.FLASHLIGHT: "FL",
             self.AUTOPLAY: "AU",
             self.SPUNOUT: "SO",
-            self.RELAX2: "AP",
+            self.AUTOPILOT: "AP",
             self.PERFECT: "PF",
             self.KEY1: "1K",
             self.KEY2: "2K",
@@ -98,7 +98,7 @@ class Mods(IntFlag):
     def from_str(cls, s: str) -> "Mods":
         # split every 2nd character
         mods = cls.NONE
-        str_mods = [(s[i: i + 2]) for i in range(0, len(s), 2)]
+        str_mods = [(s[i : i + 2]) for i in range(0, len(s), 2)]
 
         for mod in str_mods:
             for key, value in mods.__dict__().items():

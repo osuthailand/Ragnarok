@@ -6,20 +6,24 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MAX 16
 #define MAX_BYTES (MAX * 4)
 #define TEA_DELTA 0x9e3779b9
 
-struct XXTea {
-    uint8_t _key[MAX];
-    uint32_t _n;
-};
+void XXTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size);
+void XXTea_Encrypt(const uint32_t* key, const void* src, void* dst, int size);
 
-void XXTea_Init(struct XXTea* tea, const uint8_t* key);
-void XXTea_EncryptDecryptXXTea(struct XXTea* tea, char* buffer, int bufferLength, int encrypt);
-void XXTea_EncryptWords(uint32_t* v, uint8_t* key, uint32_t n);
-void XXTea_DecryptWords(uint32_t* v, uint8_t* key, uint32_t n);
+void XXTea_EncryptWords(uint32_t* src_dst, const uint32_t* key, uint32_t n);
+void XXTea_DecryptWords(uint32_t* src_dst, const uint32_t* key, uint32_t n);
+
+void SimpleCryptor_EncryptBytes(const uint32_t* key, const void* src, uint8_t* dst, int size);
+void SimpleCryptor_DecryptBytes(const uint32_t* key, const void* src, uint8_t* dst, int size);
+
+// utils functions
+uint8_t RotateLeft(uint8_t val, uint8_t n);
+uint8_t RotateRight(uint8_t val, uint8_t n);
 
 #endif

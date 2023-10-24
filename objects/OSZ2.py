@@ -4,26 +4,17 @@ from dataclasses import dataclass
 from enum import IntEnum, unique
 from typing import Union
 import hashlib
-import math
 import os
 import io
 
 from packets.reader import Reader
 from datetime import datetime
 
-# test stuff
-from cffi import FFI
 from objects.xxtea import decrypt
-#import xtea as tiny_enc_algro
 
-from struct import pack, unpack
+from struct import pack
 
 from utils import log
-
-from Crypto.Cipher import AES
-
-from utils.general import compare_byte_sequence
-
 
 @unique
 class MetadataType(IntEnum):
@@ -82,16 +73,17 @@ class FileInfo:
 # fmt: on
 
 # fmt: off
-# knownByteSeq = bytearray([
-#    0x55, 0xAA, 0x74, 0x10, 0x2B, 0x56, 0xB3, 0x9E,
-#    0x25, 0x9E, 0xFE, 0xB7, 0xBE, 0x06, 0xFC, 0xF2,
-#    0xB6, 0x3C, 0x6F, 0x47, 0x7E, 0x38, 0x69, 0x43,
-#    0x80, 0x89, 0x25, 0x00, 0xCC, 0xB6, 0xFE, 0x12,
-#    0xA9, 0xB2, 0x4A, 0x2C, 0x96, 0xD5, 0xEA, 0x26,
-#    0x42, 0x31, 0xAF, 0x0A, 0x0D, 0xAE, 0x00, 0xED,
-#    0xFE, 0x96, 0xA6, 0x94, 0x99, 0xA7, 0x90, 0xE4,
-#    0x68, 0xBF, 0xC6, 0x97, 0x5B, 0x1B, 0x5E, 0x7F
-# ])
+# this is FastRandom(1990)
+knownByteSeq = bytearray([
+   0x55, 0xAA, 0x74, 0x10, 0x2B, 0x56, 0xB3, 0x9E,
+   0x25, 0x9E, 0xFE, 0xB7, 0xBE, 0x06, 0xFC, 0xF2,
+   0xB6, 0x3C, 0x6F, 0x47, 0x7E, 0x38, 0x69, 0x43,
+   0x80, 0x89, 0x25, 0x00, 0xCC, 0xB6, 0xFE, 0x12,
+   0xA9, 0xB2, 0x4A, 0x2C, 0x96, 0xD5, 0xEA, 0x26,
+   0x42, 0x31, 0xAF, 0x0A, 0x0D, 0xAE, 0x00, 0xED,
+   0xFE, 0x96, 0xA6, 0x94, 0x99, 0xA7, 0x90, 0xE4,
+   0x68, 0xBF, 0xC6, 0x97, 0x5B, 0x1B, 0x5E, 0x7F
+])
 # fmt: on
 
 # lol
@@ -104,6 +96,7 @@ def bytes_to_vector(b: bytearray):
         int.from_bytes(b[4:8], byteorder="big"),
     ]
 
+# FastRandom(1990)
 def generate_known_plain() -> bytearray:
     b = bytearray(64)
 
@@ -243,9 +236,9 @@ class OSZ2:
 
         # verify if hash is matched with what osz2 reported
         with writerMetaHash.getbuffer() as buffer:
-            hash_bytes = OSZ2().compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
-            if hash_bytes != pack('16B', *oszhash_meta):
-                log.fail(f"calculated: {hash_bytes.hex()}")
+            calculated_oszhash_meta = OSZ2().compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
+            if calculated_oszhash_meta != pack('16B', *oszhash_meta):
+                log.fail(f"calculated: {calculated_oszhash_meta.hex()}")
                 log.fail(f"osz2 report: {pack('16B', *oszhash_meta).hex()}")
                 log.fail("bad hashes")
                 return
@@ -266,20 +259,16 @@ class OSZ2:
 
         # save key for later uses
         KEY = hashlib.md5(seed.encode("ascii")).digest()
-        KNOWN_PLAIN = b"\x00" * 64
-
-        log.debug(f"{KEY=}")
 
         # TODO: Verify this magic block using XTEA
-        unknown_bytes = reader.read_bytes(64)
-        #bytes_crap = pack('64B', *unknown_bytes) # turn this 64 block into buffer
-        #XTEAKEY_UNCASTED = [int(KEY[i:i+8], 16) for i in range(0, len(KEY), 8)]
+        reader.read_bytes(64)
 
-        # read encrypted length and decrypt it
+        # read encrypted data length and decrypt it
         length = reader.read_int32()
         for i in range(0, 16, 2):
             length -= oszhash_file[i] | (oszhash_file[i + 1] << 17)
 
+        # read all .osu files in osz2 and set an offset
         fileInfo = reader.read_bytes(length)
         fileOffset = reader.offset
 
@@ -287,45 +276,61 @@ class OSZ2:
         log.debug(f"{fileOffset=}")
 
         # prepare the buffer for XXTEA verification and extraction
-        writerFileInfo = BytesIOWrapper()
-        writerFileInfo.write(pack(f'{len(fileInfo)}B', *fileInfo))
+        fileInfoBytes = bytearray(fileInfo)
+        enc_fileInfo_count = fileInfoBytes[0:4]
+        enc_fileInfo_offset = fileInfoBytes[4:8]
+        log.debug(enc_fileInfo_count)
+        log.debug(enc_fileInfo_offset)
 
-        #almost good but not really...
-        # TODO: Finish peppy's custom XXTEA encryption
-        with writerFileInfo.getbuffer() as buffer:
-            decryptedxx = decrypt(buffer, KEY)
-            log.debug(f'{len(decryptedxx)=}')
-            log.debug(f'{decryptedxx.hex()=}')
+        # start decrypting
+        fileInfo_count = Reader(decrypt(enc_fileInfo_count, KEY)).read_int32()
+        fileInfo_offset = Reader(decrypt(enc_fileInfo_offset, KEY)).read_int32()
 
-            # if everything went well, then this i32 should be readable
-            #encFileCount = reader.read_int32()
-            #log.debug(encFileCount)
+        # TODO: make oszhash_file checksum test
+        # calculated_oszhash_file = OSZ2().compute_osz_hash(fileInfoBytes, fileInfo_count * 4, 0xd1)
+        # if calculated_oszhash_file != pack('16B', *oszhash_file):
+        #     log.fail(f"calculated: {calculated_oszhash_file.hex()}")
+        #     log.fail(f"osz2 report: {pack('16B', *oszhash_file).hex()}")
+        #     log.fail("bad hashes")
+        #     return
 
-        # decode iv
-        for j in range(len(iv)):
-            iv[j] ^= oszhash_file[j % 16]
+        # intialize buffer and extract files info
+        fileInfo_next_byte = 8
+        for _ in range(fileInfo_count):
+            log.fail(fileInfo_next_byte)
+            # file name
+            file_name_len = Reader(decrypt(fileInfoBytes[fileInfo_next_byte:fileInfo_next_byte+1], KEY)).read_byte()
+            fileInfo_next_byte = fileInfo_next_byte+1
+            file_name_enc = fileInfoBytes[fileInfo_next_byte:(fileInfo_next_byte)+file_name_len]
+            file_name_dec = decrypt(file_name_enc, KEY)
+            log.debug(f'{file_name_dec=}')
 
-        log.debug(f"{iv=}")
+            # file checksum (somehow this always wrong? but eh whatever)
+            file_cksm_hash_bytes = fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+16]
+            file_hash = Reader(decrypt(file_cksm_hash_bytes, KEY)).read_bytes(16)
+            log.debug(f'{bytes(file_hash).hex()=}')
+            fileInfo_next_byte = (fileInfo_next_byte) + 16
 
-        # decrypted_data = new(KEY, mode=MODE_CBC, IV=iv).decrypt(fileInfo)
-        # dreader = Reader(decrypted_data)
+            # file datetime created/modified (i dont care tbh)
+            file_date_created = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
+            log.debug(f'{file_date_created=}')
+            fileInfo_next_byte = (fileInfo_next_byte) + 8
+            log.debug(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8].hex())
+            file_date_modified = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
+            log.debug(f'{file_date_modified=}')
+            fileInfo_next_byte = (fileInfo_next_byte) + 8
 
-        # log.debug(f"{fileInfo=}")
-        # count = reader.read_int32()
-        # log.debug(f"{count=}")
+            #prep new offset
+            next_file_info_offset = 0
+            if (_ + 1 < fileInfo_count):
+                next_file_info_offset = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+4], KEY)).read_int32()
+                log.debug(next_file_info_offset)
+                fileInfo_next_byte = (fileInfo_next_byte+file_name_len) + 4
+            else:
+                next_file_info_offset = len(data) - fileOffset
 
-        # hashes = c.compute_osz_hash(buffer, count * 4, 0xD1)
-        # if not hashes:
-        #    log.fail("bad fileinfo")
-        #    return
-
-        # currentoffset = dreader.read_int32()
-        # for i in range(count):
-        #    fileName = dreader.read_str(retarded=True)
-        #    fileHash = dreader.read_bytes(16)
-
-        #    dateCreated = dreader.read_int64()
-        #    dateModified = dreader.read_int64()
+            fileLength = next_file_info_offset - fileInfo_offset
+            fileInfo_offset = next_file_info_offset
 
         return c
 
@@ -343,25 +348,3 @@ class OSZ2:
         hash[5] ^= 0x2d
 
         return bytes(hash)
-
-    @staticmethod
-    def compare_byte_sequence(a1, a2):
-        if a1 is None or a2 is None or len(a1) != len(a2):
-            return False
-
-        length = len(a1)
-        for i in range(0, length, 8):
-            if length - i >= 8:
-                if unpack('q', a1[i:i+8])[0] != unpack('q', a2[i:i+8])[0]:
-                    return False
-            elif length - i >= 4:
-                if unpack('i', a1[i:i+4])[0] != unpack('i', a2[i:i+4])[0]:
-                    return False
-            elif length - i >= 2:
-                if unpack('h', a1[i:i+2])[0] != unpack('h', a2[i:i+2])[0]:
-                    return False
-            else:
-                if a1[i] != a2[i]:
-                    return False
-
-        return True

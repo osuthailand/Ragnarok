@@ -36,7 +36,7 @@ void XXTea_Encrypt(const uint32_t* key, const void* src, void* dst, int size) {
 			return;
 	}
 
-	SimpleCryptor_EncryptBytes(key, src, ((uint8_t*)dst + size - leftOver), leftOver);
+	SimpleCryptor_EncryptBytes(key, ((uint8_t*)src + size - leftOver), ((uint8_t*)dst + size - leftOver), leftOver);
 }
 
 void XXTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size) {
@@ -91,7 +91,7 @@ void XXTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size) {
 			return;
 	}
 
-	SimpleCryptor_DecryptBytes(key, src, ((uint8_t*) dst + size - leftOver), leftOver);
+	SimpleCryptor_DecryptBytes(key, ((uint8_t*)src + size - leftOver), ((uint8_t*) dst + size - leftOver), leftOver);
 }
 
 void XXTea_EncryptWords(uint32_t* src_dst, const uint32_t* key, uint32_t n) {

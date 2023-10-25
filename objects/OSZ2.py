@@ -16,6 +16,7 @@ from struct import pack
 
 from utils import log
 
+
 @unique
 class MetadataType(IntEnum):
     Title = 0
@@ -101,7 +102,7 @@ def generate_known_plain() -> bytearray:
     b = bytearray(64)
 
     y = 842502087
-    x = 1990 # Seed for XTEA verification
+    x = 1990  # Seed for XTEA verification
     w = 273326509
     z = 3579807591
 
@@ -143,26 +144,22 @@ def generate_known_plain() -> bytearray:
 
     return b
 
-#Just a wrapper class that logs all operations.
+
 class BytesIOWrapper(io.BytesIO):
     def read(self, __size: int | None = None) -> bytes:
-        log.debug(f"Reading {__size} bytes")
         return super().read(__size)
 
     def write(self, __buffer) -> int:
-        log.debug(f"Writing {len(__buffer)} bytes")
         return super().write(__buffer)
 
     def seek(self, __offset: int, __whence: int = 0) -> int:
-        log.debug(f"Seeking by {__offset} from {__whence}")
         newPos = super().seek(__offset, __whence)
-        log.debug(f"Seeked to {newPos}")
         return newPos
 
     def tell(self) -> int:
         curPos = super().tell()
-        log.debug(f"Telling current position: {curPos}")
         return curPos
+
 
 class OSZ2:
     def __init__(self) -> None:
@@ -178,6 +175,7 @@ class OSZ2:
 
         if filepath:
             if not os.path.exists(filepath):
+                log.fail("The osz2 doesn't exist[]")
                 return
 
             with open(filepath, "rb") as osz2:
@@ -198,22 +196,21 @@ class OSZ2:
 
         # metadata block
         writerMetaHash = BytesIOWrapper()
-        #metadata_entries = reader.read_int32()
-        metadata_entries_bytes = reader.read_bytes(4) #i32
-        writerMetaHash.write(pack('4B', *metadata_entries_bytes)) # save buffer for verification
+        # metadata_entries = reader.read_int32()
+        metadata_entries_bytes = reader.read_bytes(4)  # i32
+        # save buffer for verification
+        writerMetaHash.write(pack('4B', *metadata_entries_bytes))
 
-        metadata_entries = int.from_bytes(pack('4B', *metadata_entries_bytes), byteorder='little')
+        metadata_entries = int.from_bytes(
+            pack('4B', *metadata_entries_bytes), byteorder='little')
 
         metadata_info = []
         for _ in range(metadata_entries):
-            #type = reader.read_int16()
-            type_bytes = reader.read_bytes(2) #i16
+            # type = reader.read_int16()
+            type_bytes = reader.read_bytes(2)  # i16
             value = reader.read_str(retarded=True)
 
             type = int.from_bytes(type_bytes, byteorder='little')
-
-            log.debug(type)
-            log.debug(value)
 
             match MetadataType(type):
                 case MetadataType.Creator:
@@ -232,18 +229,21 @@ class OSZ2:
                     c.metadata.set_id = int(value)
 
             writerMetaHash.write(pack('2B', *type_bytes))
-            writerMetaHash.write((len(str(value).encode('utf-8'))).to_bytes(1, 'little') + str(value).encode()) #shouldve used write_str but er
+            writerMetaHash.write((len(str(value).encode('utf-8'))).to_bytes(
+                # shouldve used write_str but er
+                1, 'little') + str(value).encode())
 
         # verify if hash is matched with what osz2 reported
         with writerMetaHash.getbuffer() as buffer:
-            calculated_oszhash_meta = OSZ2().compute_osz_hash(buffer, metadata_entries * 3, 0xa7)
+            calculated_oszhash_meta = OSZ2().compute_osz_hash(
+                buffer, metadata_entries * 3, 0xa7)
             if calculated_oszhash_meta != pack('16B', *oszhash_meta):
                 log.fail(f"calculated: {calculated_oszhash_meta.hex()}")
                 log.fail(f"osz2 report: {pack('16B', *oszhash_meta).hex()}")
                 log.fail("bad hashes")
                 return
 
-        log.debug(c.metadata)
+        # log.debug(c.metadata)
 
         num_files = reader.read_int32()
 
@@ -251,17 +251,16 @@ class OSZ2:
             fileName = reader.read_str(retarded=True)
             map_id = reader.read_int32()
 
-            log.debug(f"{fileName=} {map_id=}")
+            # log.debug(f"{fileName=} {map_id=}")
 
         # prepare key
         seed = f"{c.metadata.creator}yhxyfjo5{c.metadata.set_id}"
-        log.debug(f"{seed=}")
 
         # save key for later uses
         KEY = hashlib.md5(seed.encode("ascii")).digest()
 
         # TODO: Verify this magic block using XTEA
-        reader.read_bytes(64)
+        reader.read_bytes(64)  # skip for now
 
         # read encrypted data length and decrypt it
         length = reader.read_int32()
@@ -272,59 +271,66 @@ class OSZ2:
         fileInfo = reader.read_bytes(length)
         fileOffset = reader.offset
 
-        log.debug(f"{fileInfo=}")
-        log.debug(f"{fileOffset=}")
+        # log.debug(f"{fileInfo=}")
+        # log.debug(f"{fileOffset=}")
 
-        # prepare the buffer for XXTEA verification and extraction
+        # prepare the buffer for XXTEA files verification and extraction
         fileInfoBytes = bytearray(fileInfo)
-        enc_fileInfo_count = fileInfoBytes[0:4]
-        enc_fileInfo_offset = fileInfoBytes[4:8]
-        log.debug(enc_fileInfo_count)
-        log.debug(enc_fileInfo_offset)
+        fileInfo_count = Reader(decrypt(fileInfoBytes[0:4], KEY)).read_int32()
+        fileInfo_offset = Reader(decrypt(fileInfoBytes[4:8], KEY)).read_int32()
 
-        # start decrypting
-        fileInfo_count = Reader(decrypt(enc_fileInfo_count, KEY)).read_int32()
-        fileInfo_offset = Reader(decrypt(enc_fileInfo_offset, KEY)).read_int32()
-
-        # TODO: make oszhash_file checksum test
-        # calculated_oszhash_file = OSZ2().compute_osz_hash(fileInfoBytes, fileInfo_count * 4, 0xd1)
-        # if calculated_oszhash_file != pack('16B', *oszhash_file):
-        #     log.fail(f"calculated: {calculated_oszhash_file.hex()}")
-        #     log.fail(f"osz2 report: {pack('16B', *oszhash_file).hex()}")
-        #     log.fail("bad hashes")
-        #     return
+        # verify if hash is matched with what osz2 reported
+        calculated_oszhash_file = OSZ2().compute_osz_hash(
+            fileInfoBytes, fileInfo_count * 4, 0xd1)
+        if calculated_oszhash_file != pack('16B', *oszhash_file):
+            log.fail(f"calculated: {calculated_oszhash_file.hex()}")
+            log.fail(f"osz2 report: {pack('16B', *oszhash_file).hex()}")
+            log.fail("bad hashes")
+            return
 
         # intialize buffer and extract files info
         fileInfo_next_byte = 8
+        log.debug(f"{fileInfo_count=}")
         for _ in range(fileInfo_count):
-            log.fail(fileInfo_next_byte)
-            # file name
-            file_name_len = Reader(decrypt(fileInfoBytes[fileInfo_next_byte:fileInfo_next_byte+1], KEY)).read_byte()
-            fileInfo_next_byte = fileInfo_next_byte+1
-            file_name_enc = fileInfoBytes[fileInfo_next_byte:(fileInfo_next_byte)+file_name_len]
-            file_name_dec = decrypt(file_name_enc, KEY)
-            log.debug(f'{file_name_dec=}')
+            # file name (get length)
+            file_name_len = Reader(decrypt(
+                fileInfoBytes[fileInfo_next_byte:fileInfo_next_byte+1], KEY)).read_byte()
 
-            # file checksum (somehow this always wrong? but eh whatever)
-            file_cksm_hash_bytes = fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+16]
-            file_hash = Reader(decrypt(file_cksm_hash_bytes, KEY)).read_bytes(16)
-            log.debug(f'{bytes(file_hash).hex()=}')
+            # file name (get string)
+            fileInfo_next_byte = fileInfo_next_byte+1
+            file_name_enc = fileInfoBytes[fileInfo_next_byte:(
+                fileInfo_next_byte)+file_name_len]
+            file_name_dec = file_name_len.to_bytes(
+                1, 'little') + decrypt(file_name_enc, KEY)
+            file_name = Reader(file_name_dec).read_str(retarded=True)
+            log.warn(f'{file_name=}')
+
+            # file checksum
+            file_cksm_hash_bytes = fileInfoBytes[fileInfo_next_byte +
+                                                 file_name_len:(fileInfo_next_byte+file_name_len)+16]
+            file_hash = Reader(
+                decrypt(file_cksm_hash_bytes, KEY)).read_bytes(16)
+            log.warn(f'{bytes(file_hash).hex()=}')
             fileInfo_next_byte = (fileInfo_next_byte) + 16
 
-            # file datetime created/modified (i dont care tbh)
-            file_date_created = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
-            log.debug(f'{file_date_created=}')
+            # file datetime created/modified
+            # TODO: Make this readable by datetime
+            file_date_created = Reader(decrypt(
+                fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
+            log.warn(f'{file_date_created=}')
             fileInfo_next_byte = (fileInfo_next_byte) + 8
-            log.debug(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8].hex())
-            file_date_modified = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
-            log.debug(f'{file_date_modified=}')
+            file_date_modified = Reader(decrypt(
+                fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+8], KEY)).read_int64()
+            log.warn(f'{file_date_modified=}')
             fileInfo_next_byte = (fileInfo_next_byte) + 8
 
-            #prep new offset
+            # prep new offset for files extraction
             next_file_info_offset = 0
             if (_ + 1 < fileInfo_count):
-                next_file_info_offset = Reader(decrypt(fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+4], KEY)).read_int32()
-                log.debug(next_file_info_offset)
+                next_file_info_offset = Reader(decrypt(
+                    fileInfoBytes[fileInfo_next_byte+file_name_len:(fileInfo_next_byte+file_name_len)+4], KEY)).read_int32()
+                # some_function_that_uses_FileInfo_dataclass_here()
+                log.warn(next_file_info_offset)
                 fileInfo_next_byte = (fileInfo_next_byte+file_name_len) + 4
             else:
                 next_file_info_offset = len(data) - fileOffset

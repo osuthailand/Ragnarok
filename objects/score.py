@@ -98,9 +98,12 @@ class Score:
     @property
     def web_format(self) -> str:
         return (
-            f"\n{self.id}|{self.player.username}|{self.score if self.gamemode == Gamemode.VANILLA else math.ceil(self.pp)}|"
-            f"{self.max_combo}|{self.count_50}|{self.count_100}|{self.count_300}|{self.count_miss}|"
-            f"{self.count_katu}|{self.count_geki}|{self.perfect}|{self.mods}|{self.player.id}|"
+            f"\n{self.id}|{self.player.username}|{
+                self.score if self.gamemode == Gamemode.VANILLA else math.ceil(self.pp)}|"
+            f"{self.max_combo}|{self.count_50}|{self.count_100}|{
+                self.count_300}|{self.count_miss}|"
+            f"{self.count_katu}|{self.count_geki}|{
+                self.perfect}|{self.mods}|{self.player.id}|"
             f"{self.position}|{self.submitted}|1"
         )
 
@@ -290,27 +293,6 @@ class Score:
                 s.status = SubmitStatus.BEST
         else:
             s.status = SubmitStatus.FAILED
-
-        # Currently all I need for this checksum
-        # to work, is a storyboard checksum? Yeah,
-        # I don't know either. I KNOW, nvm.
-
-        # security_hash = RijndaelCbc(key, iv_latin, ZeroPadding(32), 32).decrypt(b64decode(security_hash).decode("latin_1")).decode()
-        # reci_check_sum = data[2]
-
-        # check_sum = md5(
-        #     f"chickenmcnuggets"
-        #     f"{s.count_100 + s.count_300}o15{s.count_50}{s.count_geki}"
-        #     f"smustard{s.count_katu}{s.count_miss}uu"
-        #     f"{s.map.map_md5}{s.max_combo}{str(s.perfect)}"
-        #     f"{s.player.username}{s.score}{s.rank}{s.mods}Q{str(s.passed)}"
-        #     f"{s.mode}{data[17].strip()}{data[16]}{security_hash}{storyboardchecksum}"
-        #     .encode()
-        # ).hexdigest()
-
-        # if reci_check_sum != check_sum:
-        #     log.error(f"{s.player.username} tried to submit a score with an invalid score checksum.")
-        #     return
 
         return s
 

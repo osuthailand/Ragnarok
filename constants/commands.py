@@ -7,6 +7,7 @@ import uuid
 import time
 import random
 import asyncio
+from events import osu
 from objects.beatmap import Beatmap
 from objects.match import Match
 from objects.score import SubmitStatus
@@ -21,7 +22,7 @@ from rina_pp_pyb import Beatmap as BMap, Calculator
 
 from objects.bot import Bot
 from constants.mods import Mods
-from constants.playmode import Mode
+from constants.playmode import Gamemode, Mode
 from constants.beatmap import Approved
 from constants.player import Privileges
 from constants.packets import BanchoPackets
@@ -212,7 +213,8 @@ async def verify_with_key(ctx: Context) -> str | None:
 
     if not (
         key_info := await services.sql.fetch(
-            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (key)
+            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (
+                key)
         )
     ):
         return "Invalid key"
@@ -225,7 +227,8 @@ async def verify_with_key(ctx: Context) -> str | None:
     )
 
     asyncio.create_task(
-        services.sql.execute("DELETE FROM beta_keys WHERE id = %s", key_info["id"])
+        services.sql.execute(
+            "DELETE FROM beta_keys WHERE id = %s", key_info["id"])
     )
 
     ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
@@ -238,7 +241,8 @@ async def verify_with_key(ctx: Context) -> str | None:
         )
     )
 
-    log.info(f"{ctx.author.username} successfully verified their account with a key")
+    log.info(
+        f"{ctx.author.username} successfully verified their account with a key")
 
     return "Successfully verified your account."
 
@@ -387,7 +391,8 @@ async def last_score(ctx: Context) -> str:
     )
 
     if not score.status & SubmitStatus.PASSED:
-        initial_response += f"[{score.status.name} | {int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
+        initial_response += f"[{score.status.name} | {
+            int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
 
     return initial_response
 
@@ -410,7 +415,7 @@ def ensure_match(host: bool):
 
                 if (
                     host and ctx.author.match.host != ctx.author.id
-                ) or not ctx.author.privileges & Privileges.MODERATOR:
+                ) and not ctx.author.privileges & Privileges.MODERATOR:
                     return "Only the host can perform this command."
 
                 return await cb(ctx, *args, **kwargs)
@@ -674,7 +679,8 @@ async def invite_people(ctx: Context) -> str | None:
         return "You can't invite yourself."
 
     await ctx.author.send_message(
-        f"Come join my multiplayer match: [osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
+        f"Come join my multiplayer match: [osump://{m.match_id}/{
+            m.match_pass.replace(' ', '_')} {m.match_name}]",
         reciever=target,
     )
 
@@ -777,7 +783,8 @@ async def restrict_user(ctx: Context) -> str | None:
 
     asyncio.create_task(
         services.sql.execute(
-            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (t.id)
+            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (
+                t.id)
         )
     )
 
@@ -880,10 +887,12 @@ async def approve_map(ctx: Context) -> str | None:
     else:
         title = bmap.full_title
 
-    resp = f"Successfully changed {title}'s status, from {Approved(bmap.approved).name} to {ranked_status.name}"
+    resp = f"Successfully changed {title}'s status, from {
+        Approved(bmap.approved).name} to {ranked_status.name}"
 
     await ctx.author.log(
-        f"changed {title}'s status from {Approved(bmap.approved).name} to {ranked_status.name}"
+        f"changed {title}'s status from {Approved(bmap.approved).name} to {
+            ranked_status.name}"
     )
 
     bmap.approved = ranked_status
@@ -905,14 +914,19 @@ async def approve_map(ctx: Context) -> str | None:
 async def recalc_scores(ctx: Context) -> str | None:
     """Recalculate all the scores on either relax or vanilla."""
 
-    if not ctx.args:
-        return "Usage: !recalc <relax/vanilla>"
+    if len(ctx.args) < 2:
+        return "Usage: !recalc <relax/vanilla/autopilot> <std/taiko/catch/mania>"
 
-    if ctx.args[0].lower() not in ("relax", "vanilla"):
-        return "Usage: !recalc <relax/vanilla>"
+    gamemode = Gamemode.from_str(ctx.args[0].lower())
+    mode = Mode.from_str(ctx.args[1].lower())
+
+    if gamemode == Gamemode.UNKNOWN or mode == Mode.NONE:
+        return "Usage: !recalc <relax/vanilla/autopilot> <std/taiko/catch/mania>"
 
     await ctx.reciever.send(
-        message=f"Fetching EVERY SCORE on the server for {ctx.args[0].lower()}...",
+        message=f"Fetching EVERY SCORE on the server for {
+            ctx.args[1].lower()} {
+            ctx.args[0].lower()}...",
         sender=services.bot,
     )
 
@@ -922,17 +936,21 @@ async def recalc_scores(ctx: Context) -> str | None:
         "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
         "b.version, b.artist FROM scores s "
         "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
-        "WHERE s.gamemode = %s AND s.mode = 0 AND s.status = 3",  # 3: best
-        (1 if ctx.args[0].lower() == "relax" else 0),
+        "WHERE s.gamemode = %s AND s.mode = %s AND s.status = 3",  # 3: best
+        (gamemode, mode.value),
     ):
         try:
             bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
         except:
-            await ctx.reciever.send(
-                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
-                sender=services.bot,
-            )
-            continue
+            await ctx.reciever.send(message="No beatmap with that id found on server... Getting from osu api...", sender=services.bot)
+            await osu.save_beatmap_file(score["map_id"])
+            await asyncio.sleep(2)
+            await ctx.reciever.send(message="Waiting 2 seconds before continuing to prevent rate limiting.", sender=services.bot)
+            try:
+                bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
+            except:
+                await ctx.reciever.send(message="welp couldn't find beatmap lol", sender=services.bot)
+                continue
 
         calc = Calculator(
             mode=score["mode"],
@@ -951,7 +969,8 @@ async def recalc_scores(ctx: Context) -> str | None:
 
         if math.isnan(pp):
             await ctx.reciever.send(
-                message=f"Failed to recalculate pp for score {score['id']} on map {score['artist']} - {score['title']} [{score['version']}]",
+                message=f"Failed to recalculate pp for score {score['id']} on map {
+                    score['artist']} - {score['title']} [{score['version']}]",
                 sender=services.bot,
             )
             pp = 0
@@ -961,7 +980,8 @@ async def recalc_scores(ctx: Context) -> str | None:
         )
 
         await ctx.reciever.send(
-            message=f"Finished recalculating score {score['id']} (before: {round(score['pp'],4)}, after: {round(pp,4)})",
+            message=f"Finished recalculating score {
+                score['id']} (before: {round(score['pp'], 4)}, after: {round(pp, 4)})",
             sender=services.bot,
         )
 
@@ -1009,7 +1029,8 @@ async def beta_keys(ctx: Context) -> str | None:
             return "Key doesn't exist"
 
         asyncio.create_task(
-            services.sql.execute("DELETE FROM beta_keys WHERE id = %s", (key_id))
+            services.sql.execute(
+                "DELETE FROM beta_keys WHERE id = %s", (key_id))
         )
 
         return f"Deleted key {key_id}"
@@ -1089,5 +1110,9 @@ async def handle_commands(
         if ctx.cmd != command.cmd or not command.perms & ctx.author.privileges:
             if ctx.cmd not in command.aliases:
                 continue
+        try:
+            response = await command.trigger(ctx)
+        except Exception as e:
+            response = f"unhandled error: {e} (contact Simon about this)"
 
-        return await command.trigger(ctx)
+        return response

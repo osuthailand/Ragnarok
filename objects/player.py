@@ -342,7 +342,8 @@ class Player:
             # TODO: make mode and relax for user achievements
             if not (ach := services.get_achievement_by_id(achievement["achievement_id"])):
                 log.fail(
-                    f"user_achievements: Failed to fetch achievements (id: {achievement['achievement_id']})"
+                    f"user_achievements: Failed to fetch achievements (id: {
+                        achievement['achievement_id']})"
                 )
                 return
 
@@ -402,7 +403,8 @@ class Player:
 
                 # country rank
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod.value}:{self.country}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{mod.value}:{
+                        self.country}:{mode.value}", self.id
                 )
 
         # notify user
@@ -416,7 +418,8 @@ class Player:
 
         # important stuff
         await services.sql.execute(
-            f"UPDATE {s.gamemode.table} SET pp_{se} = %s, playcount_{se} = %s, "
+            f"UPDATE {s.gamemode.table} SET pp_{
+                se} = %s, playcount_{se} = %s, "
             f"accuracy_{se} = %s, total_score_{se} = %s, "
             f"ranked_score_{se} = %s, level_{se} = %s WHERE id = %s",
             (
@@ -432,8 +435,10 @@ class Player:
         log.debug(s.total_hits)
         # less important
         await services.sql.execute(
-            f"UPDATE {s.gamemode.table} SET total_hits_{se} = total_hits_{se} + %s, "
-            f"playtime_{se} = playtime_{se} + %s, max_combo_{se} = IF(max_combo_{se}<%s, %s, max_combo_{se}) "
+            f"UPDATE {s.gamemode.table} SET total_hits_{
+                se} = total_hits_{se} + %s, "
+            f"playtime_{se} = playtime_{
+                se} + %s, max_combo_{se} = IF(max_combo_{se}<%s, %s, max_combo_{se}) "
             "WHERE id = %s",
             (s.total_hits, s.playtime, s.max_combo, s.max_combo, self.id)
         )
@@ -464,14 +469,16 @@ class Player:
     async def set_location(self, get: bool = False):
         async with aiohttp.ClientSession() as sess:
             async with sess.get(
-                f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"
+                f"http://ip-api.com/json/{
+                    self.ip}?fields=status,message,countryCode,region,lat,lon"
             ) as resp:
                 if not (ret := await resp.json()):
                     return  # sus
 
                 if ret["status"] == "fail":
                     log.fail(
-                        f"Unable to get {self.username}'s location. Response: {ret['message']}"
+                        f"Unable to get {self.username}'s location. Response: {
+                            ret['message']}"
                     )
                     return
 
@@ -498,9 +505,12 @@ class Player:
 
     async def get_stats(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> dict:
         ret = await services.sql.fetch(
-            f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
-            f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
-            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
+            f"SELECT {mode.to_db("ranked_score")}, {
+                mode.to_db("total_score")}, "
+            f"{mode.to_db("accuracy")}, {mode.to_db(
+                "playcount")}, {mode.to_db("pp")}, "
+            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {
+                mode.to_db("max_combo")} "
             f"FROM {gamemode.table} "
             "WHERE id = %s",
             (self.id),
@@ -515,7 +525,7 @@ class Player:
         mod = (
             "vanilla" if gamemode == Gamemode.VANILLA else
             "relax" if gamemode == Gamemode.RELAX else
-            "autopilot" # gamemode == Gamemode.AUTOPILOT
+            "autopilot"  # gamemode == Gamemode.AUTOPILOT
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{mode}",
@@ -527,7 +537,7 @@ class Player:
         mod = (
             "vanilla" if gamemode == Gamemode.VANILLA else
             "relax" if gamemode == Gamemode.RELAX else
-            "autopilot" # gamemode == Gamemode.AUTOPILOT
+            "autopilot"  # gamemode == Gamemode.AUTOPILOT
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
@@ -540,7 +550,7 @@ class Player:
             mod = (
                 "vanilla" if gamemode == Gamemode.VANILLA else
                 "relax" if gamemode == Gamemode.RELAX else
-                "autopilot" # gamemode == Gamemode.AUTOPILOT
+                "autopilot"  # gamemode == Gamemode.AUTOPILOT
             )
             await services.redis.zadd(
                 f"ragnarok:leaderboard:{mod}:{mode}",

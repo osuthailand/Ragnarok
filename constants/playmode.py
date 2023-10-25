@@ -14,7 +14,7 @@ class Mode(IntEnum):
         return iter((self.OSU, self.TAIKO, self.CATCH, self.MANIA))
 
     @classmethod
-    def from_str(cls, mode: str):
+    def from_str(cls, mode: str) -> "Mode":
         match mode.lower():
             case "std" | "osu":
                 return cls.OSU
@@ -77,3 +77,14 @@ class Gamemode(IntEnum):
     @property
     def score_order(self):
         return "score" if self == self.VANILLA else "pp"
+
+    @classmethod
+    def from_str(cls, s: str) -> "Gamemode":
+        match s:
+            case "vn" | "vanilla":
+                return cls.VANILLA
+            case "rx" | "relax":
+                return cls.RELAX
+            case "ap" | "autopilot":
+                return cls.AUTOPILOT
+            case _: return cls.UNKNOWN

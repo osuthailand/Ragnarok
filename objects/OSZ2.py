@@ -3,7 +3,6 @@ from base64 import b64decode
 from dataclasses import dataclass
 from enum import IntEnum, unique
 import struct
-from typing import Union
 import hashlib
 import os
 import io
@@ -62,20 +61,8 @@ class FileInfo:
     Created: datetime
     Modified: datetime
 
-
 # fmt: off
-# KEY: bytearray = (
-#     216, 98, 163, 48, 2,
-#     109, 118, 89, 244, 247,
-#     37, 194, 235, 70, 174,
-#     52, 13, 106, 97, 84, 242,
-#     62, 186, 48, 25, 66, 72,
-#     85, 242, 22, 15, 92,
-# ) # type: ignore
-# fmt: on
-
-# fmt: off
-# this is FastRandom(1990)
+# FastRandom(1990) but not sure if this is correct ones
 knownByteSeq = bytearray([
    0x55, 0xAA, 0x74, 0x10, 0x2B, 0x56, 0xB3, 0x9E,
    0x25, 0x9E, 0xFE, 0xB7, 0xBE, 0x06, 0xFC, 0xF2,
@@ -88,8 +75,56 @@ knownByteSeq = bytearray([
 ])
 # fmt: on
 
+# FastRandom(1990) but also not sure if this is correct ones
+def generate_known_plain() -> bytearray:
+    b = bytearray(64)
 
-class DecryptReader:
+    y = 842502087
+    x = 1990  # Seed for XTEA verification
+    w = 273326509
+    z = 3579807591
+
+    t = 0
+    i = 0
+    while i < len(b) - 3:
+        t = x ^ (x << 11)
+
+        x = y
+        y = z
+        z = w
+        w = (w ^ (w >> 19)) ^ (t ^ (t >> 8))
+
+        b[i] = w & 0x000000FF
+        b[i + 1] = (w & 0x0000FF00) >> 8
+        b[i + 2] = (w & 0x00FF0000) >> 16
+        b[i + 3] = (w & 0xFF000000) >> 24
+
+        i += 4
+
+    if i < len(b):
+        t = x ^ (x << 11)
+        x = y
+        y = z
+        z = w
+        w = (w ^ (w >> 19)) ^ (t ^ (t >> 8))
+
+        b[i] = w & 0x000000FF
+        i += 1
+        if i < len(b):
+            b[i] = (w & 0x0000FF00) >> 8
+            i += 1
+            if i < len(b):
+                b[i] = (w & 0x00FF0000) >> 16
+                i += 1
+                if i < len(b):
+                    i += 1
+                    b[i] = (w & 0xFF000000) >> 24
+
+    return b
+
+
+
+class XXTeaDecryptReader:
     def __init__(self, data, key: bytes) -> None:
         self.key: bytes = key
         self._data = memoryview(bytearray(data))
@@ -127,28 +162,27 @@ class DecryptReader:
         self.offset += 8
         return ret
 
-    def read_str(self, known_length: int) -> str:
-        data = decrypt(self.data[: known_length], self.key)
-
-        shift = 0
-        result = 0
+    def read_uleb128(self) -> int:
+        result = shift = 0
 
         while True:
-            b = data[0]
+            b = int.from_bytes(decrypt(self.data[0:1], self.key))
             self.offset += 1
 
-            result |= (b & 0x7F) << shift
-
-            if b & 0x80 == 0:
+            result |= (b & 0b01111111) << shift
+            if (b & 0b10000000) == 0:
                 break
 
             shift += 7
 
-        ret = data[:known_length].decode()
+        return result
+    
+    def read_str(self) -> str:
+        s_len = self.read_uleb128()
+        ret = decrypt(self.data[:s_len], self.key).decode()
+        self.offset += s_len
 
-        self.offset += known_length
         return ret
-
 
 class BytesIOWrapper(io.BytesIO):
     def read(self, __size: int | None = None) -> bytes:
@@ -164,6 +198,30 @@ class BytesIOWrapper(io.BytesIO):
     def tell(self) -> int:
         curPos = super().tell()
         return curPos
+
+    def write_uleb128(self, num: int):
+        if num == 0:
+            return b'\x00'
+
+        ret = bytearray()
+        length = 0
+
+        while num > 0:
+            ret.append(num & 0b01111111)
+            num >>= 7
+            if num != 0:
+                ret[length] |= 0b10000000
+            length += 1
+
+        self.write(ret)
+
+    def write_str(self, s: str):
+        if s:
+            encoded = s.encode()
+            self.write_uleb128(len(encoded))
+            self.write(encoded)
+        else:
+            self.write(b'\x00')
 
 
 class OSZ2:
@@ -190,32 +248,39 @@ class OSZ2:
 
         # the file should start with 0xEC, 0x48 and 0x4F otherwise it is NOT osz2
         if reader.read_bytes(3) != (0xEC, 0x48, 0x4F):
-            log.fail("User tried to submit an invalid osz2 file")
-            return
+            # check if it's a patch file instead (BSDIFF40)
+            reader.offset = 0
+            if reader.read_bytes(8) == (0x42, 0x53, 0x44, 0x49, 0x46, 0x46, 0x34, 0x30):
+                log.fail("Patch file not supported yet!")
+                return
+            else:
+                log.fail("User tried to submit an invalid osz2 file")
+                return
 
+        # unused
         version = reader.read_byte()
         iv = bytearray(reader.read_bytes(16))
+
         hash_meta = reader.read_bytes(16)
         hash_file = reader.read_bytes(16)
         hash_data = reader.read_bytes(16)
 
         # metadata block
-        writerMetaHash = BytesIOWrapper()
-        # metadata_entries = reader.read_int32()
+        #metadata_entries = reader.read_int32()
         metadata_entries_bytes = reader.read_bytes(4)  # i32
+        metadata_entries = int.from_bytes(pack('4B', *metadata_entries_bytes), byteorder='little')
+
         # save buffer for verification
+        writerMetaHash = BytesIOWrapper()
         writerMetaHash.write(pack('4B', *metadata_entries_bytes))
 
-        metadata_entries = int.from_bytes(
-            pack('4B', *metadata_entries_bytes), byteorder='little')
-
+        # read metadata
         metadata_info = []
         for _ in range(metadata_entries):
             # type = reader.read_int16()
             type_bytes = reader.read_bytes(2)  # i16
-            value = reader.read_str(retarded=True)
-
             type = int.from_bytes(type_bytes, byteorder='little')
+            value = reader.read_str(dotNETString=True)
 
             match MetadataType(type):
                 case MetadataType.Creator:
@@ -233,35 +298,34 @@ class OSZ2:
                 case MetadataType.BeatmapSetID:
                     c.metadata.set_id = int(value)
 
+            # also save this to the buffer for verification
             writerMetaHash.write(pack('2B', *type_bytes))
-            writerMetaHash.write((len(str(value).encode('utf-8'))).to_bytes(
-                # shouldve used write_str but er
-                1, 'little') + str(value).encode())
+            writerMetaHash.write_str(value)
 
         # verify if hash is matched with what osz2 reported
-        with writerMetaHash.getbuffer() as buffer:
-            calculated_hash_meta = OSZ2().compute_osz_hash(
-                buffer, metadata_entries * 3, 0xa7)
+        with writerMetaHash.getbuffer() as meta_buffer:
+            calculated_hash_meta = OSZ2.compute_osz_hash(meta_buffer, metadata_entries * 3, 0xa7)
             if calculated_hash_meta != pack('16B', *hash_meta):
                 log.fail(f"calculated: {calculated_hash_meta.hex()}")
                 log.fail(f"osz2 report: {pack('16B', *hash_meta).hex()}")
-                log.fail("bad hashes")
+                log.fail("bad hashes (hash_meta)")
                 return
 
+        # check how many .osu are there in the osz2
         num_files = reader.read_int32()
 
-        for _ in range(num_files):
-            fileName = reader.read_str(retarded=True)
+        # read all of them
+        # TODO: add them to dict for FileInfo
+        for i in range(num_files):
+            fileName = reader.read_str(dotNETString=True)
             map_id = reader.read_int32()
 
-        # prepare key
+        # prepare key and save key for later uses
         seed = f"{c.metadata.creator}yhxyfjo5{c.metadata.set_id}"
-
-        # save key for later uses
         KEY = hashlib.md5(seed.encode("ascii")).digest()
 
         # TODO: Verify this magic block using XTEA
-        reader.read_bytes(64)  # skip for now
+        magic_key = reader.read_bytes(64)  # skip for now
 
         # read encrypted data length and decrypt it
         length = reader.read_int32()
@@ -272,55 +336,42 @@ class OSZ2:
         file_info = reader.read_bytes(length)
         file_offset = reader.offset
 
-        with DecryptReader(file_info, KEY) as (reader, raw_data):
-            # prepare the buffer for XXTEA files verification and extraction
-            file_info_count = reader.read_int32()
-            file_info_offset = reader.read_int32()
-            log.debug(f"{file_info_count=}")
-            log.debug(f"{file_info_offset=}")
+        # prepare the buffer for XXTEA files verification and extraction
+        with XXTeaDecryptReader(file_info, KEY) as (xxtea_reader, xxtea_block):
             # verify if hash is matched with what osz2 reported
-            # calculated_hash_file = OSZ2.compute_osz_hash(
-            #     raw_data, file_info_count * 4, 0xd1)
-
-            # if calculated_hash_file != pack('16B', *hash_file):
-            #     log.fail(f"calculated: {calculated_hash_file.hex()}")
-            #     log.fail(f"osz2 report: {pack('16B', *hash_file).hex()}")
-            #     log.fail("bad hashes")
-            #     return
+            file_info_count = xxtea_reader.read_int32()
+            calculated_hash_file = OSZ2.compute_osz_hash(bytearray(file_info), file_info_count * 4, 0xd1)
+            if calculated_hash_file != pack('16B', *hash_file):
+                 log.fail(f"calculated: {calculated_hash_file.hex()}")
+                 log.fail(f"osz2 report: {pack('16B', *hash_file).hex()}")
+                 log.fail("bad hashes (hash_file)")
+                 return
+            
+            current_fileinfo_offset = xxtea_reader.read_int32()
 
             # intialize buffer and extract files info
             for i in range(file_info_count):
-                # file name (get length)
-                file_name_len = reader.read_byte()
-                log.debug(f"{file_name_len=}")
-
-                # file name (get string)
-                # file_name = reader.read_str(file_name_len)
-                file_name = (file_name_len.to_bytes(
-                    1, "little") + decrypt(reader.data[:file_name_len], KEY)).decode()
-                reader.offset += file_name_len
+                # file name
+                file_name = xxtea_reader.read_str()
 
                 # file checksum
-                file_hash = reader.read_bytes(16)
+                file_hash = xxtea_reader.read_bytes(16)
 
                 # file datetime created/modified
                 # TODO: Make this readable by datetime
-                file_date_created = reader.read_int64()
-                file_date_modified = reader.read_int64()
+                file_date_created = xxtea_reader.read_int64()
+                file_date_modified = xxtea_reader.read_int64()
 
-                # # # prep new offset for files extraction
+                # prep new offset for files extraction
                 next_file_info_offset = 0
                 if (i + 1 < file_info_count):
-                    # next file is not being used for the rest of the thingy thing thing
-                    next_file_info_offset = reader.read_int32()
-                    # some_function_that_uses_FileInfo_dataclass_here()
+                    next_file_info_offset = xxtea_reader.read_int32()
                 else:
-                    next_file_info_offset = len(raw_data) - file_offset
+                    next_file_info_offset = len(data) - file_offset
 
-                file_info = next_file_info_offset - file_info_offset
-                file_info_offset = next_file_info_offset
-
-        return c
+                file_len = next_file_info_offset - current_fileinfo_offset
+                # TODO: add file info append here
+                current_fileinfo_offset = next_file_info_offset
 
     @staticmethod
     def compute_osz_hash(buffer: memoryview | bytearray, pos: int, swap: int) -> bytes:

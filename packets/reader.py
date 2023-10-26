@@ -94,7 +94,7 @@ class Reader:
 
     @property
     def data(self):
-        return self.packet_data[self.offset :]
+        return self.packet_data[self.offset:]
 
     def read_bytes(self, size: int):
         ret = struct.unpack("<" + "B" * size, self.data[:size])
@@ -169,24 +169,22 @@ class Reader:
         self.offset += 8
         return ret
 
-    def read_str(self, retarded: bool = False) -> str:
-        if not retarded:
+    def read_str(self, dotNETString: bool = False) -> str:
+        if not dotNETString:
             is_string = self.data[0] == 0x0B
             self.offset += 1
 
             if not is_string:
                 return ""
 
-        shift = 0
-        result = 0
+        result = shift = 0
 
         while True:
             b = self.data[0]
             self.offset += 1
 
-            result |= (b & 0x7F) << shift
-
-            if b & 0x80 == 0:
+            result |= (b & 0b01111111) << shift
+            if (b & 0b10000000) == 0:
                 break
 
             shift += 7
@@ -222,15 +220,14 @@ class Reader:
         m.match_name = self.read_str()
         m.match_pass = self.read_str()
 
-        self.read_str() # map title
-        map_id = self.read_int32() # map id
+        self.read_str()  # map title
+        map_id = self.read_int32()  # map id
         map_md5 = self.read_str()
 
         m.map = await services.beatmaps.get(map_md5)
-        
+
         if not m.map:
             m.map = await services.beatmaps.get_by_map_id(map_id)
-
 
         for slot in m.slots:
             slot.status = SlotStatus(self.read_int8())

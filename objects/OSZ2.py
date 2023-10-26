@@ -373,6 +373,29 @@ class OSZ2:
                 # TODO: add file info append here
                 current_fileinfo_offset = next_file_info_offset
 
+        # data extraction
+        # TODO: write full code when simon is here, for now have the first file only for now
+        data_enc_len = reader.read_bytes(4)
+        data_dec_len = decrypt(bytearray(data_enc_len), KEY)
+        data_dec_len = (data_dec_len[0] |
+                        data_dec_len[1] << 8 |
+                        data_dec_len[2] << 16 |
+                        data_dec_len[3] << 24)
+
+        encrypted_data_tuple = reader.read_bytes(data_dec_len)
+        encrypted_data = bytearray(encrypted_data_tuple)
+        full_blocks = len(encrypted_data) // 64
+        equivalent_value = full_blocks * 64
+        leftover = len(encrypted_data) - equivalent_value
+
+        with open(f".data/osz2/test_data/test_bytes", "wb+") as extract:
+            decrypted_data = decrypt(encrypted_data[0:equivalent_value], KEY)
+            decrypted_data += decrypt(encrypted_data[equivalent_value:equivalent_value+64], KEY)
+            decrypted_data += decrypt(encrypted_data[equivalent_value+64:equivalent_value+64+leftover], KEY)
+            extract.write(decrypted_data)
+        
+        return c
+
     @staticmethod
     def compute_osz_hash(buffer: memoryview | bytearray, pos: int, swap: int) -> bytes:
         buffer[pos] ^= swap

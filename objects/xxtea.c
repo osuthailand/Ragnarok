@@ -3,6 +3,58 @@
 // port of XXTea code from Osz2Decryptor to C
 // by r0neko
 
+// port of XTea code from Osz2Decryptor to C
+// by Aoba
+
+// XTEA
+void XTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size) {
+	uint32_t fullWordCount = (uint32_t)size / 8;
+	uint32_t leftOver = (uint32_t)size % 8;
+
+	uint32_t* uBufferPtr = (uint32_t*)dst;
+
+	uBufferPtr -= 2;
+
+	// copy the source data to the destination, if the source is not the same.
+	if (src != dst) {
+		memcpy(dst, src, size);
+	}
+
+	for (uint32_t wordCount = 0; wordCount < fullWordCount; wordCount++)
+	{
+		XTea_DecryptWords(uBufferPtr += 2, key);
+	}
+
+	if (leftOver == 0)
+		return;
+
+	uint8_t* bufferEnd = (uint8_t*)dst + size ;
+    uint8_t* bufferLeft = bufferEnd - leftOver;
+
+    // copy leftover buffer array to result array
+    uint8_t* bufferResult;
+    do
+    {
+        bufferResult = bufferLeft++;
+		bufferResult++;
+    } while (bufferResult != bufferEnd);
+
+	SimpleCryptor_DecryptBytes(key, (bufferResult - leftOver), (bufferResult - leftOver), leftOver);
+}
+
+void XTea_DecryptWords(uint32_t* dst_src, const uint32_t* key) {
+    uint32_t i;
+    uint32_t v0=dst_src[0], v1=dst_src[1];
+    uint32_t sum = TEA_DELTA * 32;
+    for (i = 0; i < 32; i++) {
+        v1 -= (((v0 << 4) ^ (v0 >> 5)) + v0) ^ (sum + key[(sum >> 11) & 3]);
+        sum -= TEA_DELTA;
+        v0 -= (((v1 << 4) ^ (v1 >> 5)) + v1) ^ (sum + key[sum & 3]);
+    }
+	dst_src[0]=v0; dst_src[1]=v1;
+}
+
+// XXTEA
 void XXTea_Encrypt(const uint32_t* key, const void* src, void* dst, int size) {
 	uint32_t fullWordCount = (uint32_t)size / MAX_BYTES;
 	uint32_t leftOver = (uint32_t)size % MAX_BYTES;

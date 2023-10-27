@@ -13,6 +13,9 @@
 #define MAX_BYTES (MAX * 4)
 #define TEA_DELTA 0x9e3779b9
 
+void XTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size);
+void XTea_DecryptWords(uint32_t* dst_src, const uint32_t* key);
+
 void XXTea_Decrypt(const uint32_t* key, const void* src, void* dst, int size);
 void XXTea_Encrypt(const uint32_t* key, const void* src, void* dst, int size);
 

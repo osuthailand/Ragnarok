@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Any
 
 import orjson
@@ -18,6 +19,16 @@ def random_string(len: int) -> str:
     return "".join(
         random.choice(string.ascii_lowercase + string.digits) for _ in range(len)
     )
+
+
+def datetime_frombinary(time: int) -> datetime:
+    n_ticks = time & 0x3fffffffffffffff
+    secs = n_ticks / 1e7
+
+    d1 = datetime(1, 1, 1)
+    t1 = timedelta(seconds=secs)
+
+    return d1+t1
 
 
 def compare_byte_sequence(a1: bytes, a2: bytes) -> bool:

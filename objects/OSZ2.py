@@ -9,8 +9,9 @@ import io
 
 from packets.reader import Reader
 from datetime import datetime
+from utils.general import datetime_frombinary
 
-from objects.xxtea import decrypt
+from objects.xxtea import xxtea_decrypt, xtea_decrypt
 
 from struct import pack
 
@@ -63,7 +64,7 @@ class FileInfo:
 
 # fmt: off
 # FastRandom(1990) but not sure if this is correct ones
-knownByteSeq = bytearray([
+knownPlainByteSeq = bytearray([
    0x55, 0xAA, 0x74, 0x10, 0x2B, 0x56, 0xB3, 0x9E,
    0x25, 0x9E, 0xFE, 0xB7, 0xBE, 0x06, 0xFC, 0xF2,
    0xB6, 0x3C, 0x6F, 0x47, 0x7E, 0x38, 0x69, 0x43,
@@ -74,55 +75,6 @@ knownByteSeq = bytearray([
    0x68, 0xBF, 0xC6, 0x97, 0x5B, 0x1B, 0x5E, 0x7F
 ])
 # fmt: on
-
-# FastRandom(1990) but also not sure if this is correct ones
-def generate_known_plain() -> bytearray:
-    b = bytearray(64)
-
-    y = 842502087
-    x = 1990  # Seed for XTEA verification
-    w = 273326509
-    z = 3579807591
-
-    t = 0
-    i = 0
-    while i < len(b) - 3:
-        t = x ^ (x << 11)
-
-        x = y
-        y = z
-        z = w
-        w = (w ^ (w >> 19)) ^ (t ^ (t >> 8))
-
-        b[i] = w & 0x000000FF
-        b[i + 1] = (w & 0x0000FF00) >> 8
-        b[i + 2] = (w & 0x00FF0000) >> 16
-        b[i + 3] = (w & 0xFF000000) >> 24
-
-        i += 4
-
-    if i < len(b):
-        t = x ^ (x << 11)
-        x = y
-        y = z
-        z = w
-        w = (w ^ (w >> 19)) ^ (t ^ (t >> 8))
-
-        b[i] = w & 0x000000FF
-        i += 1
-        if i < len(b):
-            b[i] = (w & 0x0000FF00) >> 8
-            i += 1
-            if i < len(b):
-                b[i] = (w & 0x00FF0000) >> 16
-                i += 1
-                if i < len(b):
-                    i += 1
-                    b[i] = (w & 0xFF000000) >> 24
-
-    return b
-
-
 
 class XXTeaDecryptReader:
     def __init__(self, data, key: bytes) -> None:
@@ -141,24 +93,24 @@ class XXTeaDecryptReader:
         pass
 
     def read_bytes(self, size: int):
-        dec = decrypt(self.data[:size], self.key)
+        dec = xxtea_decrypt(self.data[:size], self.key)
         self.offset += size
         return struct.unpack(f"<{"B"*size}", dec)
 
     def read_byte(self) -> int:
-        ret = struct.unpack("<b", decrypt(self.data[:1], self.key))
+        ret = struct.unpack("<b", xxtea_decrypt(self.data[:1], self.key))
         self.offset += 1
         return ret[0]
 
     def read_int32(self) -> int:
         ret = int.from_bytes(
-            decrypt(self.data[:4], self.key), "little", signed=True)
+            xxtea_decrypt(self.data[:4], self.key), "little", signed=True)
         self.offset += 4
         return ret
 
     def read_int64(self) -> int:
         ret = int.from_bytes(
-            decrypt(self.data[:8], self.key), "little", signed=True)
+            xxtea_decrypt(self.data[:8], self.key), "little", signed=True)
         self.offset += 8
         return ret
 
@@ -166,7 +118,7 @@ class XXTeaDecryptReader:
         result = shift = 0
 
         while True:
-            b = int.from_bytes(decrypt(self.data[0:1], self.key))
+            b = int.from_bytes(xxtea_decrypt(self.data[0:1], self.key))
             self.offset += 1
 
             result |= (b & 0b01111111) << shift
@@ -179,7 +131,7 @@ class XXTeaDecryptReader:
     
     def read_str(self) -> str:
         s_len = self.read_uleb128()
-        ret = decrypt(self.data[:s_len], self.key).decode()
+        ret = xxtea_decrypt(self.data[:s_len], self.key).decode()
         self.offset += s_len
 
         return ret
@@ -263,7 +215,7 @@ class OSZ2:
 
         hash_meta = reader.read_bytes(16)
         hash_file = reader.read_bytes(16)
-        hash_data = reader.read_bytes(16)
+        hash_data = reader.read_bytes(16) # seems to be unused because IV was never used
 
         # metadata block
         #metadata_entries = reader.read_int32()
@@ -324,8 +276,13 @@ class OSZ2:
         seed = f"{c.metadata.creator}yhxyfjo5{c.metadata.set_id}"
         KEY = hashlib.md5(seed.encode("ascii")).digest()
 
-        # TODO: Verify this magic block using XTEA
-        magic_key = reader.read_bytes(64)  # skip for now
+        # Verify this magic block using XTEA
+        magic_key = xtea_decrypt(bytearray(reader.read_bytes(64)), KEY)
+        if magic_key != knownPlainByteSeq:
+            log.fail(f"calculated: {knownPlainByteSeq.hex()}")
+            log.fail(f"osz2 report: {magic_key.hex()}")
+            log.fail("bad hashes (magic xtea block)")
+            return
 
         # read encrypted data length and decrypt it
         length = reader.read_int32()
@@ -358,9 +315,8 @@ class OSZ2:
                 file_hash = xxtea_reader.read_bytes(16)
 
                 # file datetime created/modified
-                # TODO: Make this readable by datetime
-                file_date_created = xxtea_reader.read_int64()
-                file_date_modified = xxtea_reader.read_int64()
+                file_date_created = datetime_frombinary(xxtea_reader.read_int64())
+                file_date_modified = datetime_frombinary(xxtea_reader.read_int64())
 
                 # prep new offset for files extraction
                 next_file_info_offset = 0
@@ -376,13 +332,13 @@ class OSZ2:
         # data extraction
         # TODO: save extracted data somewhere
         for i in range(file_info_count):
-            data_dec_len = decrypt(bytearray(reader.read_bytes(4)), KEY)
+            data_dec_len = xxtea_decrypt(bytearray(reader.read_bytes(4)), KEY)
             data_dec_len = (data_dec_len[0] |
                             data_dec_len[1] << 8 |
                             data_dec_len[2] << 16 |
                             data_dec_len[3] << 24)
 
-            decrypted_data = decrypt(bytearray(reader.read_bytes(data_dec_len)), KEY)
+            decrypted_data = xxtea_decrypt(bytearray(reader.read_bytes(data_dec_len)), KEY)
         
         return c
 

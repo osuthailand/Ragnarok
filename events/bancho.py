@@ -31,7 +31,8 @@ from starlette.requests import Request, ClientDisconnect
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
         services.packets |= {
-            packet.value: Packet(packet=packet, callback=cb, restricted=restricted)
+            packet.value: Packet(
+                packet=packet, callback=cb, restricted=restricted)
         }
 
     return decorator
@@ -137,14 +138,16 @@ async def login(req: Request) -> Response:
     if phash in services.bcrypt_cache:
         if pmd5 != services.bcrypt_cache[phash]:
             log.warn(
-                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+                f"USER {user_info['username']} ({
+                    user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
             return await failed_login(-1)
         else:
             if not bcrypt.checkpw(pmd5, phash):
                 log.warn(
-                    f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+                    f"USER {user_info['username']} ({
+                        user_info['id']}) | Login fail. (WRONG PASSWORD)"
                 )
 
                 return await failed_login(-1)
@@ -154,7 +157,8 @@ async def login(req: Request) -> Response:
     if _p := services.players.get(user_info["username"]):
         # user is already online? sus
         log.warn(
-            f"A user tried to login onto the account {_p.username} ({_p.id}), but user already online."
+            f"A user tried to login onto the account {
+                _p.username} ({_p.id}), but user already online."
         )
         return await failed_login(-1, extra=await writer.Notification(ALREADY_ONLINE))
 
@@ -173,7 +177,8 @@ async def login(req: Request) -> Response:
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
         log.info(
-            f"{user_info['username']} tried to login, but failed to do so, since they're banned."
+            f"{user_info['username']
+               } tried to login, but failed to do so, since they're banned."
         )
 
         return await failed_login(-3)
@@ -292,7 +297,7 @@ async def change_action(p: Player, sr: Reader) -> None:
         Gamemode.AUTOPILOT if p.current_mods & Mods.AUTOPILOT else
         Gamemode.VANILLA
     )
-    
+
     asyncio.create_task(p.update_stats_cache())
 
     if not p.is_restricted:
@@ -339,7 +344,8 @@ async def send_public_message(p: Player, sr: Reader) -> None:
 
     if not chan:
         await p.shout(
-            f"You can't send messages to a channel ({chan_name}), you're not already connected to."
+            f"You can't send messages to a channel ({
+                chan_name}), you're not already connected to."
         )
         return
 
@@ -415,18 +421,19 @@ async def spectating_frames(p: Player, sr: Reader) -> None:
     frame = sr.read_raw()
 
     # packing manually seems to be faster, so let's use that.
-    data = struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame)) + frame
+    data = struct.pack(
+        "<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame)) + frame
 
     for t in p.spectators:
-        t.enqueue(data)
+        # to prevent double frames
+        if t is not p:
+            t.enqueue(data)
 
 
 # id: 21
 @register_event(BanchoPackets.OSU_CANT_SPECTATE)
 async def unable_to_spec(p: Player, sr: Reader) -> None:
-    id = sr.read_int32()
-
-    ret = await writer.UsrCantSpec(id)
+    ret = await writer.UsrCantSpec(p.id)
 
     host = p.spectating
     host.enqueue(ret)
@@ -627,7 +634,8 @@ async def mp_start(p: Player, sr: Reader) -> None:
         return
 
     if p.id != m.host:
-        log.warn(f"{p.username} tried to start the match, while not being the host.")
+        log.warn(
+            f"{p.username} tried to start the match, while not being the host.")
         return
 
     for slot in m.slots:
@@ -684,7 +692,8 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
     slot_id = m.find_user_slot(p)
 
     if services.debug:
-        log.debug(f"{p.username} has slot id {slot_id} and has incoming score update.")
+        log.debug(f"{p.username} has slot id {
+                  slot_id} and has incoming score update.")
 
     m.enqueue(await writer.MatchScoreUpdate(s, slot_id, raw))
 
@@ -853,7 +862,8 @@ async def join_osu_channel(p: Player, sr: Reader) -> None:
     #     channel = p.match.chat._name
 
     if not (c := services.channels.get(channel)):
-        log.fail(f"{p.username} tried to join channel {channel}, but failed so.")
+        log.fail(f"{p.username} tried to join channel {
+                 channel}, but failed so.")
         await p.shout(f"Channel ({channel}) couldn't be found.")
         return
 
@@ -930,7 +940,8 @@ async def leave_osu_channel(p: Player, sr: Reader) -> None:
     #     _chan = p.match.chat._name
 
     if not (chan := services.channels.get(_chan)):
-        log.warn(f"{p.username} tried to part from {_chan}, but channel doesn't exist.")
+        log.warn(f"{p.username} tried to part from {
+                 _chan}, but channel doesn't exist.")
         return
 
     if not chan.is_dm:
@@ -969,7 +980,8 @@ async def mp_invite(p: Player, sr: Reader) -> None:
         return
 
     await p.send_message(
-        f"Come join my multiplayer match: [osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
+        f"Come join my multiplayer match: [osump://{m.match_id}/{
+            m.match_pass.replace(' ', '_')} {m.match_name}]",
         reciever=reciever,
     )
 

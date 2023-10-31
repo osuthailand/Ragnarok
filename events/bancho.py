@@ -39,7 +39,7 @@ def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
 
 
 bancho = Router()
-IGNORED_PACKETS = 79
+IGNORED_PACKETS = (BanchoPackets.OSU_PING, BanchoPackets.OSU_RECEIVE_UPDATES, BanchoPackets.OSU_SPECTATE_FRAMES)
 
 
 @bancho.route("/", methods=["POST", "GET"])
@@ -52,7 +52,7 @@ async def handle_bancho(req: Request) -> Response:
         return Response(content=msg.encode())
 
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
-        return "no"
+        return Response(content=b"no")
 
     if not "osu-token" in req.headers:
         return await login(req)
@@ -61,15 +61,16 @@ async def handle_bancho(req: Request) -> Response:
 
     if not (player := services.players.get(token)):
         return Response(
-            content=await writer.Notification("Server has restarted")
-            + await writer.ServerRestart()
+            content=writer.notification("Server has restarted")
+                    + writer.server_restart()
         )
 
     try:
         body = await req.body()
     except ClientDisconnect:
         log.info(f"{player.username} logged out.")
-        await player.logout()
+        player.logout()
+
         return Response(content=player.dequeue())
 
     for p in (sr := Reader(body)):
@@ -82,9 +83,10 @@ async def handle_bancho(req: Request) -> Response:
 
         end = (time.time_ns() - start) / 1e6
 
-        if services.debug and p.packet.value not in IGNORED_PACKETS:
+        if services.debug and p.packet not in IGNORED_PACKETS:
             log.debug(
-                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {player.username} - {end:.2f}ms"
+                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {
+                    player.username} - {end:.2f}ms"
             )
 
     player.last_update = time.time()
@@ -96,14 +98,14 @@ ALREADY_ONLINE = "You're already online!"
 RESTRICTED_MSG = "Your account has been set in restricted mode."
 
 
-async def failed_login(code: int, /, extra: bytes = b"") -> Response:
+def failed_login(code: int, /, extra: bytes = b"") -> Response:
     return Response(
-        content=await writer.UserID(code) + extra, headers={"cho-token": "no"}
+        content=writer.user_id(code) + extra, headers={"cho-token": "no"}
     )
 
 
 async def login(req: Request) -> Response:
-    data = bytearray(await writer.ProtocolVersion(19))
+    data = bytearray(writer.protocol_version(19))
     body = await req.body()
     start = time.time_ns()
     # parse login info and client info.
@@ -128,7 +130,7 @@ async def login(req: Request) -> Response:
             [login_info[0].lower().replace(" ", "_")],
         )
     ):
-        return await failed_login(-1)
+        return failed_login(-1)
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -142,7 +144,7 @@ async def login(req: Request) -> Response:
                     user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
-            return await failed_login(-1)
+            return failed_login(-1)
         else:
             if not bcrypt.checkpw(pmd5, phash):
                 log.warn(
@@ -150,7 +152,7 @@ async def login(req: Request) -> Response:
                         user_info['id']}) | Login fail. (WRONG PASSWORD)"
                 )
 
-                return await failed_login(-1)
+                return failed_login(-1)
 
             services.bcrypt_cache[phash] = pmd5
 
@@ -160,19 +162,19 @@ async def login(req: Request) -> Response:
             f"A user tried to login onto the account {
                 _p.username} ({_p.id}), but user already online."
         )
-        return await failed_login(-1, extra=await writer.Notification(ALREADY_ONLINE))
+        return failed_login(-1, extra=writer.notification(ALREADY_ONLINE))
 
     # invalid security hash (old ver probably using that)
     if len(client_info[3].split(":")) < 4:
-        return await failed_login(-1)
+        return failed_login(-1)
 
     # check if user is restricted; pretty sure its like this lol
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
-        data += await writer.Notification(RESTRICTED_MSG)
+        data += writer.notification(RESTRICTED_MSG)
 
     # only allow 2023 clients
     if not client_info[0].startswith("b2023"):
-        return await writer.UserID(-2)
+        return failed_login(-2)
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
@@ -181,7 +183,7 @@ async def login(req: Request) -> Response:
                } tried to login, but failed to do so, since they're banned."
         )
 
-        return await failed_login(-3)
+        return failed_login(-3)
 
     # TODO: Hardware ban check (security[3] and [4])
     """
@@ -211,7 +213,7 @@ async def login(req: Request) -> Response:
     )
 
     if not p.is_verified:
-        await services.bot.send_message(
+        services.bot.send_message(
             "Since we're still in beta, you'll need to verify your account with a beta key given by one of the founders. "
             "You'll have 30 minutes to verify the account, or the account will be deleted. "
             "To verify your account, please enter !verify <your beta key>",
@@ -224,31 +226,27 @@ async def login(req: Request) -> Response:
 
     asyncio.create_task(p.check_loc())
 
-    data += await writer.UserID(p.id)
-    data += await writer.UserPriv(p.privileges)
+    data += writer.user_id(p.id)
+    data += writer.user_privileges(p.privileges)
 
     if services.osu_settings["osu_menu_icon"]["boolean_value"]:
-        data += await writer.MainMenuIcon(
+        data += writer.main_menu_icon(
             image_url=services.osu_settings["osu_menu_icon"]["string_value"],
             url=f"https://{services.domain}",
         )
 
-    data += await writer.FriendsList(*p.friends)
-    data += await writer.UserPresence(p, spoof=True)
-    data += await writer.UpdateStats(p)
+    data += writer.friends_list(p.friends)
+    data += writer.user_presence(p, spoof=True)
+    data += writer.update_stats(p)
 
     for chan in services.channels:
         if chan.public:
-            data += await writer.ChanInfo(chan.name)
+            data += writer.channel_info(chan)
 
-            if chan.auto_join:
-                data += await writer.ChanAutoJoin(chan.name)
-                await p.join_channel(chan)
-
-        if chan.staff and p.is_staff:
-            data += await writer.ChanInfo(chan.name)
-            data += await writer.ChanJoin(chan.name)
-            await p.join_channel(chan)
+        if chan.is_staff and p.is_staff:
+            data += writer.channel_info(chan)
+            # data += writer.channel_join(chan.display_name)
+            chan.connect(p)
 
     for player in services.players:
         # NOTE: current player don't need this
@@ -256,26 +254,26 @@ async def login(req: Request) -> Response:
         if player == p:
             continue
 
-        player.enqueue(await writer.UserPresence(p) + await writer.UpdateStats(p))
+        player.enqueue(writer.user_presence(p) + writer.update_stats(p))
 
         if player.bot:
-            data += await writer.BotPresence()
+            data += writer.bot_presence()
         else:
-            data += await writer.UserPresence(player)
+            data += writer.user_presence(player)
 
-        data += await writer.UpdateStats(player)
+        data += writer.update_stats(player)
 
-    data += await writer.ChanInfoEnd()
+    data += writer.channel_info_end()
 
     et = (time.time_ns() - start) / 1e6
 
     if services.osu_settings["welcome_message"]["boolean_value"]:
         # maybe add formatting to message?
-        data += await writer.Notification(
+        data += writer.notification(
             services.osu_settings["welcome_message"]["string_value"]
         )
 
-    data += await writer.Notification(f"Authorization took {et:.2f} ms.")
+    data += writer.notification(f"Authorization took {et:.2f} ms.")
 
     log.info(f"{p!r} logged in.")
 
@@ -301,12 +299,12 @@ async def change_action(p: Player, sr: Reader) -> None:
     asyncio.create_task(p.update_stats_cache())
 
     if not p.is_restricted:
-        services.players.enqueue(await writer.UpdateStats(p))
+        services.players.enqueue(writer.update_stats(p))
 
 
 async def _handle_command(chan: Channel, msg: str, p: Player):
     if resp := await cmd.handle_commands(message=msg, sender=p, reciever=chan):
-        await chan.send(resp, sender=services.bot)
+        chan.send(resp, sender=services.bot)
 
 
 # id: 1
@@ -328,10 +326,10 @@ async def send_public_message(p: Player, sr: Reader) -> None:
         return
 
     if chan_name == "#multiplayer":
-        if not (m := p.match):
+        if not (match := p.match):
             return
 
-        chan = m.chat
+        chan = match.chat
     elif chan_name == "#spectator":
         if p.spectators:
             chan = services.channels.get(f"#spect_{p.id}")
@@ -343,22 +341,33 @@ async def send_public_message(p: Player, sr: Reader) -> None:
         chan = services.channels.get(chan_name)
 
     if not chan:
-        await p.shout(
-            f"You can't send messages to a channel ({
-                chan_name}), you're not already connected to."
+        p.shout(
+            f"You can't send messages to a channel ({chan_name}), you're not already connected to."
         )
         return
 
-    await chan.send(msg, p)
+    # send message to channel
+    chan.send(msg, p)
 
+    # check if the message is a np.
+    # if so, post the 100%, 99%, etc.
+    # pp for the map.
     if np := services.regex["np"].search(msg):
         log.info(np.groups())
         p.last_np = await Beatmap._get_beatmap_from_sql("", np.groups(0), 0)
         asyncio.create_task(_handle_command(chan, "!pp ", p))
 
+    # this is for whenever the user failed to 
+    # do a command with following arguments
+    #
+    # might remove this feature, as i don't see
+    # a big use for it...
     if p.token in services.await_response and not services.await_response[p.token]:
         services.await_response[p.token] = msg
 
+    # commands should be run on another thread
+    # so slower commands (pp recalc) don't stop
+    # the server.
     if msg[0] == services.prefix:
         asyncio.create_task(_handle_command(chan, msg, p))
 
@@ -368,12 +377,13 @@ async def send_public_message(p: Player, sr: Reader) -> None:
 async def logout(p: Player, sr: Reader) -> None:
     _ = sr.read_int32()
 
+    # osu tends to double send logout packet
     if (time.time() - p.login_time) < 1:
         return
 
     log.info(f"{p.username} logged out.")
 
-    await p.logout()
+    p.logout()
 
 
 # id: 3
@@ -381,13 +391,13 @@ async def logout(p: Player, sr: Reader) -> None:
 async def update_stats(p: Player, sr: Reader) -> None:
     # TODO: add this update for spectator as well
     #       since they need to have up-to-date beatmap info
-    p.enqueue(await writer.UpdateStats(p))
+    p.enqueue(writer.update_stats(p))
 
 
 # id: 4
 @register_event(BanchoPackets.OSU_PING, restricted=True)
 async def pong(p: Player, sr: Reader) -> None:
-    p.enqueue(await writer.Pong())
+    p.enqueue(writer.pong())
 
 
 # id: 16
@@ -399,7 +409,7 @@ async def start_spectate(p: Player, sr: Reader) -> None:
     if not p.is_verified or not host:
         return
 
-    await host.add_spectator(p)
+    host.add_spectator(p)
 
 
 # id: 17
@@ -410,7 +420,7 @@ async def stop_spectate(p: Player, sr: Reader) -> None:
     if not host:
         return
 
-    await host.remove_spectator(p)
+    host.remove_spectator(p)
 
 
 # id: 18
@@ -433,7 +443,7 @@ async def spectating_frames(p: Player, sr: Reader) -> None:
 # id: 21
 @register_event(BanchoPackets.OSU_CANT_SPECTATE)
 async def unable_to_spec(p: Player, sr: Reader) -> None:
-    ret = await writer.UsrCantSpec(p.id)
+    ret = writer.spectator_cant_spectate(p.id)
 
     host = p.spectating
     host.enqueue(ret)
@@ -455,11 +465,11 @@ async def send_private_message(p: Player, sr: Reader) -> None:
     sr.read_int32()  # sender id
 
     if not (reciever := services.players.get(recieverr)):
-        await p.shout("The player you're trying to reach is currently offline.")
+        p.shout("The player you're trying to reach is currently offline.")
         return
 
     if not reciever.bot:
-        await p.send_message(msg, reciever=reciever)
+        p.send_message(msg, reciever=reciever)
     else:
         if np := services.regex["np"].search(msg):
             p.last_np = await Beatmap.get_beatmap(beatmap_id=np.groups(1)[0])
@@ -468,10 +478,10 @@ async def send_private_message(p: Player, sr: Reader) -> None:
             if resp := await cmd.handle_commands(
                 message=msg, sender=p, reciever=services.bot
             ):
-                await services.bot.send_message(resp, reciever=p)
+                services.bot.send_message(resp, reciever=p)
                 return
 
-        await services.bot.send_message("beep boop", reciever=p)
+        services.bot.send_message("beep boop", reciever=p)
 
 
 # id: 29
@@ -489,11 +499,11 @@ async def lobby_join(p: Player, sr: Reader) -> None:
         return
 
     if p.match:
-        await p.leave_match()
+        p.leave_match()
 
     for match in services.matches:
         if match.connected:
-            p.enqueue(await writer.Match(match))
+            p.enqueue(writer.match(match))
 
 
 # id: 31
@@ -503,7 +513,7 @@ async def mp_create_match(p: Player, sr: Reader) -> None:
 
     services.matches.add(m)
 
-    await p.join_match(m, pwd=m.match_pass)
+    p.join_match(m, pwd=m.match_pass)
 
 
 # id: 32
@@ -513,17 +523,17 @@ async def mp_join(p: Player, sr: Reader) -> None:
     matchpass = sr.read_str()
 
     if p.match or not (m := services.matches.get(matchid)):
-        p.enqueue(await writer.MatchFail())
+        p.enqueue(writer.match_fail())
         return
 
-    await p.join_match(m, pwd=matchpass)
+    p.join_match(m, pwd=matchpass)
 
 
 # id: 33
 @register_event(BanchoPackets.OSU_PART_MATCH)
 async def mp_leave(p: Player, sr: Reader) -> None:
     if p.match:
-        await p.leave_match()
+        p.leave_match()
 
 
 # id: 38
@@ -547,7 +557,7 @@ async def mp_change_slot(p: Player, sr: Reader) -> None:
 
     old_slot.reset()
 
-    await m.enqueue_state()
+    m.enqueue_state()
 
 
 # id: 39
@@ -565,7 +575,7 @@ async def mp_ready_up(p: Player, sr: Reader) -> None:
 
     slot.status = SlotStatus.READY
 
-    await m.enqueue_state()
+    m.enqueue_state()
 
 
 # id: 40
@@ -583,7 +593,7 @@ async def mp_lock_slot(p: Player, sr: Reader) -> None:
     else:
         slot.status = SlotStatus.LOCKED
 
-    await m.enqueue_state()
+    m.enqueue_state()
 
 
 # id: 41
@@ -624,7 +634,7 @@ async def mp_change_settings(p: Player, sr: Reader) -> None:
     if new_match.team_type != m.team_type:
         m.team_type = new_match.team_type
 
-    await m.enqueue_state()
+    m.enqueue_state()
 
 
 # id: 44
@@ -642,11 +652,11 @@ async def mp_start(p: Player, sr: Reader) -> None:
         if slot.status & SlotStatus.OCCUPIED:
             if slot.status != SlotStatus.NOMAP:
                 slot.status = SlotStatus.PLAYING
-                slot.p.enqueue(await writer.MatchStart(m))
+                slot.player.enqueue(writer.match_start(m))
 
     m.in_progress = True
 
-    await m.enqueue_state(lobby=True)
+    m.enqueue_state(lobby=True)
 
 
 # id: 47
@@ -665,13 +675,6 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
     ):
         if os.path.isfile(f".data/beatmaps/{m.map.map_id}.osu"):
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
-            log.debug(
-                f"{s.count_300=}x300 "
-                f"{s.count_100=}x100 "
-                f"{s.count_50=}x50 "
-                f"{s.count_miss=}m "
-                f"{s.max_combo=}x "
-            )
 
             calc = Calculator(
                 mode=m.mode,
@@ -695,35 +698,35 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
         log.debug(f"{p.username} has slot id {
                   slot_id} and has incoming score update.")
 
-    m.enqueue(await writer.MatchScoreUpdate(s, slot_id, raw))
+    m.enqueue(writer.match_score_update(s, slot_id, raw))
 
 
 # id: 49
 @register_event(BanchoPackets.OSU_MATCH_COMPLETE)
 async def mp_complete(p: Player, sr: Reader) -> None:
-    if not (m := p.match) or not m.in_progress:
+    if not (match := p.match) or not match.in_progress:
         return
 
-    played = [slot.p for slot in m.slots if slot.status == SlotStatus.PLAYING]
+    players_played = [slot.player for slot in match.slots if slot.status == SlotStatus.PLAYING]
 
-    for slot in m.slots:
-        if slot.p in played:
+    for slot in match.slots:
+        if slot.player in players_played:
             slot.status = SlotStatus.NOTREADY
 
-    m.in_progress = False
+    match.in_progress = False
 
-    for slot in m.slots:
+    for slot in match.slots:
         if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
             slot.status = SlotStatus.NOTREADY
         slot.skipped = False
         slot.loaded = False
 
-    await m.enqueue_state(lobby=True)
+    match.enqueue_state(lobby=True)
 
-    for pl in played:
-        pl.enqueue(await writer.MatchComplete())
+    for player in players_played:
+        player.enqueue(writer.match_complete())
 
-    await m.enqueue_state(lobby=True)
+    match.enqueue_state(lobby=True)
 
 
 # id: 51
@@ -731,161 +734,145 @@ async def mp_complete(p: Player, sr: Reader) -> None:
 async def mp_change_mods(p: Player, sr: Reader) -> None:
     mods = sr.read_int32()
 
-    if not (m := p.match) or m.in_progress:
+    if not (match := p.match) or match.in_progress:
         return
 
-    if m.freemods:
-        if m.host == p.id:
+    if match.freemods:
+        if match.host == p.id:
             if mods & Mods.MULTIPLAYER:
-                m.mods = Mods(mods & Mods.MULTIPLAYER)
+                match.mods = Mods(mods & Mods.MULTIPLAYER)
 
-                for slot in m.slots:
+                for slot in match.slots:
                     if slot.status == SlotStatus.READY:
                         slot.status = SlotStatus.NOTREADY
 
-        slot = m.find_user(p)
+        slot = match.find_user(p)
 
         slot.mods = Mods(mods - (mods & Mods.MULTIPLAYER))
     else:
-        if m.host != p.id:
+        if match.host != p.id:
             return
 
-        m.mods = Mods(mods)
+        match.mods = Mods(mods)
 
-        for slot in m.slots:
+        for slot in match.slots:
             if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
                 slot.status = SlotStatus.NOTREADY
 
-    await m.enqueue_state()
+    match.enqueue_state()
 
 
 # id: 52
 @register_event(BanchoPackets.OSU_MATCH_LOAD_COMPLETE)
 async def mp_load_complete(p: Player, sr: Reader) -> None:
-    if not (m := p.match) or not m.in_progress:
+    if not (match := p.match) or not match.in_progress:
         return
 
-    m.find_user(p).loaded = True
+    match.find_user(p).loaded = True
 
-    if all(s.loaded for s in m.slots if s.status == SlotStatus.PLAYING):
-        m.enqueue(await writer.MatchAllReady())
+    if all(s.loaded for s in match.slots if s.status == SlotStatus.PLAYING):
+        match.enqueue(writer.match_all_ready())
 
 
 # id: 54
 @register_event(BanchoPackets.OSU_MATCH_NO_BEATMAP)
 async def mp_no_beatmap(p: Player, sr: Reader) -> None:
-    if not (m := p.match):
+    if not (match := p.match):
         return
 
-    m.find_user(p).status = SlotStatus.NOMAP
+    match.find_user(p).status = SlotStatus.NOMAP
 
-    await m.enqueue_state()
+    match.enqueue_state()
 
 
 # id: 55
 @register_event(BanchoPackets.OSU_MATCH_NOT_READY)
 async def mp_unready(p: Player, sr: Reader) -> None:
-    if not (m := p.match):
+    if not (match := p.match):
         return
 
-    slot = m.find_user(p)
+    slot = match.find_user(p)
 
     if slot.status == SlotStatus.NOTREADY:
         return
 
     slot.status = SlotStatus.NOTREADY
 
-    await m.enqueue_state()
+    match.enqueue_state()
 
 
 # id: 56
 @register_event(BanchoPackets.OSU_MATCH_FAILED)
 async def match_failed(p: Player, sr: Reader) -> None:
-    if not (m := p.match) or not m.in_progress:
+    if not (match := p.match) or not match.in_progress:
         return
 
-    for slot in m.slots:
-        if slot.p is not None:
-            slot.p.enqueue(await writer.MatchPlayerFailed(p.id))
+    for slot in match.slots:
+        if slot.player is not None:
+            slot.player.enqueue(writer.match_player_failed(p.id))
 
 
 # id: 59
 @register_event(BanchoPackets.OSU_MATCH_HAS_BEATMAP)
 async def has_beatmap(p: Player, sr: Reader) -> None:
-    if not (m := p.match):
+    if not (match := p.match):
         return
 
-    m.find_user(p).status = SlotStatus.NOTREADY
+    match.find_user(p).status = SlotStatus.NOTREADY
 
-    await m.enqueue_state()
+    match.enqueue_state()
 
 
 # id: 60
 @register_event(BanchoPackets.OSU_MATCH_SKIP_REQUEST)
 async def skip_request(p: Player, sr: Reader) -> None:
-    if not (m := p.match) or not m.in_progress:
+    if not (match := p.match) or not match.in_progress:
         return
 
-    slot = m.find_user(p)
+    slot = match.find_user(p)
 
     if slot.skipped:
         return
 
     slot.skipped = True
-    m.enqueue(await writer.MatchPlayerReqSkip(p.id))
+    match.enqueue(writer.match_player_skipped(p.id))
 
-    for slot in m.slots:
+    for slot in match.slots:
         if slot.status == SlotStatus.PLAYING and not slot.skipped:
             return
 
-    m.enqueue(await writer.MatchSkip())
+    match.enqueue(writer.match_skip())
 
 
 # id: 63
 @register_event(BanchoPackets.OSU_CHANNEL_JOIN, restricted=True)
-async def join_osu_channel(p: Player, sr: Reader) -> None:
-    channel = sr.read_str()
-
-    # if channel == "#spectator":
-    #     if p.spectating:
-    #         channel = f"#spect_{p.spectating.id}"
-    #     elif p.spectators:
-    #         channel = f"#spect_{p.id}"
-    #     else:
-    #         log.debug(f"{channel} error jefoiwejfoeiw")
-    #         return
-
-    # if channel == "#multiplayer":
-    #     if not p.match:
-    #         return
-
-    #     channel = p.match.chat._name
-
-    if not (c := services.channels.get(channel)):
-        log.fail(f"{p.username} tried to join channel {
-                 channel}, but failed so.")
-        await p.shout(f"Channel ({channel}) couldn't be found.")
+async def join_channel(p: Player, sr: Reader) -> None:
+    _chan = sr.read_str()
+    channel = services.channels.get(_chan)
+    
+    if not channel:
+        p.shout(f"{_chan} couldn't be found.")
         return
 
-    await p.join_channel(c)
+    channel.connect(p)
 
 
 # id: 70
 @register_event(BanchoPackets.OSU_MATCH_TRANSFER_HOST)
 async def mp_transfer_host(p: Player, sr: Reader) -> None:
-    if not (m := p.match):
+    if not (match := p.match):
         return
 
     slot_id = sr.read_int32()
 
-    if not (slot := m.find_slot(slot_id)):
+    if not (slot := match.find_slot(slot_id)):
         return
 
-    m.host = slot.p.id
-    slot.p.enqueue(await writer.MatchTransferHost())
+    match.host = slot.player.id
+    slot.player.enqueue(writer.match_transfer_host())
 
-    m.enqueue(await writer.Notification(f"{slot.p.username} became host!"))
-    await m.enqueue_state()
+    match.enqueue(writer.notification(f"{slot.player.username} became host!"))
+    match.enqueue_state()
 
 
 # id: 73 and 74
@@ -902,10 +889,10 @@ async def add_friend(p: Player, sr: Reader) -> None:
 # id: 77
 @register_event(BanchoPackets.OSU_MATCH_CHANGE_TEAM)
 async def mp_change_team(p: Player, sr: Reader) -> None:
-    if not (m := p.match) or m.in_progress:
+    if not (match := p.match) or match.in_progress:
         return
 
-    slot = m.find_user(p)
+    slot = match.find_user(p)
 
     if slot.team == SlotTeams.BLUE:
         slot.team = SlotTeams.RED
@@ -913,58 +900,46 @@ async def mp_change_team(p: Player, sr: Reader) -> None:
         slot.team = SlotTeams.BLUE
 
     # Should this really be for every occupied slot? or just the user changing team?
-    for slot in m.slots:
+    for slot in match.slots:
         if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
             slot.status = SlotStatus.NOTREADY
 
-    await m.enqueue_state()
+    match.enqueue_state()
 
 
 # id: 78
 @register_event(BanchoPackets.OSU_CHANNEL_PART, restricted=True)
-async def leave_osu_channel(p: Player, sr: Reader) -> None:
+async def part_channel(p: Player, sr: Reader) -> None:
     _chan = sr.read_str()
 
-    # if _chan == "#spectator":
-    #     if p.spectating:
-    #         _chan = f"#spect_{p.spectating.id}"
-    #     elif p.spectators:
-    #         _chan = f"#spect_{p.id}"
-    #     else:
-    #         return
-
-    # if _chan == "#multiplayer":
-    #     if not p.match:
-    #         return
-
-    #     _chan = p.match.chat._name
+    if _chan[0] != "#":
+        return
 
     if not (chan := services.channels.get(_chan)):
         log.warn(f"{p.username} tried to part from {
                  _chan}, but channel doesn't exist.")
         return
 
-    if not chan.is_dm:
-        await p.leave_channel(chan)
+    chan.disconnect(p)
 
 
 # id: 85
 @register_event(BanchoPackets.OSU_USER_STATS_REQUEST, restricted=True)
 async def request_stats(p: Player, sr: Reader) -> None:
     # people id's that current online rn
-    users = sr.read_i32_list()
+    user_ids = sr.read_i32_list()
 
-    if len(users) > 32:
+    if len(user_ids) > 32:
         return
 
-    for user in users:
-        if user == p.id:
+    for user_id in user_ids:
+        if user_id == p.id:
             continue
 
-        if not (u := services.players.get(user)):
+        if not (target := services.players.get(user_id)):
             continue
 
-        u.enqueue(await writer.UpdateStats(u))
+        target.enqueue(writer.update_stats(target))
 
 
 # id: 87
@@ -975,14 +950,14 @@ async def mp_invite(p: Player, sr: Reader) -> None:
 
     _reciever = sr.read_int32()
 
-    if not (reciever := services.players.get(_reciever)):
-        await p.shout("You can't invite someone who's offline.")
+    if not (target := services.players.get(_reciever)):
+        p.shout("You can't invite someone who's offline.")
         return
 
-    await p.send_message(
+    p.send_message(
         f"Come join my multiplayer match: [osump://{m.match_id}/{
             m.match_pass.replace(' ', '_')} {m.match_name}]",
-        reciever=reciever,
+        reciever=target,
     )
 
 
@@ -1001,31 +976,31 @@ async def change_pass(p: Player, sr: Reader) -> None:
 
     for slot in m.slots:
         if slot.status & SlotStatus.OCCUPIED:
-            slot.p.enqueue(await writer.MatchPassChange(new_data.match_pass))
+            slot.player.enqueue(writer.match_change_password(new_data.match_pass))
 
-    await m.enqueue_state(lobby=True)
+    m.enqueue_state(lobby=True)
 
 
 # id: 97
 @register_event(BanchoPackets.OSU_USER_PRESENCE_REQUEST, restricted=True)
 async def request_presence(p: Player, sr: Reader) -> None:
     # people id's that current online rn
-    users = sr.read_i32_list()
+    user_ids = sr.read_i32_list()
 
-    if len(users) > 256:
+    if len(user_ids) > 256:
         return
 
-    for user in users:
-        if user == p.id:
+    for user_id in user_ids:
+        if user_id == p.id:
             continue
 
-        if not (u := services.players.get(user)):
+        if not (target := services.players.get(user_id)):
             continue
 
-        if u.bot:
-            p.enqueue(await writer.UserPresence(u))
+        if target.bot:
+            p.enqueue(writer.bot_presence(target))
         else:
-            p.enqueue(await writer.UserPresence(u))
+            p.enqueue(writer.user_presence(target))
 
 
 # id: 98
@@ -1034,4 +1009,4 @@ async def request_presence_all(p: Player, sr: Reader) -> None:
     sr.read_int32()
 
     for player in services.players:
-        player.enqueue(await writer.UserPresence(player))
+        player.enqueue(writer.user_presence(player))

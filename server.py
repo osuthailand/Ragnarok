@@ -8,6 +8,7 @@ from starlette.responses import Response
 from starlette.routing import Host
 
 from objects.achievement import Achievement
+from objects.channel import Channel
 from objects.collections import Tokens, Channels, Matches, Beatmaps
 
 # routers
@@ -56,8 +57,7 @@ async def startup():
 
             os.makedirs(_path)
 
-    log.info(
-        f"Running Ragnarok on `{services.domain}` (port: {services.port})")
+    log.info(f"Running Ragnarok on `{services.domain}` (port: {services.port})")
     log.info("... Connecting to the database")
 
     services.sql = Database()
@@ -82,9 +82,10 @@ async def startup():
     log.info("✓ Successfully connected Louise!")
     log.info("... Adding channels")
 
-    async for channel in services.sql.iterall(
+    async for _channel in services.sql.iterall(
         "SELECT name, description, public, staff, auto_join, read_only FROM channels"
     ):
+        channel = Channel(**_channel)
         services.channels.add(channel)
 
     log.info("✓ Successfully added all avaliable channels")
@@ -98,8 +99,7 @@ async def startup():
 
     async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
         services.osu_settings[setting["name"]] = {
-            key: item
-            for key, item in setting.items() if key != "name"
+            key: item for key, item in setting.items() if key != "name"
         }
 
     log.info("✓ Successfully got bancho settings")

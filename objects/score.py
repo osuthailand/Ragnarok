@@ -3,20 +3,20 @@ import time
 
 from utils import score
 from enum import IntEnum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from base64 import b64decode
 from objects import services
 from dataclasses import dataclass
 from rina_pp_pyb import Calculator, Beatmap as BMap
 
 from constants.mods import Mods
-from objects.player import Player
 from objects.beatmap import Beatmap
 from constants.playmode import Gamemode, Mode
 from constants.playmode import Mode
 from constants.beatmap import Approved
 from py3rijndael.rijndael import RijndaelCbc
 from py3rijndael.paddings import ZeroPadding
+from objects.player import Player
 
 
 @dataclass

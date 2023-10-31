@@ -10,8 +10,9 @@ if TYPE_CHECKING:
 
 class Channel:
     def __init__(self, **kwargs):
-        self.name: str = kwargs.get("name", "unnamed")  # display name
-        self._name: str = kwargs.get("raw", self.name)  # real name. fx #multi_1
+        self.name: str = kwargs.get("name", "#unnamed")  # real name. fx #multi_1
+
+        self.display_name: str = kwargs.get("display_name", self.name)  # display name
 
         self.description: str = kwargs.get("description", "An osu! channel.")
 
@@ -19,67 +20,87 @@ class Channel:
         self.read_only: bool = kwargs.get("read_only", False)
         self.auto_join: bool = kwargs.get("auto_join", False)
 
-        self.staff: bool = kwargs.get("staff", False)
+        self.is_staff: bool = kwargs.get("staff", False)
+        self.ephemeral: bool = kwargs.get(
+            "ephemeral", False
+        )  # object will get removed upon no connection
 
-        self.connected: list[Player] = []
-
-    def __repr__(self) -> str:
-        return (
-            "Channel("
-            f'display="{self.name}", '
-            f'name="{self._name}", '
-            f'description="{self.description}", '
-            f"connected={self.connected[0:3]}..."
-            ")"
-        )
-
-    @property
-    def is_multi(self) -> bool:
-        return self.name == "#multiplayer"
+        self.connected: list["Player"] = []
 
     @property
     def is_dm(self) -> bool:
-        return self._name[0] != "#"
+        return self.display_name[0] != "#"
 
-    def enqueue(self, data: bytes, ignore: list[int] = []) -> None:
-        for p in self.connected:
-            if p.id not in ignore:
-                p.enqueue(data)
+    @property
+    def is_multi(self) -> bool:
+        return self.display_name == "#multiplayer"
 
-    async def update_info(self) -> None:
-        services.players.enqueue(await writer.ChanInfo(self._name))
+    def enqueue(self, data: bytes, ignore: tuple = ()) -> None:
+        for player in self.connected:
+            if player.id not in ignore:
+                player.enqueue(data)
 
-    async def force_join(self, p: "Player") -> None:
-        if self in p.channels:
+    def update_info(self) -> None:
+        if self.ephemeral:
+            for player in self.connected:
+                player.enqueue(writer.channel_info(self))
+        else:
+            services.players.enqueue(writer.channel_info(self))
+
+    def connect(self, player: "Player"):
+        if self in player.channels:
+            log.fail(
+                f"{player.username} tried to joined {self.name}, which they're already connected to."
+            )
             return
 
-        p.channels.append(self)
-        self.connected.append(p)
-
-        p.enqueue(await writer.ChanJoin(self._name))
-
-        await self.update_info()
-
-    async def kick(self, p: "Player") -> None:
-        if not self in p.channels:
+        # if the player is not a staff and tries to join
+        # a staff channel, it'll return false.
+        if not player.is_staff and self.is_staff:
+            log.fail(
+                f"{player.username} tried to join {self.name} with insufficient privileges."
+            )
             return
 
-        p.channels.remove(self)
-        self.connected.remove(p)
+        self.connected.append(player)
+        player.channels.append(self)
 
-        p.enqueue(await writer.ChanKick(self._name))
+        player.enqueue(writer.channel_join(self.display_name))
+        self.update_info()
 
-        await self.update_info()
+        log.info(f"{player.username} joined {self.name}")
 
-    async def send(self, message: str, sender: "Player") -> None:
+    def disconnect(self, player: "Player"):
+        if self not in player.channels:
+            log.fail(
+                f"{player.username} tried to leave {self.name}, which they aren't connected to."
+            )
+            return
+
+        self.connected.remove(player)
+        player.channels.remove(self)
+
+        player.enqueue(writer.channel_kick(self.display_name))
+
+        if self.ephemeral and not self.connected:
+            services.channels.remove(self)
+
+        self.update_info()
+
+        log.info(f"{player.username} parted from {self.name}")
+
+    def send(self, message: str, sender: "Player") -> None:
         if not sender.bot:
             if not (self in sender.channels or self.read_only):
                 return
 
-        ret = await writer.SendMessage(
-            sender=sender.username, message=message, channel=self.name, id=sender.id
+        ret = writer.send_message(
+            sender=sender.username,
+            message=message,
+            channel=self.display_name,
+            id=sender.id,
         )
 
-        self.enqueue(ret, ignore=[sender.id])
+        self.enqueue(ret, ignore=(sender.id,))
 
-        log.chat(f"<{sender.username}> {message} [{self._name}]")
+        log.chat(f"<{sender.username}> {message} [{self.name}]")

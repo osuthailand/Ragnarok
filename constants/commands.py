@@ -232,14 +232,13 @@ async def verify_with_key(ctx: Context) -> str | None:
     )
 
     ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
-    ctx.author.enqueue(
-        await writer.Notification(
-            "Welcome to Ragnarok. You've successfully verified your account and gained beta access! If you see any bugs or anything unusal, please report it to one of the developers, through Github issues or Discord."
-        )
-        + await writer.Notification(
-            "Please login again to prevent any corruption to your user data!"
-        )
+    
+    ctx.author.shout(
+        "Welcome to Ragnarok. You've successfully verified your account and gained beta access! "
+        "If you see any bugs or anything unusal, please report it to one of the developers, through "
+        "Github issues or Discord."
     )
+    ctx.author.shout("Please login again to prevent any corruption to your user data!")
 
     log.info(
         f"{ctx.author.username} successfully verified their account with a key")
@@ -452,7 +451,7 @@ async def make_multi(ctx: Context) -> str | None:
 
     services.matches.add(m)
 
-    await ctx.author.join_match(m)
+    ctx.author.join_match(m)
 
 
 @rmp_command("name")
@@ -466,7 +465,7 @@ async def change_multi_name(ctx: Context) -> str | None:
     new_name = " ".join(ctx.args)
     m.match_name = new_name
 
-    await m.enqueue_state()
+    m.enqueue_state()
     return f"Changed match name from {current_name} to {new_name}"
 
 
@@ -476,7 +475,7 @@ async def lock_slot(ctx: Context) -> str | None:
     m = ctx.author.match
     m.locked = True
 
-    await m.enqueue_state()
+    m.enqueue_state()
     return f"Locked the match"
 
 
@@ -486,7 +485,7 @@ async def unlock_slot(ctx: Context) -> str | None:
     m = ctx.author.match
     m.locked = True
 
-    await m.enqueue_state()
+    m.enqueue_state()
     return f"Locked the match"
 
 
@@ -502,11 +501,11 @@ async def start_match(ctx: Context) -> str | None:
                 if slot.status & SlotStatus.OCCUPIED:
                     if slot.status != SlotStatus.NOMAP:
                         slot.status = SlotStatus.PLAYING
-                        slot.p.enqueue(await writer.MatchStart(m))
+                        slot.player.enqueue(writer.match_start(m))
 
             m.in_progress = True
 
-            await m.enqueue_state(lobby=True)
+            m.enqueue_state(lobby=True)
             return "Starting match... Good luck!"
 
     if not all(
@@ -514,7 +513,7 @@ async def start_match(ctx: Context) -> str | None:
         for slot in m.slots
         if slot.status & SlotStatus.OCCUPIED
     ):
-        await ctx.reciever.send(
+        ctx.reciever.send(
             message="All players aren't ready, would you like to force start? (y/n)",
             sender=services.bot,
         )
@@ -528,8 +527,8 @@ async def start_match(ctx: Context) -> str | None:
 
     m.in_progress = True
 
-    m.enqueue(await writer.MatchStart(m))
-    await m.enqueue_state()
+    m.enqueue(writer.match_start(m))
+    m.enqueue_state()
     return "Starting match... Good luck!"
 
 
@@ -540,7 +539,7 @@ async def abort_match(ctx: Context) -> str | None:
 
     for s in m.slots:
         if s.status == SlotStatus.PLAYING:
-            s.p.enqueue(await writer.write(BanchoPackets.CHO_MATCH_ABORT))
+            s.player.enqueue(writer.write(BanchoPackets.CHO_MATCH_ABORT))
             s.status = SlotStatus.NOTREADY
 
             s.skipped = False
@@ -548,7 +547,7 @@ async def abort_match(ctx: Context) -> str | None:
 
     m.in_progress = False
 
-    await m.enqueue_state(lobby=True)
+    m.enqueue_state(lobby=True)
     return "Aborted match."
 
 
@@ -565,13 +564,13 @@ async def win_condition(ctx: Context) -> str | None:
         old_scoring = copy.copy(m.scoring_type)
         m.scoring_type = ScoringType.find_value(ctx.args[0])
 
-        await m.enqueue_state()
+        m.enqueue_state()
         return f"Changed win condition from {old_scoring.name.lower()} to {m.scoring_type.name.lower()}"
     elif ctx.args[0] == "pp":
         m.scoring_type = ScoringType.SCORE  # force it to be score
         m.pp_win_condition = True
 
-        await m.enqueue_state()
+        m.enqueue_state()
         return (
             "Changed win condition to pp. THIS IS IN BETA AND CAN BE REMOVED ANY TIME."
         )
@@ -603,9 +602,9 @@ async def move_slot(ctx: Context) -> str | None:
     to.copy_from(target)
     target.reset()
 
-    await m.enqueue_state(lobby=True)
+    m.enqueue_state(lobby=True)
 
-    return f"Moved {to.p.username} to slot {ctx.args[1] + 1}"
+    return f"Moved {to.player.username} to slot {ctx.args[1] + 1}"
 
 
 @rmp_command("size")
@@ -639,7 +638,7 @@ async def get_beatmap(ctx: Context) -> str | None:
     if not ctx.args:
         return f"Wrong usage: !mp get <{'|'.join(mirrors.keys())}>"
 
-    if m.map_id == 0:
+    if not m.map:
         return "The host has probably choosen a map that needs to be updated! Tell them to do so!"
 
     if ctx.args[0] not in mirrors:
@@ -649,11 +648,11 @@ async def get_beatmap(ctx: Context) -> str | None:
 
     match ctx.args[0]:
         case "chimu":
-            url += f"download/{m.map_id}"
+            url += f"download/{m.map.set_id}"
         case "katsu":
-            url += f"d/{m.map_id}"
+            url += f"d/{m.map.set_id}"
         case "nerinyan":
-            url += f"d/{m.map_id}"
+            url += f"d/{m.map.set_id}"
 
     return f"[{url} Download beatmap from {ctx.args[0]}]"
 
@@ -664,7 +663,7 @@ async def invite_people(ctx: Context) -> str | None:
     m = ctx.author.match
 
     if not ctx.args:
-        await ctx.reciever.send(
+        ctx.reciever.send(
             message="Who do you want to invite?", sender=services.bot
         )
         response = await ctx.await_response()
@@ -678,7 +677,7 @@ async def invite_people(ctx: Context) -> str | None:
     if target is ctx.author:
         return "You can't invite yourself."
 
-    await ctx.author.send_message(
+    ctx.author.send_message(
         f"Come join my multiplayer match: [osump://{m.match_id}/{
             m.match_pass.replace(' ', '_')} {m.match_name}]",
         reciever=target,
@@ -693,7 +692,7 @@ async def change_host(ctx: Context) -> str | None:
     m = ctx.author.match
 
     if not ctx.args:
-        await ctx.reciever.send(
+        ctx.reciever.send(
             message="Who do you want to invite?", sender=services.bot
         )
 
@@ -710,7 +709,7 @@ async def change_host(ctx: Context) -> str | None:
     if not target_slot:
         return "The user isn't in your match."
 
-    await m.transfer_host(target_slot)
+    m.transfer_host(target_slot)
 
 
 #
@@ -727,12 +726,12 @@ async def announce(ctx: Context) -> str | None:
     msg = " ".join(ctx.args[1:])
 
     if ctx.args[0] == "all":
-        services.players.enqueue(await writer.Notification(msg))
+        services.players.enqueue(writer.notification(msg))
     else:
         if not (target := services.players.get(ctx.args[0])):
             return "Player is not online."
 
-        target.enqueue(await writer.Notification(msg))
+        target.shout(msg)
 
     return "ok"
 
@@ -749,7 +748,7 @@ async def kick_user(ctx: Context) -> str | None:
             if (p == ctx.author) or p.bot:
                 continue
 
-            await p.logout()
+            p.logout()
 
         return "Kicked every. single. user online."
 
@@ -759,8 +758,8 @@ async def kick_user(ctx: Context) -> str | None:
     if t.bot:
         return "You can't kick me from the server!"
 
-    await t.logout()
-    t.enqueue(await writer.Notification("You've been kicked!"))
+    t.logout()
+    t.enqueue(writer.notification("You've been kicked!"))
 
     return f"Successfully kicked {t.username}"
 
@@ -775,28 +774,25 @@ async def restrict_user(ctx: Context) -> str | None:
     if len(ctx.args) < 1:
         return "Usage: !restrict <username>"
 
-    if not (t := await services.players.get_offline(" ".join(ctx.args))):
+    if not (target := await services.players.get_offline(" ".join(ctx.args))):
         return "Player isn't online or couldn't be found in the database"
 
-    if t.is_restricted:
+    if target.is_restricted:
         return "Player is already restricted? Did you mean to unrestrict them?"
 
     asyncio.create_task(
         services.sql.execute(
             "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (
-                t.id)
+                target.id)
         )
     )
 
-    t.privileges -= Privileges.VERIFIED
+    target.privileges -= Privileges.VERIFIED
+    target.shout("An admin has set your account in restricted mode!")
 
-    t.enqueue(
-        await writer.Notification("An admin has set your account in restricted mode!")
-    )
+    await ctx.author.log(f"restricted {target.username}")
 
-    await ctx.author.log(f"restricted {t.username}")
-
-    return f"Successfully restricted {t.username}"
+    return f"Successfully restricted {target.username}"
 
 
 @register_command("unrestrict", category="Staff", required_perms=Privileges.ADMIN)
@@ -809,24 +805,24 @@ async def unrestrict_user(ctx: Context) -> str | None:
     if len(ctx.args) < 1:
         return "Usage: !unrestrict <username>"
 
-    if not (t := await services.players.get_offline(" ".join(ctx.args))):
+    if not (target := await services.players.get_offline(" ".join(ctx.args))):
         return "Player couldn't be found in the database"
 
-    if not t.is_restricted:
+    if not target.is_restricted:
         return "Player isn't even restricted?"
 
     await services.sql.execute(
-        "UPDATE users SET privileges = privileges + 4 WHERE id = %s", (t.id)
+        "UPDATE users SET privileges = privileges + 4 WHERE id = %s", (target.id)
     )
 
-    t.privileges |= Privileges.VERIFIED
+    target.privileges |= Privileges.VERIFIED
 
-    if t.token:  # if user is online
-        t.enqueue(await writer.Notification("An admin has unrestricted your account!"))
+    if target.token:  # if user is online
+        target.shout("An admin has unrestricted your account!")
 
-    await ctx.author.log(f"unrestricted {t.username}")
+    await ctx.author.log(f"unrestricted {target.username}")
 
-    return f"Successfully unrestricted {t.username}"
+    return f"Successfully unrestricted {target.username}"
 
 
 @register_command("bot", category="Staff", required_perms=Privileges.ADMIN)
@@ -851,6 +847,7 @@ async def bot_commands(ctx: Context) -> str | None:
 @register_command("approve", category="Staff", required_perms=Privileges.BAT)
 async def approve_map(ctx: Context) -> str | None:
     """Change the ranked status of beatmaps."""
+    # maybe remove this, and add it to admin panel?
 
     if not ctx.author.last_np:
         return "Please /np a map first."
@@ -923,7 +920,7 @@ async def recalc_scores(ctx: Context) -> str | None:
     if gamemode == Gamemode.UNKNOWN or mode == Mode.NONE:
         return "Usage: !recalc <relax/vanilla/autopilot> <std/taiko/catch/mania>"
 
-    await ctx.reciever.send(
+    ctx.reciever.send(
         message=f"Fetching EVERY SCORE on the server for {
             ctx.args[1].lower()} {
             ctx.args[0].lower()}...",
@@ -942,14 +939,14 @@ async def recalc_scores(ctx: Context) -> str | None:
         try:
             bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
         except:
-            await ctx.reciever.send(message="No beatmap with that id found on server... Getting from osu api...", sender=services.bot)
+            ctx.reciever.send(message="No beatmap with that id found on server... Getting from osu api...", sender=services.bot)
             await osu.save_beatmap_file(score["map_id"])
             await asyncio.sleep(2)
-            await ctx.reciever.send(message="Waiting 2 seconds before continuing to prevent rate limiting.", sender=services.bot)
+            ctx.reciever.send(message="Waiting 2 seconds before continuing to prevent rate limiting.", sender=services.bot)
             try:
                 bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
             except:
-                await ctx.reciever.send(message="welp couldn't find beatmap lol", sender=services.bot)
+                ctx.reciever.send(message="welp couldn't find beatmap lol", sender=services.bot)
                 continue
 
         calc = Calculator(
@@ -968,7 +965,7 @@ async def recalc_scores(ctx: Context) -> str | None:
         pp = calc.performance(bmap).pp
 
         if math.isnan(pp):
-            await ctx.reciever.send(
+            ctx.reciever.send(
                 message=f"Failed to recalculate pp for score {score['id']} on map {
                     score['artist']} - {score['title']} [{score['version']}]",
                 sender=services.bot,
@@ -979,7 +976,7 @@ async def recalc_scores(ctx: Context) -> str | None:
             "UPDATE scores SET pp = %s WHERE id = %s", (pp, score["id"])
         )
 
-        await ctx.reciever.send(
+        ctx.reciever.send(
             message=f"Finished recalculating score {
                 score['id']} (before: {round(score['pp'], 4)}, after: {round(pp, 4)})",
             sender=services.bot,
@@ -1000,20 +997,16 @@ async def beta_keys(ctx: Context) -> str | None:
     if ctx.args[0] == "create":
         if len(ctx.args) != 2:
             key = uuid.uuid4().hex
-
             id = await services.sql.execute(
                 "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
                 (key, time.time() + 432000),  # 5 days
             )
-
-            return f"Created key with the name {key} (id: {id})"
-
-        key = ctx.args[1]
-
-        id = await services.sql.execute(
-            "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
-            (key, time.time() + 432000),  # 5 days
-        )
+        else:
+            key = ctx.args[1]
+            id = await services.sql.execute(
+                "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
+                (key, time.time() + 432000),  # 5 days
+            )
 
         return f"Created key with the name {key} (id: {id})"
 
@@ -1028,9 +1021,8 @@ async def beta_keys(ctx: Context) -> str | None:
         ):
             return "Key doesn't exist"
 
-        asyncio.create_task(
-            services.sql.execute(
-                "DELETE FROM beta_keys WHERE id = %s", (key_id))
+        await services.sql.execute(
+                "DELETE FROM beta_keys WHERE id = %s", (key_id)
         )
 
         return f"Deleted key {key_id}"
@@ -1042,7 +1034,7 @@ async def beta_keys(ctx: Context) -> str | None:
     "system", aliases=["sys"], category="Admin", required_perms=Privileges.ADMIN
 )
 @ensure_channel
-async def system(ctx: Context) -> str:
+async def system(ctx: Context) -> str | None:
     """Control the server system from ingame!"""
     if not ctx.args:
         return f"Wrong usage: !{ctx.cmd} [restart | shutdown | reload | maintenance]"
@@ -1050,11 +1042,11 @@ async def system(ctx: Context) -> str:
     match ctx.args[0].lower():
         case "restart":
             # TODO: add timer
-            await ctx.reciever.send(message="Restarting server...", sender=services.bot)
+            ctx.reciever.send(message="Restarting server...", sender=services.bot)
             os.execl(sys.executable, sys.executable, *sys.argv)
 
         case "shutdown":
-            await ctx.reciever.send(
+            ctx.reciever.send(
                 message="Shutting down server...", sender=services.bot
             )
             os.kill(os.getpid(), signal.SIGTERM)
@@ -1091,7 +1083,7 @@ async def system(ctx: Context) -> str:
 
 async def handle_commands(
     message: str, sender: "Player", reciever: Union["Channel", "Player"]
-) -> None:
+) -> str | None:
     if message[:3] == "!mp":
         message = message[4:]
         commands_set = mp_commands

@@ -66,38 +66,6 @@ def check_auth(
 
             return await cb(req, p, *args, **kwargs)
 
-            # if not (
-            #     user_info := await services.sql.fetch(
-            #         "SELECT username, id, privileges, "
-            #         "passhash, lon, lat, country, cc FROM users "
-            #         "WHERE safe_username = %s",
-            #         [player.lower().replace(" ", "_")],
-            #     )
-            # ):
-            #     return Response(content=custom_resp or b"not allowed")
-
-            # phash = user_info["passhash"].encode("utf-8")
-            # pmd5 = password.encode("utf-8")
-
-            # if phash in services.bcrypt_cache:
-            #     if pmd5 != services.bcrypt_cache[phash]:
-            #         log.warn(
-            #             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-            #         )
-
-            #         return Response(content=custom_resp or b"not allowed")
-            # else:
-            #     if not bcrypt.checkpw(pmd5, phash):
-            #         log.warn(
-            #             f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-            #         )
-
-            #         return Response(content=custom_resp or b"not allowed")
-
-            #     services.bcrypt_cache[phash] = pmd5
-
-            # return await cb(req, *args, **kwargs)
-
         return wrapper
 
     return decorator
@@ -235,15 +203,14 @@ async def get_scores(req: Request, p: Player) -> Response:
     # enqueue respective stats if gamemode has changed
     if prev_gamemode != p.gamemode:
         await p.update_stats_cache()
-        services.players.enqueue(await writer.UpdateStats(p))
+        services.players.enqueue(await writer.update_stats(p))
 
     ret = [b.web_format]
 
     mode = int(req.query_params["m"])
 
     query = (
-        f"SELECT s.id as id_, u.username, CAST(s.{
-            p.gamemode.score_order} as INT) as score, "
+        f"SELECT s.id as id_, u.username, CAST(s.{p.gamemode.score_order} as INT) as score, "
         "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         " s.submitted, s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
         "INNER JOIN users u ON u.id = s.user_id WHERE s.map_md5 = %s AND mode = %s "
@@ -268,9 +235,8 @@ async def get_scores(req: Request, p: Player) -> Response:
 
     query += f"ORDER BY score DESC, s.submitted ASC LIMIT 50"
     personal_best = await services.sql.fetch(
-        f"SELECT s.id as id_, CAST(s.{
-            p.gamemode.score_order} as INT) as score, s.max_combo, "
-        "s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
+        f"SELECT s.id as id_, CAST(s.{p.gamemode.score_order} as INT) as score, "
+        "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
         "AND s.map_md5 = %s AND s.gamemode = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
         (b.map_md5, p.gamemode.value, mode, p.id),
@@ -375,7 +341,7 @@ async def score_submission(req: Request) -> Response:
         "SELECT 1 FROM beatmap_playcount WHERE map_md5 = %s "
         "AND user_id = %s AND mode = %s AND gamemode = %s",
         (s.map.map_md5, s.player.id, s.mode, s.gamemode)
-    ) is not None:
+    ):
         await services.sql.execute(
             "UPDATE beatmap_playcount SET playcount = playcount + 1 "
             "WHERE map_md5 = %s AND user_id = %s AND mode = %s AND gamemode = %s ",
@@ -383,7 +349,6 @@ async def score_submission(req: Request) -> Response:
         )
     # else we want to insert
     else:
-        log.debug("beatmap playcount not found. inserting...")
         await services.sql.execute(
             "INSERT INTO beatmap_playcount (map_md5, user_id, mode, gamemode, playcount) "
             "VALUES (%s, %s, %s, %s, 1) ",
@@ -462,7 +427,7 @@ async def score_submission(req: Request) -> Response:
             stats.rank = await stats.update_rank(s.gamemode, s.mode)
 
         await stats.update_stats(s)
-        services.players.enqueue(await writer.UpdateStats(stats))
+        services.players.enqueue(await writer.update_stats(stats))
 
         # if the player got a position on
         # the leaderboard lower than or equal to 10
@@ -495,12 +460,12 @@ async def score_submission(req: Request) -> Response:
         if eval(ach.condition):
             await services.sql.execute(
                 "INSERT INTO users_achievements "
-                "(user_id, achievement_id) VALUES (%s, %s)",
-                (stats.id, ach.id),
+                "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, %s, %s)",
+                (stats.id, ach.id, s.mode.value, s.gamemode.value),
             )
 
-            stats.achievements.add(ach)
-            _achievements.append(ach)
+        stats.achievements.add(ach)
+        _achievements.append(ach)
 
     achievements = "/".join(str(ach) for ach in _achievements)
     gamemode = (
@@ -618,6 +583,7 @@ async def score_submission(req: Request) -> Response:
                     )
                 ),
                 f"achievements-new:{achievements}",
+                # f"achievements-new:special-pp-flag-icon+Impressive+That's an impressive score, but can you redo it, for the staff. 7 days.",
             )
         )
     )

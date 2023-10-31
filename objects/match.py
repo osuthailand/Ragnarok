@@ -5,7 +5,7 @@ from constants.playmode import Mode
 from constants.mods import Mods
 from packets import writer
 from objects import services
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from objects.player import Player
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 class Players:
     def __init__(self):
-        self.p: "Player" = None  # no superman :pensive:
+        self.player: "Player" = None  # no superman :pensive:
         self.mods: Mods = Mods.NONE
         self.host: bool = False
         self.status: SlotStatus = SlotStatus.OPEN
@@ -22,7 +22,7 @@ class Players:
         self.skipped: bool = False
 
     def reset(self):
-        self.p = None
+        self.player = None
         self.mods = Mods.NONE
         self.host = False
         self.status = SlotStatus.OPEN
@@ -31,7 +31,7 @@ class Players:
         self.skipped = False
 
     def copy_from(self, old):
-        self.p = old.p
+        self.player = old.p
         self.mods = old.mods
         self.host = old.host
         self.status = old.status
@@ -63,7 +63,7 @@ class Match:
 
         self.seed: int = 0
 
-        self.connected: list = []
+        self.connected: list["Player"] = []
 
         self.locked: bool = False
 
@@ -81,17 +81,17 @@ class Match:
 
     def find_host(self) -> Players | None:
         for slot in self.slots:
-            if slot.p.id == self.host:
+            if slot.player.id == self.host:
                 return slot
 
     def find_user(self, p: "Player") -> Players | None:
         for slot in self.slots:
-            if slot.p == p:
+            if slot.player == p:
                 return slot
 
     def find_user_slot(self, p: "Player") -> int | None:
         for id, slot in enumerate(self.slots):
-            if slot.p == p:
+            if slot.player == p:
                 return id
 
     def find_slot(self, slot_id: int) -> Players | None:
@@ -102,25 +102,23 @@ class Match:
             if id == slot_id:
                 return slot
 
-    async def transfer_host(self, slot: Players) -> None:
-        self.host = slot.p.id
+    def transfer_host(self, slot: Players) -> None:
+        self.host = slot.player.id
 
-        slot.p.enqueue(await writer.MatchTransferHost())
+        slot.player.enqueue(writer.match_transfer_host())
+        self.enqueue(writer.notification(f"{slot.player.username} became host!"))
+        self.enqueue_state()
 
-        self.enqueue(await writer.Notification(f"{slot.p.username} became host!"))
-
-        await self.enqueue_state()
-
-    async def enqueue_state(
-        self, immune: set[int] = set(), lobby: bool = False
-    ) -> None:
+    def enqueue_state(self, immune: set[int] = set(), lobby: bool = False) -> None:
         for p in self.connected:
             if p.id not in immune:
-                p.enqueue(await writer.MatchUpdate(self))
+                p.enqueue(writer.match_update(self))
 
         if lobby:
             chan = services.channels.get("#lobby")
-            chan.enqueue(await writer.MatchUpdate(self))
+            assert chan is not None
+
+            chan.enqueue(writer.match_update(self))
 
     def enqueue(self, data, lobby: bool = False) -> None:
         for p in self.connected:
@@ -128,4 +126,6 @@ class Match:
 
         if lobby:
             chan = services.channels.get("#lobby")
+            assert chan is not None
+
             chan.enqueue(data)

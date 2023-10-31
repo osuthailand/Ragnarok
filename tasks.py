@@ -37,7 +37,7 @@ async def removed_expired_tokens() -> None:
             and not player.bot
             and player.status != bStatus.AFK
         ):
-            await player.logout()
+            player.logout()
             log.info(
                 f"{player.username} has been logged out, due to loss of connection."
             )
@@ -45,13 +45,8 @@ async def removed_expired_tokens() -> None:
 
 @register_task(delay=60)
 async def check_for_osu_settings_update() -> None:
-    async for setting in services.sql.iterall(
-        "SELECT * FROM osu_settings"
-    ):
-        setting_data = {
-            key: value
-            for key, value in setting.items() if key != "name"
-        }
+    async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
+        setting_data = {key: value for key, value in setting.items() if key != "name"}
 
         if setting["name"] not in services.osu_settings:
             services.osu_settings["name"] = setting_data
@@ -62,8 +57,7 @@ async def check_for_osu_settings_update() -> None:
 
             if setting_value != setting_data:
                 services.osu_settings[setting_key] = setting_data
-                log.debug(
-                    f"Detected a change in {setting_key} and have updated it.")
+                log.debug(f"Detected a change in {setting_key} and have updated it.")
 
 
 async def run_all_tasks():

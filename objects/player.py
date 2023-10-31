@@ -84,7 +84,7 @@ class Player:
 
         self.block_unknown_pms: bool = kwargs.get("block_nonfriend", False)
 
-        self.queue: bytes = bytearray()
+        self.queue: bytearray = bytearray()
 
         self.login_time: float = time.time()
         self.last_update: float = 0.0
@@ -122,7 +122,7 @@ class Player:
     def generate_token() -> str:
         return str(uuid.uuid4())
 
-    def safe_username(self, name) -> str:
+    def safe_username(self, name: str) -> str:
         return name.lower().replace(" ", "_")
 
     def enqueue(self, packet: bytes) -> None:
@@ -138,94 +138,94 @@ class Player:
 
         return b""
 
-    async def shout(self, text: str) -> None:
+    def shout(self, text: str) -> None:
         """``shout()`` alerts the player."""
-        self.enqueue(await writer.Notification(text))
+        self.enqueue(writer.notification(text))
 
-    async def logout(self) -> None:
+    def logout(self) -> None:
         """``logout()`` logs the player out."""
         if self.channels:
             while self.channels:
-                await self.leave_channel(self.channels[0], kicked=False)
+                self.channels[0].disconnect(self)
 
         if self.match:
-            await self.leave_match()
+            self.leave_match()
 
         if self.spectating:
-            await self.spectating.remove_spectator(self)
+            self.spectating.remove_spectator(self)
 
         services.players.remove(self)
 
         for player in services.players:
             if player != self:
-                player.enqueue(await writer.Logout(self.id))
+                player.enqueue(writer.logout(self.id))
 
-    async def add_spectator(self, p: "Player") -> None:
+    def add_spectator(self, p: "Player") -> None:
         """``add_spectator()`` makes player `p` spectate the player"""
-        # TODO: Create temp spec channel
         spec_name = f"#spect_{self.id}"
-
-        # fake channel to make client aware of #spectator
-        generic_spectator_chat = Channel(
-            **{"name": "#spectator", "public": False, "auto_join": True}
-        )
         spec_channel = services.channels.get(spec_name)
 
+        # create if there's no channel
         if not spec_channel:
-            spec_channel = services.channels.add(
+            spec_channel = Channel(**
                 {
                     "name": spec_name,
+                    "display_name": "#spectator",
                     "description": f"spectator chat for {self.username}",
+                    "ephemeral": True,
                     "public": False,
                 }
             )
 
-            await self.join_channel(generic_spectator_chat)
-            await self.join_channel(spec_channel)
+            services.channels.add(spec_channel)
+            spec_channel.connect(self)
+        
+        spec_channel.connect(p)
 
-        await p.join_channel(generic_spectator_chat)
-        await p.join_channel(spec_channel)
+        player_joined = writer.fellow_spectator_joined(p.id)
 
-        joined = await writer.FellasJoinSpec(p.id)
-
-        for s in self.spectators:
-            s.enqueue(joined)
-            p.enqueue(await writer.FellasJoinSpec(s.id))
-
-        self.enqueue(await writer.UsrJoinSpec(p.id))
-
+        for spectator in self.spectators:
+            spectator.enqueue(player_joined)
+            p.enqueue(writer.fellow_spectator_joined(spectator.id))
+        
         self.spectators.append(p)
         p.spectating = self
 
-    async def remove_spectator(self, p: "Player") -> None:
+        self.enqueue(writer.spectator_joined(p.id))
+        log.info(f"{p.username} started spectating {self.username}")
+
+    def remove_spectator(self, p: "Player") -> None:
         """``remove_spectator()`` makes player `p` stop spectating the player"""
-        p.spectating = None
-        self.spectators.remove(p)
-
         spec_channel = services.channels.get(f"#spect_{self.id}")
-        assert spec_channel is not None
+        self.spectators.remove(p)
+        p.spectating = None
 
-        await p.leave_channel(spec_channel)
+        #debug
+        if not spec_channel:
+            log.debug("WHAT!")
+            return
 
+        spec_channel.disconnect(p)
+
+        fellow_stopped_spectating = writer.fellow_spectator_left(p.id)
         if not self.spectators:
-            await self.leave_channel(spec_channel)
-            services.channels.remove(spec_channel)
+            # if there are no spectators, make host disconnect
+            # from spectator channel and removing the channel.
+            spec_channel.disconnect(self)
+        else:
+            for s in self.spectators:
+                s.enqueue(fellow_stopped_spectating)
 
-        left = await writer.FellasLeftSpec(p.id)
+        self.enqueue(writer.spectator_left(p.id))
 
-        for s in self.spectators:
-            s.enqueue(left)
-
-        self.enqueue(await writer.UsrLeftSpec(p.id))
-
-    async def join_match(self, m: Match, pwd: str = "") -> None:
+    def join_match(self, m: Match, pwd: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
         if self.match or pwd != m.match_pass or not m in services.matches:
-            self.enqueue(await writer.MatchFail())
+            self.enqueue(writer.match_fail())
             return  # user is already in a match
 
         if (free_slot := m.get_free_slot()) == -1:
-            self.enqueue(await writer.MatchFail())
+            self.enqueue(writer.match_fail())
             log.warn(f"{self.username} tried to join a full match ({m!r})")
             return
 
@@ -233,7 +233,7 @@ class Player:
 
         slot = m.slots[free_slot]
 
-        slot.p = self
+        slot.player = self
         slot.mods = Mods.NONE
         slot.status = SlotStatus.NOTREADY
 
@@ -241,30 +241,31 @@ class Player:
             slot.host = True
 
         if not self.match.chat:
-            mc = Channel(
-                **{
-                    "raw": f"#multi_{self.match.match_id}",
-                    "name": "#multiplayer",
-                    "description": self.match.match_name,
-                }
-            )
+            mc = Channel(**{
+                "raw": f"#multi_{self.match.match_id}",
+                "name": "#multiplayer",
+                "description": self.match.match_name,
+                "public": False,
+                "ehpemeral": True,
+            })
+            services.channels.add(mc)
             self.match.chat = mc
 
-        await self.join_channel(self.match.chat)
+        self.match.chat.connect(self)
 
         self.match.connected.append(self)
 
-        self.enqueue(await writer.MatchJoin(self.match))  # join success
+        self.enqueue(writer.match_join(self.match))  # join success
 
         log.info(f"{self.username} joined {m}")
-        await self.match.enqueue_state(lobby=True)
+        self.match.enqueue_state(lobby=True)
 
-    async def leave_match(self) -> None:
+    def leave_match(self) -> None:
         """``leave_match()`` leaves the multiplayer match, the user is in."""
         if not self.match or not (slot := self.match.find_user(self)):
             return
 
-        await self.leave_channel(self.match.chat)
+        self.match.chat.disconnect(self)
 
         m = copy(self.match)
         self.match = None
@@ -279,9 +280,7 @@ class Player:
         # delete the multi lobby
         if not m.connected:
             log.info(f"{m} is empty! Removing...")
-
-            m.enqueue(await writer.MatchDispose(m.match_id), lobby=True)
-
+            m.enqueue(writer.match_dispose(m.match_id), lobby=True)
             services.matches.remove(m)
             return
 
@@ -289,43 +288,15 @@ class Player:
             log.info("Host left, rotating host.")
             for slot in m.slots:
                 if not slot.host and slot.status & SlotStatus.OCCUPIED:
-                    await m.transfer_host(slot)
+                    m.transfer_host(slot)
 
                     break
 
-        await m.enqueue_state(immune={self.id}, lobby=True)
+        m.enqueue_state(immune={self.id}, lobby=True)
 
-    async def join_channel(self, chan: Channel):
-        """``join_channel()`` makes the player join a channel."""
-        if chan in self.channels or (
-            chan.staff  # if the chan is already in the user lists chans
-            and not self.is_staff
-        ):  # if the user isnt staff and the chan is.
-            return
-
-        self.channels.append(chan)
-        chan.connected.append(self)
-
-        self.enqueue(await writer.ChanJoin(chan.name))
-
-        await chan.update_info()
-
-    async def leave_channel(self, chan: Channel, kicked: bool = True):
-        """``leave_channel()`` makes the player leave a channel."""
-        if not chan in self.channels:
-            return
-
-        self.channels.remove(chan)
-        chan.connected.remove(self)
-
-        if kicked:
-            self.enqueue(await writer.ChanKick(chan.name))
-
-        await chan.update_info()
-
-    async def send_message(self, message, reciever: "Player" = None):
+    def send_message(self, message, reciever: "Player"):
         reciever.enqueue(
-            await writer.SendMessage(
+            writer.send_message(
                 sender=self.username,
                 message=message,
                 channel=reciever.username,
@@ -335,7 +306,7 @@ class Player:
 
     async def get_achievements(self) -> None:
         async for achievement in services.sql.iterall(
-            "SELECT achievement_id, mode, relax FROM users_achievements "
+            "SELECT achievement_id, mode, gamemode FROM users_achievements "
             "WHERE user_id = %s",
             (self.id),
         ):
@@ -388,10 +359,8 @@ class Player:
 
         self.privileges -= Privileges.VERIFIED
 
-        asyncio.create_task(
-            services.sql.execute(
-                "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
-            )
+        await services.sql.execute(
+            "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
         )
 
         # remove player from leaderboards
@@ -408,7 +377,7 @@ class Player:
                 )
 
         # notify user
-        await self.shout("Your account has been put in restricted mode!")
+        self.shout("Your account has been put in restricted mode!")
 
         log.info(f"{self.username} has been put in restricted mode!")
 
@@ -432,7 +401,6 @@ class Player:
                 self.id,
             ),
         )
-        log.debug(s.total_hits)
         # less important
         await services.sql.execute(
             f"UPDATE {s.gamemode.table} SET total_hits_{

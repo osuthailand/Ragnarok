@@ -85,17 +85,15 @@ class Channels:
     def __iter__(self):
         return iter(self.channels)
 
-    def add(self, data: dict[str, Any]) -> Channel:
-        chan = Channel(**data)
+    def add(self, chan: Channel) -> None:
         self.channels.append(chan)
-        return chan
 
     def remove(self, c: Channel) -> None:
         self.channels.remove(c)
 
     def get(self, name: str) -> Channel | None:
         for chan in self.channels:
-            if chan._name == name:
+            if chan.name == name:
                 return chan
 
 

@@ -246,7 +246,7 @@ class Player:
                 "name": "#multiplayer",
                 "description": self.match.match_name,
                 "public": False,
-                "ehpemeral": True,
+                "ephemeral": True,
             })
             services.channels.add(mc)
             self.match.chat = mc

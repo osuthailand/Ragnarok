@@ -18,13 +18,12 @@ from objects.channel import Channel
 from constants.levels import levels
 from constants.playmode import Gamemode, Mode
 from constants.match import SlotStatus
-from objects.achievement import Achievement
+from objects.achievement import UserAchievement
 from constants.player import PresenceFilter, bStatus, Privileges, country_codes
 
 if TYPE_CHECKING:
     from objects.beatmap import Beatmap
     from objects.score import Score
-
 
 class Player:
     def __init__(
@@ -40,6 +39,7 @@ class Player:
     ) -> None:
         self.id: int = id
         self.username: str = username
+        self.username_with_tag: str = ""
         self.safe_name: str = self.safe_username(self.username)
         self.privileges: int = privileges
         self.passhash: str = passhash
@@ -65,7 +65,7 @@ class Player:
         self.play_mode: Mode = Mode.OSU
         self.beatmap_id: int = -1
 
-        self.achievements: set[Achievement] = set()
+        self.achievements: list[UserAchievement] = []
         self.friends: set[int] = set()
         self.channels: list[Channel] = []
         self.spectators: list[Player] = []
@@ -79,6 +79,9 @@ class Player:
         self.level: float = 0.0
         self.rank: int = 0
         self.pp: int = 0
+
+        self.total_hits: int = 0
+        self.max_combo: int = 0
 
         self.gamemode: Gamemode = Gamemode.VANILLA
 
@@ -304,6 +307,18 @@ class Player:
             )
         )
 
+    async def get_clan_tag(self) -> None:
+        clan_tag = await services.sql.fetch(
+            "SELECT c.tag FROM clans c INNER JOIN users u ON c.id = u.clan_id "
+            "WHERE u.id = %s",
+            (self.id)
+        )
+
+        if not clan_tag:
+            return
+
+        self.username_with_tag = f"[{clan_tag["tag"]}] {self.username}"
+
     async def get_achievements(self) -> None:
         async for achievement in services.sql.iterall(
             "SELECT achievement_id, mode, gamemode FROM users_achievements "
@@ -318,7 +333,15 @@ class Player:
                 )
                 return
 
-            self.achievements.add(ach)
+            gamemode = Gamemode(achievement["gamemode"])
+            mode = Mode(achievement["mode"])
+            user_achievement = UserAchievement(
+                **ach.__dict__,
+                gamemode=gamemode,
+                mode=mode
+            )
+
+            self.achievements.append(user_achievement)
 
     async def get_friends(self) -> None:
         async for player in services.sql.iterall(
@@ -404,11 +427,11 @@ class Player:
         # less important
         await services.sql.execute(
             f"UPDATE {s.gamemode.table} SET total_hits_{
-                se} = total_hits_{se} + %s, "
+                se} = %s, "
             f"playtime_{se} = playtime_{
                 se} + %s, max_combo_{se} = IF(max_combo_{se}<%s, %s, max_combo_{se}) "
             "WHERE id = %s",
-            (s.total_hits, s.playtime, s.max_combo, s.max_combo, self.id)
+            (self.total_hits, s.playtime, s.max_combo, s.max_combo, self.id)
         )
 
     def get_level(self):
@@ -543,6 +566,8 @@ class Player:
         self.level = ret["level"]
         self.rank = ret["rank"]
         self.pp = math.ceil(ret["pp"])
+        self.total_hits = ret["total_hits"]
+        self.max_combo = ret["max_combo"]
 
         return True
 

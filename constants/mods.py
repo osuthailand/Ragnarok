@@ -109,3 +109,19 @@ class Mods(IntFlag):
                 log.fail(f"Mod: {mod} doesn't exist.")
 
         return mods
+
+    # mainly used for achievement conditions
+    def has_all(self, *mods: "Mods") -> bool:
+        for mod in mods:
+            if not mod & self:
+                return False
+                
+        return True
+
+    # mainly used for achievement conditions
+    def has_any(self, *mods: "Mods") -> bool:
+        for mod in mods:
+            if mod & self:
+                return True
+                
+        return False

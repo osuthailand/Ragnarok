@@ -1,13 +1,21 @@
+from dataclasses import dataclass
+
+from constants.playmode import Gamemode, Mode
+
+
+@dataclass(kw_only=True)
 class Achievement:
-    def __init__(self, **kwargs) -> None:
-        self.id: int = kwargs.get("id", 0)
-        self.name: str = kwargs.get("name", "")
-        self.description: str = kwargs.get("description", "")
-        self.icon: str = kwargs.get("icon", "")
-        self.condition: str = kwargs.get("condition", "")
+    id: int = 0
+    name: str = ""
+    description: str = ""
+    icon: str = ""
+    condition: str = ""
 
-    def __dict__(self) -> dict[str, str]:
-        return {"name": self.name, "description": self.description, "icon": self.icon}
-
-    def __str__(self) -> str:
+    def __repr__(self) -> str:
         return f"{self.icon}+{self.name}+{self.description}"
+
+
+@dataclass(kw_only=True)
+class UserAchievement(Achievement):
+    gamemode: Gamemode = Gamemode.VANILLA
+    mode: Mode = Mode.OSU

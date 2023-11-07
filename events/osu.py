@@ -10,6 +10,7 @@ import asyncio
 import aiofiles
 import numpy as np
 from constants.playmode import Gamemode
+from objects.achievement import UserAchievement
 from packets import writer
 
 from utils import log
@@ -21,6 +22,7 @@ from typing import Callable
 
 from objects.player import Player
 from constants.mods import Mods
+from constants.playmode import Mode # this is being used for achievements condition 
 from urllib.parse import unquote
 from objects.beatmap import Beatmap
 from starlette.routing import Router
@@ -30,6 +32,7 @@ from constants.player import Privileges
 from objects.score import Score, SubmitStatus
 from starlette.responses import FileResponse, Response, RedirectResponse
 
+from rina_pp_pyb import Beatmap as BMap
 
 def check_auth(
     u: str,
@@ -179,6 +182,7 @@ class LeaderboardType(IntEnum):
 async def get_scores(req: Request, p: Player) -> Response:
     hash = req.query_params["c"]
 
+
     if not (b := await services.beatmaps.get(hash)):
         return Response(content=b"-1|true")
 
@@ -203,18 +207,19 @@ async def get_scores(req: Request, p: Player) -> Response:
     # enqueue respective stats if gamemode has changed
     if prev_gamemode != p.gamemode:
         await p.update_stats_cache()
-        services.players.enqueue(await writer.update_stats(p))
+        services.players.enqueue(writer.update_stats(p))
 
     ret = [b.web_format]
 
     mode = int(req.query_params["m"])
 
     query = (
-        f"SELECT s.id as id_, u.username, CAST(s.{p.gamemode.score_order} as INT) as score, "
+        "SELECT s.id as id_, COALESCE(CONCAT('[', c.tag, '] ', u.username), u.username) as username, "
         "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
-        " s.submitted, s.count_geki, s.perfect, s.mods, s.user_id, u.country FROM scores s "
-        "INNER JOIN users u ON u.id = s.user_id WHERE s.map_md5 = %s AND mode = %s "
-        "AND s.status = 3 AND u.privileges & 4 AND s.gamemode = %s "
+        f"CAST(s.{p.gamemode.score_order} as INT) as score, s.submitted, s.count_geki, s.perfect, "
+        "s.mods, s.user_id, u.country FROM scores s INNER JOIN users u ON u.id = s.user_id "
+        "LEFT JOIN clans c ON c.id = u.clan_id WHERE s.map_md5 = %s AND "
+        "s.mode = %s AND s.status = 3 AND u.privileges & 4 AND s.gamemode = %s "
     )
     params = [hash, mode, p.gamemode.value]
 
@@ -262,7 +267,7 @@ async def get_scores(req: Request, p: Player) -> Response:
                 SCORES_FORMAT.format(
                     **personal_best,
                     user_id=p.id,
-                    username=p.username,
+                    username=p.username_with_tag,
                     position=pb_position[0] + 1,
                 )
             )  # type: ignore
@@ -331,21 +336,19 @@ async def score_submission(req: Request) -> Response:
 
     s.playtime = int(form["st" if passed else "ft"]) // 1000  # milliseconds
     s.id = await s.save_to_db()
-
-    s.player.last_score = s
     s.map.plays += 1
 
     # check if the beatmap playcount for player exists first
     # if it does, we just wanna update.
-    if await services.sql.fetch(
-        "SELECT 1 FROM beatmap_playcount WHERE map_md5 = %s "
+    if beatmap_playcount := await services.sql.fetch(
+        "SELECT id FROM beatmap_playcount WHERE map_md5 = %s "
         "AND user_id = %s AND mode = %s AND gamemode = %s",
         (s.map.map_md5, s.player.id, s.mode, s.gamemode)
     ):
         await services.sql.execute(
             "UPDATE beatmap_playcount SET playcount = playcount + 1 "
-            "WHERE map_md5 = %s AND user_id = %s AND mode = %s AND gamemode = %s ",
-            (s.map.map_md5, s.player.id, s.mode, s.gamemode)
+            "WHERE id = %s ",
+            (beatmap_playcount["id"])
         )
     # else we want to insert
     else:
@@ -391,6 +394,7 @@ async def score_submission(req: Request) -> Response:
 
     stats.playcount += 1
     stats.total_score += s.score
+    stats.total_hits += s.total_hits
 
     if s.status == SubmitStatus.BEST:
         sus = s.score
@@ -427,7 +431,7 @@ async def score_submission(req: Request) -> Response:
             stats.rank = await stats.update_rank(s.gamemode, s.mode)
 
         await stats.update_stats(s)
-        services.players.enqueue(await writer.update_stats(stats))
+        services.players.enqueue(writer.update_stats(stats))
 
         # if the player got a position on
         # the leaderboard lower than or equal to 10
@@ -444,28 +448,43 @@ async def score_submission(req: Request) -> Response:
                 else ""
             )
 
-            await chan.send(
+            chan.send(
                 f"{s.player.embed} achieved #{s.position} on {
                     s.map.embed} ({s.mode.to_string()}) {gamemode}",
                 sender=services.bot,
             )
 
+    # TODO: map difficulty changing mods 
+
     _achievements = []
     for ach in services.achievements:
-        if ach in stats.achievements:
+        user_achievement = UserAchievement(
+            **ach.__dict__,
+            gamemode=s.gamemode,
+            mode=s.mode
+        )
+
+        if user_achievement in stats.achievements:
             continue
 
         # if the achievement condition matches
         # with the score, it should be unlocked.
-        if eval(ach.condition):
-            await services.sql.execute(
-                "INSERT INTO users_achievements "
-                "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, %s, %s)",
-                (stats.id, ach.id, s.mode.value, s.gamemode.value),
-            )
+        try:
+            if eval(ach.condition):
+                log.info(f"{stats.username} unlocked {ach.name} that has condition: {ach.condition}")
+                await services.sql.execute(
+                    "INSERT INTO users_achievements "
+                    "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, %s, %s)",
+                    (stats.id, ach.id, s.mode.value, s.gamemode.value),
+                )
 
-        stats.achievements.add(ach)
-        _achievements.append(ach)
+                stats.achievements.append(user_achievement)
+                _achievements.append(ach)
+        except:
+            # TODO: fix the failed conditions
+            log.error(f"failed to eval condition: {ach.condition}")
+            continue
+
 
     achievements = "/".join(str(ach) for ach in _achievements)
     gamemode = (
@@ -478,8 +497,11 @@ async def score_submission(req: Request) -> Response:
 
     log.info(
         f"{stats.username} submitted a score on {
-            s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) [{gamemode}]"
+            s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) {gamemode}"
     )
+
+    # cache the score as the latest score on current player session.
+    s.player.last_score = s
 
     # only do charts if the score isn't relax
     # but do charts if the user is playing on rina
@@ -583,7 +605,6 @@ async def score_submission(req: Request) -> Response:
                     )
                 ),
                 f"achievements-new:{achievements}",
-                # f"achievements-new:special-pp-flag-icon+Impressive+That's an impressive score, but can you redo it, for the staff. 7 days.",
             )
         )
     )
@@ -712,25 +733,27 @@ async def osu_direct(req: Request, p: Player) -> Response:
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url) as resp:
-            if len(await resp.json()) == 100:
+            data = await resp.json()
+
+            if len(data) == 100:
                 bmCount = 1
 
-            for beatmapsSet in await resp.json():
+            for beatmapset in data:
                 bmCount += 1
 
-                sid = beatmapsSet["id"]
-                artist = beatmapsSet["artist"]
-                title = beatmapsSet["title"]
-                creator = beatmapsSet["creator"]
-                ranked = beatmapsSet["ranked"]
+                sid = beatmapset["id"]
+                artist = beatmapset["artist"]
+                title = beatmapset["title"]
+                creator = beatmapset["creator"]
+                ranked = beatmapset["ranked"]
 
-                lastUpd = beatmapsSet["last_updated"]
+                lastUpd = beatmapset["last_updated"]
 
-                threadId = beatmapsSet["legacy_thread_url"][
+                threadId = beatmapset["legacy_thread_url"][
                     43:
                 ]  # remove osu link and get only id
-                hasVideo = "1" if beatmapsSet["video"] else ""
-                hasStoryboard = "1" if beatmapsSet["storyboard"] else ""
+                hasVideo = "1" if beatmapset["video"] else ""
+                hasStoryboard = "1" if beatmapset["storyboard"] else ""
 
                 directList += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
                 directList += (
@@ -738,7 +761,7 @@ async def osu_direct(req: Request, p: Player) -> Response:
                         hasVideo}|{hasStoryboard}|0||"
                 )
 
-                for i, beatmaps in enumerate(beatmapsSet["beatmaps"]):
+                for i, beatmaps in enumerate(beatmapset["beatmaps"]):
                     diffName = beatmaps["version"]
                     starsRating = beatmaps["difficulty_rating"]
                     mode = beatmaps["mode_int"]
@@ -746,7 +769,7 @@ async def osu_direct(req: Request, p: Player) -> Response:
                     directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{
                         starsRating}@{mode}"
 
-                    if i < len(beatmapsSet["beatmaps"]) - 1:
+                    if i < len(beatmapset["beatmaps"]) - 1:
                         directList += ","
                     else:
                         directList += "\n"
@@ -784,6 +807,8 @@ async def osu_search_set(req: Request, p: Player) -> Response:
 @osu.route("/d/{map_id:int}")
 @osu.route("/d/{map_id:int}n")  # no video
 async def download_osz(req: Request) -> Response:
+    # TODO: check for availablity, if not use another mirror.
+
     return RedirectResponse(
         url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{
             '?noVideo=true' if req.url.path[-1] == 'n' else ''}",

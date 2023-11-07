@@ -2,8 +2,10 @@ from base64 import b64decode
 
 from dataclasses import dataclass
 from enum import IntEnum, unique
+import zipfile
 import struct
 import hashlib
+import gzip
 import os
 import io
 
@@ -47,24 +49,32 @@ class MetadataType(IntEnum):
 @dataclass
 class Metadata:
     title: str = ""
-    creator: str = ""
+    title_unicode: str = ""
+    
     artist: str = ""
+    artist_unicode: str = ""
+
+    creator: str = ""
     version: str = ""
     set_id: int = 0
 
 
 @dataclass
 class FileInfo:
-    Name: str
-    Offset: int
-    Size: int
-    Hash: list[bytes]
-    Created: datetime
-    Modified: datetime
+    name: str
+    offset: int
+    size: int
+    hash: list[bytes]
+    created: datetime
+    modified: datetime
+
+    raw_data: bytes = b""
+
+    _map_id: int = 0
 
 # fmt: off
 # FastRandom(1990)
-knownPlainByteSeq = bytearray([
+known_plain = bytearray([
    0x55, 0xAA, 0x74, 0x10, 0x2B, 0x56, 0xB3, 0x9E,
    0x25, 0x9E, 0xFE, 0xB7, 0xBE, 0x06, 0xFC, 0xF2,
    0xB6, 0x3C, 0x6F, 0x47, 0x7E, 0x38, 0x69, 0x43,
@@ -144,8 +154,8 @@ class BytesIOWrapper(io.BytesIO):
         return super().write(__buffer)
 
     def seek(self, __offset: int, __whence: int = 0) -> int:
-        newPos = super().seek(__offset, __whence)
-        return newPos
+        new_pos = super().seek(__offset, __whence)
+        return new_pos
 
     def tell(self) -> int:
         curPos = super().tell()
@@ -175,39 +185,136 @@ class BytesIOWrapper(io.BytesIO):
         else:
             self.write(b'\x00')
 
-
 class OSZ2:
     def __init__(self) -> None:
         self.metadata: Metadata = Metadata()
-        self.files: FileInfo
+        self.files: list[FileInfo] = []
+        self.path: str = ""
 
         self._raw: bytes = b""
 
-    @classmethod
-    def parse(cls, filepath: str = "", raw: bytes = b"") -> "OSZ2":
-        c = cls()
-        data = raw
+    def extract_osu_files(self) -> list[FileInfo]:
+        files = []
+        for file in self.files:
+            if file._map_id:
+                files.append(file)
 
-        if filepath:
-            if not os.path.exists(filepath):
-                log.fail("The osz2 doesn't exist[]")
+        return files
+
+    @classmethod
+    def parse(cls, raw: bytes, file_type: int = 1) -> "OSZ2":
+        match file_type:
+            case 1:
+                return cls().parse_full_submit(raw)
+            case 2:
+                return cls().parse_patch(raw)
+            case _:
+                # TODO: maybe read the header and determine from there? or maybe that'd be useless
+                log.warn(f"Someone tried to parse an invalid beatmap file type ({file_type}).")    
+
+        return
+
+    # used for BSDIFF40 thingy
+    def _offtin(self, data):
+        x = struct.unpack('<Q', data)[0]
+
+        if x & (1 << 63):
+            x &= ~(1 << 63)
+            x *= -1
+
+        return x
+
+    def parse_patch(self, raw: bytes) -> "OSZ2":
+        data = raw
+        reader = Reader(data)
+
+        # TODO patch parsing
+        # the file should start with "BSDIFF40" otherwise it is NOT a patch file
+        if reader.read_bytes(8) != (0x42, 0x53, 0x44, 0x49, 0x46, 0x46, 0x34, 0x30):
+            log.fail("A user tried to parse a non-patch file!")
+            return
+
+        # read length in BSDIFF40's header
+        len_control = self._offtin(bytes(reader.read_bytes(8)))
+        len_data = self._offtin(bytes(reader.read_bytes(8)))
+        new_size = self._offtin(bytes(reader.read_bytes(8)))
+
+        if (len_control < 0 or len_data < 0 or new_size < 0):
+            log.fail(":WTF: (invalid patch file (sizes are corrupt))")
+            return
+
+        # decrypt starts here
+        gz_control = gzip.GzipFile(fileobj=io.BytesIO(bytes(reader.read_bytes(len_control))))
+        gz_data = gzip.GzipFile(fileobj=io.BytesIO(bytes(reader.read_bytes(len_data))))
+        gz_extra_data = gzip.GzipFile(fileobj=io.BytesIO(bytes(reader.data))) # what the fuck?
+
+        old_file_bytes = open(f'.data/osz2/100000001.osz2', 'rb').read() #PLACEHOLDDDDDDDDEEEEEEEEEEEEEEEEEERRRR!!!!!!!!!!!!!!!!!
+        new_file_bytes = bytearray(new_size)
+
+        old_size = len(old_file_bytes)
+
+        new_pos = 0
+        old_pos = 0
+
+        ctrl = [0, 0, 0]
+        buffer = bytearray(8)
+
+        # read control data
+        while new_pos < new_size:
+            for i in range(3):
+                if gz_control.readinto(buffer) < 8:
+                    log.debug("corrupted patch (bad control)")
+                    return
+                ctrl[i] = self._offtin(buffer)
+
+            if new_pos + ctrl[0] > new_size:
+                log.debug("corrupted patch (bad position)")
                 return
 
-            with open(filepath, "rb") as osz2:
-                data = osz2.read()
+            # read data (stuck here)
+            for i in range(new_pos, new_pos + ctrl[0], 65536):
+                if gz_data.readinto(memoryview(new_file_bytes[i:i+65536])) < ctrl[0]:
+                    log.debug("corrupted patch (bad data)")
+                    return
 
+            # add old data to... new data?
+            for i in range(ctrl[0]):
+                if 0 <= old_pos + i < old_size:
+                    new_file_bytes[new_pos + i] += old_file_bytes[old_pos + i]
+
+            # adjust pointer
+            new_pos += ctrl[0]
+            old_pos += ctrl[0]
+
+            if new_pos > new_size:
+                log.debug("corrupted patch (size too big???)")
+                return
+
+            # read extra stuff if there's any
+            if gz_extra_data.readinto(new_file_bytes[new_pos:new_pos+ctrl[1]]) < ctrl[1]:
+                log.debug("corrupted patch (bad extra data)")
+                return
+
+            # sanity check
+            new_pos += ctrl[1]
+            old_pos += ctrl[2]
+
+        #not sure if these are needed but errrr...
+        gz_control.close()
+        gz_data.close()
+        gz_extra_data.close()
+        
+        log.info("OK!")
+        
+
+    def parse_full_submit(self, raw: bytes) -> "OSZ2":
+        data = raw
         reader = Reader(data)
 
         # the file should start with 0xEC, 0x48 and 0x4F otherwise it is NOT osz2
         if reader.read_bytes(3) != (0xEC, 0x48, 0x4F):
-            # check if it's a patch file instead (BSDIFF40)
-            reader.offset = 0
-            if reader.read_bytes(8) == (0x42, 0x53, 0x44, 0x49, 0x46, 0x46, 0x34, 0x30):
-                log.fail("Patch file not supported yet!")
-                return
-            else:
-                log.fail("User tried to submit an invalid osz2 file")
-                return
+            log.fail("A user tried to submit an invalid osz2 file")
+            return
 
         # unused
         version = reader.read_byte()
@@ -223,11 +330,10 @@ class OSZ2:
         metadata_entries = int.from_bytes(pack('4B', *metadata_entries_bytes), byteorder='little')
 
         # save buffer for verification
-        writerMetaHash = BytesIOWrapper()
-        writerMetaHash.write(pack('4B', *metadata_entries_bytes))
+        writer_meta_hash = BytesIOWrapper()
+        writer_meta_hash.write(pack('4B', *metadata_entries_bytes))
 
         # read metadata
-        metadata_info = []
         for _ in range(metadata_entries):
             # type = reader.read_int16()
             type_bytes = reader.read_bytes(2)  # i16
@@ -236,52 +342,66 @@ class OSZ2:
 
             match MetadataType(type):
                 case MetadataType.Creator:
-                    c.metadata.creator = value
+                    self.metadata.creator = value
 
                 case MetadataType.Artist:
-                    c.metadata.artist = value
+                    self.metadata.artist = value
 
+                case MetadataType.ArtistUnicode:
+                    self.metadata.artist_unicode = value
+                
                 case MetadataType.Title:
-                    c.metadata.title = value
+                    self.metadata.title = value
+
+                case MetadataType.TitleUnicode:
+                    self.metadata.title_unicode = value
 
                 case MetadataType.Version:
-                    c.metadata.version = value
+                    self.metadata.version = value
 
                 case MetadataType.BeatmapSetID:
-                    c.metadata.set_id = int(value)
+                    self.metadata.set_id = int(value)
 
             # also save this to the buffer for verification
-            writerMetaHash.write(pack('2B', *type_bytes))
-            writerMetaHash.write_str(value)
+            writer_meta_hash.write(pack('2B', *type_bytes))
+            writer_meta_hash.write_str(value)
+
+        self.path = f".data/custom_beatmaps/{self.metadata.set_id} {self.metadata.artist} - {self.metadata.title}"
 
         # verify if hash is matched with what osz2 reported
-        with writerMetaHash.getbuffer() as meta_buffer:
+        with writer_meta_hash.getbuffer() as meta_buffer:
             calculated_hash_meta = OSZ2.compute_osz_hash(meta_buffer, metadata_entries * 3, 0xa7)
+
             if calculated_hash_meta != pack('16B', *hash_meta):
                 log.fail(f"calculated: {calculated_hash_meta.hex()}")
                 log.fail(f"osz2 report: {pack('16B', *hash_meta).hex()}")
                 log.fail("bad hashes (hash_meta)")
+
                 return
 
         # check how many .osu are there in the osz2
         num_files = reader.read_int32()
 
         # read all of them
-        # TODO: add them to dict for FileInfo
+        
+        osu_file_and_map_id = []
         for i in range(num_files):
-            fileName = reader.read_str(dotNETString=True)
+            file_name = reader.read_str(dotNETString=True)
             map_id = reader.read_int32()
 
+            osu_file_and_map_id.append((file_name, map_id))
+
         # prepare key and save key for later uses
-        seed = f"{c.metadata.creator}yhxyfjo5{c.metadata.set_id}"
+        seed = f"{self.metadata.creator}yhxyfjo5{self.metadata.set_id}"
         KEY = hashlib.md5(seed.encode("ascii")).digest()
 
         # Verify this magic block using XTEA
         magic_key = xtea_decrypt(bytearray(reader.read_bytes(64)), KEY)
-        if magic_key != knownPlainByteSeq:
-            log.fail(f"calculated: {knownPlainByteSeq.hex()}")
+        if magic_key != known_plain:
+            log.fail(f"calculated: {known_plain.hex()}")
             log.fail(f"osz2 report: {magic_key.hex()}")
             log.fail("bad hashes (magic xtea block)")
+
             return
 
         # read encrypted data length and decrypt it
@@ -309,28 +429,33 @@ class OSZ2:
             # intialize buffer and extract files info
             for i in range(file_info_count):
                 # file name
+                next_file_info_offset = 0
                 file_name = xxtea_reader.read_str()
-
-                # file checksum
                 file_hash = xxtea_reader.read_bytes(16)
-
-                # file datetime created/modified
-                file_date_created = datetime_frombinary(xxtea_reader.read_int64())
-                file_date_modified = datetime_frombinary(xxtea_reader.read_int64())
+                file_created = datetime_frombinary(xxtea_reader.read_int64())
+                file_modified = datetime_frombinary(xxtea_reader.read_int64())
+                current_fileinfo_offset = next_file_info_offset
 
                 # prep new offset for files extraction
-                next_file_info_offset = 0
                 if (i + 1 < file_info_count):
                     next_file_info_offset = xxtea_reader.read_int32()
                 else:
                     next_file_info_offset = len(data) - file_offset
-
                 file_len = next_file_info_offset - current_fileinfo_offset
+
+                file_info = FileInfo(
+                    name=file_name,
+                    hash=file_hash,
+                    created=file_created,
+                    modified=file_modified,
+                    offset=current_fileinfo_offset,
+                    size=file_len
+                )
+
                 # TODO: add file info append here
-                current_fileinfo_offset = next_file_info_offset
+                self.files.append(file_info)
 
         # data extraction
-        # TODO: save extracted data somewhere
         for i in range(file_info_count):
             data_dec_len = xxtea_decrypt(bytearray(reader.read_bytes(4)), KEY)
             data_dec_len = (data_dec_len[0] |
@@ -339,8 +464,28 @@ class OSZ2:
                             data_dec_len[3] << 24)
 
             decrypted_data = xxtea_decrypt(bytearray(reader.read_bytes(data_dec_len)), KEY)
+
+            self.files[i].raw_data = decrypted_data
+
+            for (osu_map, map_id) in osu_file_and_map_id:
+                if osu_map != self.files[i].name:
+                    continue
+
+                self.files[i]._map_id = map_id
+
+        # temporarily save stuff
+        for file in self.files:
+            path = f"{self.path}/{file.name}"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb+") as beatmap:
+                beatmap.write(file.raw_data)
+
+        # make osz, after this, remove the osz2
+        with zipfile.ZipFile(f'.data/osz/{self.metadata.set_id} {self.metadata.artist} - {self.metadata.title}.osz', mode='w', compression=zipfile.ZIP_DEFLATED) as osz:
+            for file in self.files:
+                osz.write(f"{self.path}/{file.name}", arcname=file.name)
         
-        return c
+        return self
 
     @staticmethod
     def compute_osz_hash(buffer: memoryview | bytearray, pos: int, swap: int) -> bytes:

@@ -32,6 +32,7 @@ def register_task(delay: int) -> Callable:
 async def removed_expired_tokens() -> None:
     for player in services.players:
         # doesn't look like afk players get the afk thingy thing thing
+        # ^^^ bro what?
         if (
             time.time() - player.last_update >= TOKEN_EXPIRATION
             and not player.bot

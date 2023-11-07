@@ -92,7 +92,7 @@ async def startup():
     log.info("... Caching achievements")
 
     async for achievement in services.sql.iterall("SELECT * FROM achievements"):
-        services.achievements.add(Achievement(**achievement))
+        services.achievements.append(Achievement(**achievement))
 
     log.info("✓ Successfully cached all achievements")
     log.info("... Getting bancho settings from database")

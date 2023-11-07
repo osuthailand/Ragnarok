@@ -9,6 +9,7 @@ from constants.beatmap import Approved
 
 class Beatmap:
     def __init__(self):
+        self.server: str = "bancho"
         self.set_id: int = 0
         self.map_id: int = 0
         self.map_md5: str = ""
@@ -30,9 +31,9 @@ class Beatmap:
         self.bpm: float = 0.0
         self.max_combo: int = 0
 
-        self.submit_date: str = ""
-        self.approved_date: str = ""
-        self.latest_update: str = ""
+        self.submit_date: str = "0"
+        self.approved_date: str = "0"
+        self.latest_update: str = "0"
 
         self.hit_length: float = 0.0
         self.drain: int = 0
@@ -105,7 +106,7 @@ class Beatmap:
         )
 
         ret = await services.sql.fetch(
-            "SELECT set_id, map_id, map_md5, title, title_unicode, "
+            "SELECT server, set_id, map_id, map_md5, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
             "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
             "latest_update, length, drain, plays, passes, favorites, rating "
@@ -116,6 +117,7 @@ class Beatmap:
         if not ret:
             return
 
+        b.server = ret["server"]
         b.set_id = ret["set_id"]
         b.map_id = ret["map_id"]
         b.map_md5 = ret["map_md5"]
@@ -166,11 +168,11 @@ class Beatmap:
         values.append(self.approved.value)
 
         await services.sql.execute(
-            "INSERT INTO beatmaps (set_id, map_id, map_md5, title, title_unicode, "
+            "INSERT INTO beatmaps (server, set_id, map_id, map_md5, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
             "od, ar, hp, cs, mode, bpm, max_combo, submit_date, approved_date, "
             "latest_update, length, drain, plays, passes, favorites, rating, approved) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
             "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             values,
         )

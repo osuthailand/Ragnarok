@@ -55,7 +55,7 @@ beatmaps: "Beatmaps"
 
 osu_key: str = config["api_conf"]["osu_api_key"]
 
-achievements: set[Achievement] = set()
+achievements: list[Achievement] = []
 
 
 def get_achievement_by_id(id: int) -> Achievement | None:
@@ -67,7 +67,8 @@ def get_achievement_by_id(id: int) -> Achievement | None:
 regex: dict[str, Pattern[str]] = {
     "np": re.compile(
         rf"\x01ACTION is (?:listening to|editing|playing|watching) \[https://osu.{domain}/beatmapsets/[0-9].*#/(\d*)"
-    )
+    ),
+    ".osu": re.compile(r"(.*) - (.*) \((.*)\) \[(.*)\].osu"),
 }
 
 # {token: "message"}

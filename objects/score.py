@@ -77,7 +77,7 @@ class Score:
 
         self.rank: str = "F"
 
-        self.mods: int = 0
+        self.mods: Mods = Mods.NONE
         self.status: SubmitStatus = SubmitStatus.FAILED
 
         self.playtime: int = 0
@@ -131,7 +131,7 @@ class Score:
         s.perfect = data["perfect"]
 
         s.rank = data["rank"]
-        s.mods = data["mods"]
+        s.mods = Mods(data["mods"])
 
         s.playtime = data["playtime"]
 
@@ -204,7 +204,7 @@ class Score:
 
         s.rank = data[12]
 
-        s.mods = int(data[13])
+        s.mods = Mods(int(data[13]))
         passed = data[14] == "True"
 
         if exited:
@@ -334,7 +334,7 @@ class Score:
                 self.accuracy,
                 self.perfect,
                 self.rank,
-                self.mods,
+                self.mods.value,
                 self.status.value,
                 self.playtime,
                 self.mode.value,

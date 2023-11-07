@@ -185,6 +185,8 @@ async def login(req: Request) -> Response:
 
         return failed_login(-3)
 
+    # TODO: hwid checks
+
     # TODO: Hardware ban check (security[3] and [4])
     """
     if (UserManager.CheckBannedHardwareId(securityHashParts[3], securityHashParts[4]))
@@ -209,7 +211,7 @@ async def login(req: Request) -> Response:
     services.players.add(p)
 
     await asyncio.gather(
-        *[p.get_friends(), p.update_stats_cache(), p.get_achievements()]
+        *[p.get_friends(), p.update_stats_cache(), p.get_achievements(), p.get_clan_tag()]
     )
 
     if not p.is_verified:
@@ -284,7 +286,7 @@ async def login(req: Request) -> Response:
 @register_event(BanchoPackets.OSU_CHANGE_ACTION, restricted=True)
 async def change_action(p: Player, sr: Reader) -> None:
     p.status = bStatus(sr.read_byte())
-    p.status_text = sr.read_str()
+    status_text = sr.read_str()
     p.beatmap_md5 = sr.read_str()
     p.current_mods = Mods(sr.read_uint32())
     p.play_mode = Mode(sr.read_byte())
@@ -295,6 +297,8 @@ async def change_action(p: Player, sr: Reader) -> None:
         Gamemode.AUTOPILOT if p.current_mods & Mods.AUTOPILOT else
         Gamemode.VANILLA
     )
+
+    p.status_text = f"{status_text} on {p.gamemode.name.lower()}"
 
     asyncio.create_task(p.update_stats_cache())
 
@@ -670,12 +674,15 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
     raw = raw_sr.read_raw()
     s = sr.read_scoreframe()
 
-    if m.mods & Mods.RELAX or (
-        m.pp_win_condition and m.scoring_type == ScoringType.SCORE
-    ):
+    if m.pp_win_condition:
         if os.path.isfile(f".data/beatmaps/{m.map.map_id}.osu"):
+            slot = m.find_user(p)
+            
+            # should not happen
+            if not slot:
+                return
+            
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
-
             calc = Calculator(
                 mode=m.mode,
                 n300=s.count_300,
@@ -685,7 +692,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
                 n_katu=s.count_katu,
                 combo=s.max_combo,
                 n_misses=s.count_miss,
-                mods=m.mods,
+                mods=slot.mods | m.mods,
             )
 
             s.score = math.ceil(calc.performance(bmap).pp)  # type: ignore
@@ -732,23 +739,22 @@ async def mp_complete(p: Player, sr: Reader) -> None:
 # id: 51
 @register_event(BanchoPackets.OSU_MATCH_CHANGE_MODS)
 async def mp_change_mods(p: Player, sr: Reader) -> None:
-    mods = sr.read_int32()
+    mods = Mods(sr.read_int32())
 
     if not (match := p.match) or match.in_progress:
         return
 
     if match.freemods:
         if match.host == p.id:
-            if mods & Mods.MULTIPLAYER:
-                match.mods = Mods(mods & Mods.MULTIPLAYER)
+            match.mods = Mods(mods & Mods.MULTIPLAYER)
 
-                for slot in match.slots:
-                    if slot.status == SlotStatus.READY:
-                        slot.status = SlotStatus.NOTREADY
+            for slot in match.slots:
+                if slot.status == SlotStatus.READY:
+                    slot.status = SlotStatus.NOTREADY
 
         slot = match.find_user(p)
 
-        slot.mods = Mods(mods - (mods & Mods.MULTIPLAYER))
+        slot.mods = Mods(mods & ~Mods.MULTIPLAYER)
     else:
         if match.host != p.id:
             return
@@ -758,7 +764,6 @@ async def mp_change_mods(p: Player, sr: Reader) -> None:
         for slot in match.slots:
             if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
                 slot.status = SlotStatus.NOTREADY
-
     match.enqueue_state()
 
 

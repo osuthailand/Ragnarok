@@ -1,3 +1,4 @@
+import hashlib
 from objects.OSZ2 import OSZ2
 from objects.player import Player
 from utils import log
@@ -8,11 +9,13 @@ from urllib.parse import unquote
 from starlette.requests import Request
 from starlette.responses import Response
 from objects import services
+from objects.beatmap import Beatmap
+
+from rina_pp_pyb import Calculator, Beatmap as BMap
+
 
 @osu.route("/web/osu-osz2-bmsubmit-getid.php")
-@check_auth(
-    "u", "h", b"5\nAuthentication failure. Please check your login details."
-)
+@check_auth("u", "h", b"5\nAuthentication failure. Please check your login details.")
 async def get_last_id(req: Request, p: Player) -> Response:
     # arguments:
     # s = BeatmapSetId (if available)
@@ -24,6 +27,7 @@ async def get_last_id(req: Request, p: Player) -> Response:
     1 - This beatmap you're trying to submit isn't yours!
     3 - This beatmap is already ranked. You cannot update ranked maps.
     4 - This beatmap is currently in the beatmap graveyard. You can ungraveyard your map by visiting the beatmaps section of your profile on the osu! website.
+        PS. This seems to be unused now after bancho updated their beatmap system.
     5 - Auth failure/Restricted
     6 - You have exceeded your submission cap (you are currently allowed {placeholder} total unranked maps). Please finish the maps you have currently submitted, or wait until your submissions expire automatically to the graveyarded (~4weeks).
     0 - Update successful
@@ -36,81 +40,98 @@ async def get_last_id(req: Request, p: Player) -> Response:
     everything else - Unknown error occured
     """
 
+    if p.is_restricted:
+        return Response(content=b"5\nYour account is currently restricted.")
+
     BASE_ID_INCREMENT = 100_000_000
 
-    if not (p := await services.players.get_offline(unquote(req.query_params["u"]))):
-        return Response(content=b"5\nUser not found in system")
-    
     if p.username not in ("Aoba", "real"):
         return Response(content=b"6\nNo permission to upload (yet)")
 
     set_id = int(req.query_params["s"])
+    log.debug(set_id)
     map_ids = req.query_params["b"].split(",")
-    oldOsz2Hash = req.query_params["z"]
+    old_osz2_hash = req.query_params["z"]
 
-    creatorId = -1
-    new_submit = True
+    new_submit = old_osz2_hash == ""
+    log.debug(new_submit)
     osz2_available = False
 
-    upload_cap = 1337  # placeholder
+    if set_id < BASE_ID_INCREMENT and set_id != -1:
+        return Response(
+            content=b"7\nYou're not allowed to update bancho maps. (error 1)"
+        )
 
-    # if this beatmap is already in the system/existed
-    if set_id > 0:
-        new_submit = False
-        # check if penis map even exist in database
-        # also check if the set_id is below base_id_increment
-        # (that would mean it's not from rina)
-        if set_id < BASE_ID_INCREMENT and not await services.sql.fetch(
-            "SELECT 1 FROM beatmaps WHERE set_id = %s", (set_id)
-        ):
-            new_submit = True
-            set_id = -1
+    # check if penis map exist in database
+    # also check if the set_id is below base_id_increment
+    # (that would mean it's not from rina)
+    beatmap = await services.sql.fetch(
+        "SELECT server, creator_id FROM beatmaps WHERE set_id = %s LIMIT 1", (p.id)
+    )
 
-        # disable this until testing is done
-        # if p.id != creatorId:
-        #     # TODO: maybe allow administrators to submit maps as somebody else?
-        #     return Response(content=b"1\n")
+    if beatmap:
+        # if this beatmap is already in the system/existed
+        if beatmap["server"] == "bancho":
+            return Response(
+                content=b"7\nYou're not allowed to update bancho maps. (error 2)"
+            )
 
-        # if set_id < 100_000_000:
-        #     return Response(content=b"6\nBeatmap is already on Bancho!")
+        if beatmap["creator_id"] != p.id:
+            return Response(
+                content=b"1\nThe beatmap you're trying to submit isn't yours!"
+            )
 
-        # if custom_beatmap is ranked:
-        #   return Response(content=b"3\n")
+    # return Response(
+    #     content=b"-2\nUpdating beatmaps upon submission is not supported yet."
+    # )
 
-        # if custom_beatmap is inactive:
-        #   return Response(content=b"4\n")
-    # set_id = -1 then its a new beatmap
-    # else:
-    # set_id = beatmap.insert_new_custom_map(p.id, p.username)
     if new_submit:
+        # if there are no set ids that is over the base set id increment
+        # it's the first ever custom submited map.
         if not (
-            latest_submitted_map_id := await services.sql.fetch(
-                "SELECT set_id FROM beatmaps WHERE set_id > %s ORDER BY set_id DESC LIMIT 1",
+            latest_submitted_set_id := await services.sql.fetch(
+                "SELECT set_id FROM beatmaps WHERE set_id >= %s ORDER BY set_id DESC LIMIT 1",
                 (BASE_ID_INCREMENT),
             )
         ):
             set_id = BASE_ID_INCREMENT
         else:
-            set_id = latest_submitted_map_id["set_id"] + 1
+            set_id = latest_submitted_set_id["set_id"] + 1
+
+        latest_submitted_map_id = await services.sql.fetch(
+            "SELECT map_id FROM beatmaps WHERE map_id >= %s ORDER BY map_id DESC LIMIT 1",
+            (BASE_ID_INCREMENT),
+            _dict=False,
+        )
+
+        if not latest_submitted_map_id:
+            latest_submitted_map_id = [
+                BASE_ID_INCREMENT
+            ]  # we make it a list, so we can do [0]
+
+        idx = 0
+        while idx < len(map_ids):
+            map_ids[idx] = str(latest_submitted_map_id[0] + idx + 1)
+            idx += 1
 
     # If everything went well, prepare for a new submission.
     res: list[str] = []
 
     res.append("0")  # response (0 = success, >0 = error)
-
     res.append(str(set_id))  # new set id
     res.append(",".join(map_ids))
-
     # osu client only checks if full submit is equal to 1.
     res.append(
-        "1" if new_submit else "2"
-    )  # 1 = full beatmap submission, X = ready to update/"patch-submit"
-
-    res.append("1337")
-    res.append("0")  # 0 = WIP, 1 = Pending
-    # somwhow this got emptied out when submitting new beatmap on bancho
-    res.append("0")  # Approved.GRAVEYARD
-    res.append("1")  # add to watchlist, if not then just remove
+        "1"
+        if new_submit
+        else "2"  # 1 = full beatmap submission, X = ready to update/"patch-submit"
+    )
+    res.append("1337")  # upload cpa
+    res.append(
+        "0"
+    )  # 0 = Pending, -2 = Un-graveyard, something else that is not 0 = WIP
+    res.append("0")  # unused since 2017
+    res.append("0")  # make this 0 to disable browser popup by default
     return Response(content="\n".join(res).encode())
 
 
@@ -121,20 +142,88 @@ async def get_beatmap_topic(req: Request, p: Player) -> Response:
     res = ["0"]  # 0 = success, >0 = error
     res.append("1")  # thread id
     res.append("2")  # thread subject
-    res.append("luder dreng")  # thead contents
+    res.append(
+        "this feature is not implemented, no reason to write anything..."
+    )  # thead contents
     return Response(content="\u0003".join(res).encode())
 
 
 @osu.route("/web/osu-osz2-bmsubmit-upload.php", methods=["POST"])
-#@check_auth("u", "h")
-async def beatmap_submission(req: Request) -> Response:
+@check_auth("u", "h", method="POST")
+async def beatmap_submission(req: Request, p: Player) -> Response:
     form = await req.form()
+    data = await form["osz2"].read()
+    set_id = form["s"]
+    patch = form["t"] == "2"
+    
+    with open(f".data/osz2/{"PATCHED_" if patch else ""}{set_id}.osz2", "wb+") as osz2:
+        osz2.write(data)
+
+    if not (osz2_data := OSZ2.parse(raw=data, file_type=int(form["t"]))):
+        return Response(content=b"error while parsing osz2")
 
     set_id = form["s"]
-    with open(f".data/osz2/{set_id}.osz2", "wb+") as osz2:
-        data = await form["osz2"].read()
-        osz2.write(data)
-        OSZ2.parse(raw=data)
+    beatmaps = osz2_data.extract_osu_files()
+    metadata = osz2_data.metadata
+
+    for beatmap in beatmaps:
+        # TODO: .osu file parser
+        # TODO: save to db
+        _bmap = BMap(bytes=beatmap.raw_data)
+        _calculator = Calculator()
+
+        difficulty = _calculator.difficulty(_bmap)
+        attributes = _calculator.map_attributes(_bmap)
+
+        bmap = await services.beatmaps.get_by_map_id(beatmap._map_id) or Beatmap()
+
+        bmap.server = "rina"
+        bmap.title = metadata.title
+        bmap.artist = metadata.artist
+
+        osu_file_regex = services.regex[".osu"].search(beatmap.name)
+
+        if not osu_file_regex:
+            return Response(content=b"Unexpected error.")
+
+        bmap.artist = osu_file_regex.group(1)
+        bmap.artist_unicode = metadata.artist_unicode
+
+        bmap.title = osu_file_regex.group(2)
+        bmap.title_unicode = metadata.title_unicode
+
+        bmap.version = osu_file_regex.group(4)
+
+        bmap.creator = p.username
+        bmap.creator_id = p.id
+
+        bmap.set_id = metadata.set_id
+        bmap.map_id = beatmap._map_id
+
+        bmap.ar = attributes.ar
+        bmap.od = attributes.od
+        bmap.hp = attributes.hp
+        bmap.cs = attributes.cs
+        bmap.bpm = attributes.bpm
+        bmap.mode = attributes.mode
+
+        bmap.stars = difficulty.stars
+        bmap.max_combo = difficulty.max_combo
+        bmap.map_md5 = hashlib.md5(beatmap.raw_data).digest().hex()
+
+        # TODO: proper beatmap update
+        if old_map := await services.sql.fetch(
+            "SELECT map_md5 FROM beatmaps WHERE map_id = %s", (bmap.map_id)
+        ):
+            await services.sql.execute(
+                "DELETE FROM beatmaps WHERE map_md5 = %s", old_map["map_md5"]
+            )
+
+        await bmap.add_to_db()
+
+        # save .osu file in .data/beatmaps
+        with open(f".data/beatmaps/{bmap.map_id}.osu", "wb+") as beatmap_file:
+            beatmap_file.write(beatmap.raw_data)
 
     # response with "0" if everything went right, okay
-    return Response(content=b"hej mor")
+    return Response(content=b"0")

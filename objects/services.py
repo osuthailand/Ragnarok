@@ -1,6 +1,8 @@
 import re
 
 from typing import Any, Pattern, TYPE_CHECKING
+
+from attr import dataclass
 from config import conf
 from redis import asyncio as aioredis
 
@@ -25,9 +27,43 @@ prefix: str = "!"
 
 config: dict[str, dict[str, Any]] = conf
 
-# TODO: refactor this piece of shit
-# from database
-osu_settings: dict[str, dict[str, int | str]] = {}
+
+@dataclass
+class SettingField(object):
+    value: bool
+    string: str = ""
+
+
+class OsuSettings:
+    def __init__(self) -> None:
+        self.allow_game_registration = SettingField(0)
+        self.server_maintenance = SettingField(0)
+        self.welcome_message = SettingField(0)
+        self.osu_menu_icon = SettingField(0)
+
+    async def initialize_from_db(self) -> None:
+        async for setting in sql.iterall(
+            "SELECT name, boolean_value, string_value FROM osu_settings"
+        ):
+            if hasattr(self, setting["name"]):
+                attr: SettingField = getattr(self, setting["name"])
+
+                update = (
+                    attr.value != bool(setting["boolean_value"])
+                    or attr.string != setting["string_value"]
+                )
+
+                if update:
+                    setattr(
+                        self,
+                        setting["name"],
+                        SettingField(
+                            value=bool(setting["boolean_value"]),
+                            string=setting["string_value"],
+                        ),
+                    )
+
+osu_settings: OsuSettings = OsuSettings()
 
 sql: Database
 redis: aioredis.Redis

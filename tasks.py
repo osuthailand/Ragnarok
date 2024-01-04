@@ -46,19 +46,7 @@ async def removed_expired_tokens() -> None:
 
 @register_task(delay=60)
 async def check_for_osu_settings_update() -> None:
-    async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
-        setting_data = {key: value for key, value in setting.items() if key != "name"}
-
-        if setting["name"] not in services.osu_settings:
-            services.osu_settings["name"] = setting_data
-
-        for setting_key, setting_value in services.osu_settings.items():
-            if setting["name"] != setting_key:
-                continue
-
-            if setting_value != setting_data:
-                services.osu_settings[setting_key] = setting_data
-                log.debug(f"Detected a change in {setting_key} and have updated it.")
+    await services.osu_settings.initialize_from_db()
 
 
 async def run_all_tasks():

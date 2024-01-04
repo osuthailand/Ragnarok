@@ -101,7 +101,7 @@ async def registration(req: Request) -> Response:
             status_code=400, content={"form_error": {"user": error_response}}
         )
 
-    if not services.osu_settings["allow_game_registration"]["boolean_value"]:
+    if not services.osu_settings.allow_game_registration.value:
         # osu! will attempt to go to https://url?username={username}&email={email}
         return general.ORJSONResponse(
             status_code=403,

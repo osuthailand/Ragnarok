@@ -134,7 +134,7 @@ async def login(req: Request) -> Response:
     # the players ip address
     ip = req.headers["X-Real-IP"]
 
-    if services.osu_settings["server_maintenance"]["boolean_value"]:
+    if services.osu_settings.server_maintenance.value:
         return failed_login(
             LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD, 
             extra=writer.notification("Server is currently under maintenance."))
@@ -247,9 +247,9 @@ async def login(req: Request) -> Response:
     data += writer.user_id(p.id)
     data += writer.user_privileges(p.privileges)
 
-    if services.osu_settings["osu_menu_icon"]["boolean_value"]:
+    if services.osu_settings.osu_menu_icon.value:
         data += writer.main_menu_icon(
-            image_url=services.osu_settings["osu_menu_icon"]["string_value"],
+            image_url=services.osu_settings.osu_menu_icon.string,
             url=f"https://{services.domain}",
         )
 
@@ -285,11 +285,9 @@ async def login(req: Request) -> Response:
 
     et = (time.time_ns() - start) / 1e6
 
-    if services.osu_settings["welcome_message"]["boolean_value"]:
+    if services.osu_settings.welcome_message.value:
         # maybe add formatting to message?
-        data += writer.notification(
-            services.osu_settings["welcome_message"]["string_value"]
-        )
+        data += writer.notification(services.osu_settings.welcome_message.string)
 
     data += writer.notification(f"Authorization took {et:.2f} ms.")
 

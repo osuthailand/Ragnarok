@@ -95,10 +95,7 @@ async def startup():
     log.info("✓ Successfully cached all achievements")
     log.info("... Getting bancho settings from database")
 
-    async for setting in services.sql.iterall("SELECT * FROM osu_settings"):
-        services.osu_settings[setting["name"]] = {
-            key: item for key, item in setting.items() if key != "name"
-        }
+    await services.osu_settings.initialize_from_db()
 
     log.info("✓ Successfully got bancho settings")
     log.info("... Starting background tasks")

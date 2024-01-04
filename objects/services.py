@@ -9,8 +9,8 @@ from objects.achievement import Achievement
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches, Beatmaps
-    from objects.player import Player
     from packets.reader import Packet
+    from objects.bot import Bot
 
 
 debug: bool = conf["server"]["debug"]
@@ -19,12 +19,13 @@ port: int = conf["server"]["port"]
 
 packets: dict[int, "Packet"] = {}
 
-bot: "Player"
+bot: "Bot"
 
 prefix: str = "!"
 
 config: dict[str, dict[str, Any]] = conf
 
+# TODO: refactor this piece of shit
 # from database
 osu_settings: dict[str, dict[str, int | str]] = {}
 

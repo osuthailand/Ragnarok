@@ -315,6 +315,7 @@ class Player:
         )
 
         if not clan_tag:
+            self.username_with_tag = self.username
             return
 
         self.username_with_tag = f"[{clan_tag["tag"]}] {self.username}"

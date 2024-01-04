@@ -251,7 +251,7 @@ async def get_scores(req: Request, p: Player) -> Response:
         ret.append("")
     else:
         pb_position = await services.sql.fetch(
-            "SELECT COUNT(*) FROM scores s "
+            "SELECT COUNT(*) AS pos FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
             f"WHERE s.{p.gamemode.score_order} > {personal_best['score']} "
@@ -259,7 +259,6 @@ async def get_scores(req: Request, p: Player) -> Response:
             "AND u.privileges & 4 AND s.status = 3 "
             "AND s.mode = %s",
             (p.gamemode.value, b.map_md5, mode),
-            _dict=False,
         )
 
         if pb_position:
@@ -268,7 +267,7 @@ async def get_scores(req: Request, p: Player) -> Response:
                     **personal_best,
                     user_id=p.id,
                     username=p.username_with_tag,
-                    position=pb_position[0] + 1,
+                    position=pb_position["pos"] + 1,
                 )
             )  # type: ignore
 
@@ -308,13 +307,15 @@ async def score_submission(req: Request) -> Response:
 
     # The dict is empty for some reason... odd..
     form = await req.form()
+
     if not form:
         return Response(content=b"error: missinginfo")
 
-    if (ver := form["osuver"])[:4] != "2023":
-        return Response(content=b"error: oldver")
+    # TODO: make this work properly
+    # if (ver := form["osuver"])[:4] != "2023":
+    #     return Response(content=b"error: oldver")
 
-    submission_key = f"osu!-scoreburgr---------{ver}"
+    submission_key = f"osu!-scoreburgr---------{form["osuver"]}"
 
     s = await Score.set_data_from_submission(
         form.getlist("score")[0],
@@ -647,9 +648,15 @@ async def markasread(req: Request, p: Player) -> Response:
 @check_auth("us", "ha")
 async def lastfm(req: Request, p: Player) -> Response:
     # something odd in client detected
-    # TODO: add enums to check abnormal stuff
-    if req.query_params["b"][0] == "a":
+    if not (_flag := req.query_params["b"]):
+        return Response(content=b"")
+
+    if _flag[0] != "a":
         return Response(content=b"-3")
+
+    flag = int(_flag[1:])
+
+    log.debug(flag)
 
     # if nothing odd happens... then keep checking
     return Response(content=b"")

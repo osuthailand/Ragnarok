@@ -1,29 +1,81 @@
-# from anticheat.utils.beatmap import Beatmap
-# from osrparse import Replay
-# from constants.mods import Mods
-# from utils.replay import write_replay
-# from constants.playmode import Mode
+# # from anticheat.utils.beatmap import Beatmap
+# # from osrparse import Replay
+# # from constants.mods import Mods
+# # from utils.replay import write_replay
+# # from constants.playmode import Mode
+
+# from circleguard import Circleguard, ReplayPath, ReplayString, Slider
+# from typing import TYPE_CHECKING
+
+# import numpy
+# from constants.anticheat import BadFlags
+# from constants.playmode import Gamemode
+
+# from objects import services
+
+# if TYPE_CHECKING:
+#     from objects.score import Score
 
 
-# forget this
-# async def run_anticheat(score, score_file_name: int, beatmap_file_name: str):
-#     if score.mode != Mode.OSU:
-#         return
+# from objects.player import Player
+# from objects.score import Score
+# from packets import writer
+# from objects import services
+# from hashlib import md5
+# import aiofiles
+# import struct
 
-#     r = Replay.from_string(await write_replay(s=score, file_name=score_file_name))
 
-#     hitobjects = await Beatmap().parse_hitobjects(
-#         beatmap_file_name, hr=r.mods & Mods.HARDROCK
+# # where is this used?
+# def _write_replay(s: Score, replay: bytes) -> bytearray:
+#     r_hash = md5(
+#         f"{s.count_100 + s.count_300}o{s.count_50}o{s.count_geki}o"
+#         f"{s.count_katu}t{s.count_miss}a{s.map.map_md5}r{s.max_combo}e"
+#         f"{bool(s.perfect)}y{s.player.username}o{s.score}u{s.rank}{s.mods}True".encode()
+#     ).hexdigest()
+
+#     ret = bytearray()
+
+#     ret += struct.pack("<b", s.mode)
+#     ret += writer.write_int32(
+#         20210520
+#     )  # we just gonna use the latest version of osu (this is no longer the latest version...)
+
+#     ret += (
+#         writer.write_str(s.map.map_md5)
+#         + writer.write_str(s.player.username)
+#         + writer.write_str(r_hash)
 #     )
 
-#     c_aim = 0
-#     for aim in r.replay_data:
-#         aim.xy = aim.x + aim.y
+#     ret += struct.pack(
+#         "<hhhhhhih?i",
+#         s.count_300,
+#         s.count_100,
+#         s.count_50,
+#         s.count_geki,
+#         s.count_katu,
+#         s.count_miss,
+#         s.score,
+#         s.max_combo,
+#         s.perfect,
+#         s.mods,
+#     )
 
-#         for obj in hitobjects:
-#             if aim.x == obj.x and aim.y == obj.y:
-#                 c_aim += 1
+#     ret += writer.write_str("")
 
-#     # I'm not 100% sure, if this works or not lol
+#     ret += struct.pack("<qi", s.submitted, len(replay))
+#     ret += replay
 
-#     # print(f"{c_aim} / {len(hitobjects)} * 100 = {c_aim / len(hitobjects) * 100}")
+#     ret += struct.pack("<q", s.id)
+
+#     return ret
+
+# # forget this
+# async def run(score: "Score", replay: bytes):
+#     cg = Circleguard(services.config["api_conf"]["osu_api_key"])
+#     replay = ReplayString(_write_replay(score, replay))
+
+#     if relax_resp := await relax_check(cg, replay, score):
+#         await services.bot.anticheat_log(
+#             score, BadFlags.RELAX, description=" ".join(relax_resp)
+#         )

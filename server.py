@@ -75,9 +75,7 @@ async def startup():
     log.info("✓ Successfully initalized redis")
     log.info("... Connecting Louise to the server")
 
-    if not await Bot.init():
-        log.fail("✗ Couldn't find Louise in the database.")
-        sys.exit()
+    await Bot.initialize()
 
     log.info("✓ Successfully connected Louise!")
     log.info("... Adding channels")

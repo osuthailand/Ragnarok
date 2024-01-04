@@ -175,16 +175,14 @@ class Score:
 
         s.map = bmap
 
-        (
-            s.count_300,
-            s.count_100,
-            s.count_50,
-            s.count_geki,
-            s.count_katu,
-            s.count_miss,
-            s.score,
-            s.max_combo,
-        ) = map(int, data[3:-8])
+        s.count_300 = int(data[3])
+        s.count_100 = int(data[4])
+        s.count_50 = int(data[5])
+        s.count_geki = int(data[6])
+        s.count_katu = int(data[7])
+        s.count_miss = int(data[8]) 
+        s.score = int(data[9])
+        s.max_combo = int(data[10])
 
         s.mode = Mode(int(data[15]))
 

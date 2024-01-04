@@ -1,6 +1,7 @@
 from typing import Any, Iterator
 
 from objects import services
+from objects.bot import Bot
 from objects.channel import Channel
 from objects.match import Match
 from objects.player import Player
@@ -10,7 +11,7 @@ from utils import log
 
 class Tokens:
     def __init__(self):
-        self.players: list[Player] = []
+        self.players: list[Player | Bot] = []
 
     def __iter__(self) -> Iterator[Player]:
         return iter(self.players)
@@ -18,7 +19,7 @@ class Tokens:
     def __len__(self) -> int:
         return len(self.players)
 
-    def add(self, p: Player) -> None:
+    def add(self, p: Player | Bot) -> None:
         self.players.append(p)
 
     def remove(self, p: Player) -> None:

@@ -1,3 +1,4 @@
+from enum import IntEnum
 import os
 import time
 import copy
@@ -98,9 +99,21 @@ ALREADY_ONLINE = "You're already online!"
 RESTRICTED_MSG = "Your account has been set in restricted mode."
 
 
-def failed_login(code: int, /, extra: bytes = b"") -> Response:
+@unique
+class LoginResponse(IntEnum):
+    INCORRECT_LOGIN = -1
+    INVALID_CLIENT = -2 # usually just too old
+    # -3 is also lock client
+    LOCK_CLIENT = -4
+    BANNED_HWID = -5
+    UNAUTHORIZED_CUTTING_EDGE_BUILD = -6
+    PASSWORD_RESET = -7
+
+
+
+def failed_login(code: LoginResponse, /, extra: bytes = b"") -> Response:
     return Response(
-        content=writer.user_id(code) + extra, headers={"cho-token": "no"}
+        content=writer.user_id(code.value) + extra, headers={"cho-token": "no"}
     )
 
 
@@ -121,6 +134,11 @@ async def login(req: Request) -> Response:
     # the players ip address
     ip = req.headers["X-Real-IP"]
 
+    if services.osu_settings["server_maintenance"]["boolean_value"]:
+        return failed_login(
+            LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD, 
+            extra=writer.notification("Server is currently under maintenance."))
+
     # get all user needed information
     if not (
         user_info := await services.sql.fetch(
@@ -140,21 +158,19 @@ async def login(req: Request) -> Response:
     if phash in services.bcrypt_cache:
         if pmd5 != services.bcrypt_cache[phash]:
             log.warn(
-                f"USER {user_info['username']} ({
-                    user_info['id']}) | Login fail. (WRONG PASSWORD)"
+                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
-            return failed_login(-1)
-        else:
-            if not bcrypt.checkpw(pmd5, phash):
-                log.warn(
-                    f"USER {user_info['username']} ({
-                        user_info['id']}) | Login fail. (WRONG PASSWORD)"
-                )
+            return failed_login(LoginResponse.INCORRECT_LOGIN)
+    else:
+        if not bcrypt.checkpw(pmd5, phash):
+            log.warn(
+                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
+            )
 
-                return failed_login(-1)
+            return failed_login(LoginResponse.INCORRECT_LOGIN)
 
-            services.bcrypt_cache[phash] = pmd5
+        services.bcrypt_cache[phash] = pmd5
 
     if _p := services.players.get(user_info["username"]):
         # user is already online? sus
@@ -162,28 +178,28 @@ async def login(req: Request) -> Response:
             f"A user tried to login onto the account {
                 _p.username} ({_p.id}), but user already online."
         )
-        return failed_login(-1, extra=writer.notification(ALREADY_ONLINE))
+        return failed_login(LoginResponse.INCORRECT_LOGIN, extra=writer.notification(ALREADY_ONLINE))
 
     # invalid security hash (old ver probably using that)
     if len(client_info[3].split(":")) < 4:
-        return failed_login(-1)
+        return failed_login(LoginResponse.INCORRECT_LOGIN)
 
     # check if user is restricted; pretty sure its like this lol
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
         data += writer.notification(RESTRICTED_MSG)
 
+    # TODO: actual implement this check properly wtf
     # only allow 2023 clients
-    if not client_info[0].startswith("b2023"):
-        return failed_login(-2)
+    # if not client_info[0].startswith("b2023"):
+    #     return failed_login(LoginResponse.INVALID_CLIENT)
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
         log.info(
-            f"{user_info['username']
-               } tried to login, but failed to do so, since they're banned."
+            f"{user_info['username']} tried to login, but failed to do so, since they're banned."
         )
 
-        return failed_login(-3)
+        return failed_login(LoginResponse.LOCK_CLIENT)
 
     # TODO: hwid checks
 
@@ -298,7 +314,7 @@ async def change_action(p: Player, sr: Reader) -> None:
         Gamemode.VANILLA
     )
 
-    p.status_text = f"{status_text} on {p.gamemode.name.lower()}"
+    p.status_text = f"{status_text.strip()} on {p.gamemode.name.lower()}"
 
     asyncio.create_task(p.update_stats_cache())
 
@@ -1003,7 +1019,7 @@ async def request_presence(p: Player, sr: Reader) -> None:
             continue
 
         if target.bot:
-            p.enqueue(writer.bot_presence(target))
+            p.enqueue(writer.bot_presence())
         else:
             p.enqueue(writer.user_presence(target))
 

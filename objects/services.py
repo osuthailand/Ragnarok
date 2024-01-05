@@ -36,10 +36,10 @@ class SettingField(object):
 
 class OsuSettings:
     def __init__(self) -> None:
-        self.allow_game_registration = SettingField(0)
-        self.server_maintenance = SettingField(0)
-        self.welcome_message = SettingField(0)
-        self.osu_menu_icon = SettingField(0)
+        self.allow_game_registration = SettingField(False)
+        self.server_maintenance = SettingField(False)
+        self.welcome_message = SettingField(False)
+        self.osu_menu_icon = SettingField(False)
 
     async def initialize_from_db(self) -> None:
         async for setting in sql.iterall(
@@ -62,6 +62,7 @@ class OsuSettings:
                             string=setting["string_value"],
                         ),
                     )
+
 
 osu_settings: OsuSettings = OsuSettings()
 

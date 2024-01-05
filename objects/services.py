@@ -120,3 +120,5 @@ regex: dict[str, Pattern[str]] = {
 
 # {token: "message"}
 await_response: dict[str, str] = {}
+
+ALLOWED_BUILDS: list[str] = []

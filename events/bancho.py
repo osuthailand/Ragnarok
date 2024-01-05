@@ -188,10 +188,9 @@ async def login(req: Request) -> Response:
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
         data += writer.notification(RESTRICTED_MSG)
 
-    # TODO: actual implement this check properly wtf
-    # only allow 2023 clients
-    # if not client_info[0].startswith("b2023"):
-    #     return failed_login(LoginResponse.INVALID_CLIENT)
+    # remove the little b infront of the version
+    if client_info[0][1:] not in services.ALLOWED_BUILDS:
+        return failed_login(LoginResponse.INVALID_CLIENT)
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:

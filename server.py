@@ -29,7 +29,6 @@ from utils import log
 from redis import asyncio as aioredis
 
 import os
-import sys
 import tasks
 
 REQUIRED_DIRECTORIES = (
@@ -41,7 +40,7 @@ REQUIRED_DIRECTORIES = (
 )
 
 
-async def startup():
+async def startup() -> None:
     print(f"\033[94m{services.title_card}\033[0m")
 
     services.players = Tokens()
@@ -61,14 +60,14 @@ async def startup():
     log.info("... Connecting to the database")
 
     services.sql = Database()
-    await services.sql.connect(services.config["mysql"])
+    await services.sql.connect(services.config.database)
 
     log.info("✓ Connected to the database!")
     log.info("... Initalizing redis")
 
-    redisconf = services.config["redis"]
+    redisconf = services.config.redis
     services.redis = aioredis.from_url(
-        f"redis://{redisconf['username']}:{redisconf['password']}@{redisconf['host']}:{redisconf['port']}"
+        f"redis://{redisconf.username}:{redisconf.password}@{redisconf.host}:{redisconf.port}"
     )
     await services.redis.initialize()
 

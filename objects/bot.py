@@ -40,7 +40,7 @@ class Bot(Player):
         bot.discord = discord.Client(intents=intents)
 
         try:
-            await bot.discord.login(services.config["discord"]["token"])
+            await bot.discord.login(services.config.discord.token)
         except discord.LoginFailure:
             log.fail("✗ Failed to login into discord bot (invalid token).")
             sys.exit()
@@ -66,7 +66,8 @@ class Bot(Player):
         )
 
         flag_count = await services.sql.fetch(
-            "SELECT COUNT(*) AS count FROM anticheat WHERE user_id = %s", (score.player.id)
+            "SELECT COUNT(*) AS count FROM anticheat WHERE user_id = %s",
+            (score.player.id),
         )
 
         GUILD_ID = 483250302800101376

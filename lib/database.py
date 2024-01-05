@@ -1,13 +1,20 @@
 from typing import Any, AsyncIterable, Optional
 import aiomysql
+from dynaconf import Dynaconf
 
 
 class Database:
     def __init__(self):
         self.pool = None
 
-    async def connect(self, config: dict[str, str]) -> None:
-        self.pool = await aiomysql.create_pool(**config)
+    async def connect(self, config: Dynaconf) -> None:
+        self.pool = await aiomysql.create_pool(
+            host=config.host,
+            user=config.user,
+            password=config.password,
+            db=config.db,
+            autocommit=config.autocommit,
+        )  # type: ignore
 
     async def disconnect(self) -> None:
         self.pool.close()

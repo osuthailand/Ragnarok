@@ -138,7 +138,7 @@ class Beatmap:
         b.mode = ret["mode"]
         b.bpm = ret["bpm"]
 
-        if services.config["fun"]["rank_all_maps"]:
+        if services.config.fun.rank_all_maps:
             b.approved = Approved.RANKED
         else:
             b.approved = Approved(ret["approved"])
@@ -230,7 +230,7 @@ class Beatmap:
         )  # fix taiko and mania "null" combo
 
         # for some reason, the api shows approved as one behind?
-        if services.config["fun"]["rank_all_maps"]:
+        if services.config.fun.rank_all_maps:
             b.approved = Approved.RANKED
         else:
             if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:

@@ -1,31 +1,40 @@
+import os
 import re
+import sys
+import tomllib
+
 
 from typing import Any, Pattern, TYPE_CHECKING
 
 from attr import dataclass
-from config import conf
+from dynaconf import Dynaconf
 from redis import asyncio as aioredis
 
 from lib.database import Database
 from objects.achievement import Achievement
+from utils import log
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches, Beatmaps
     from packets.reader import Packet
     from objects.bot import Bot
 
+if not os.path.exists("config.toml"):
+    os.rename("config.example.toml", "config.toml")
+    log.warn("You have to edit the config.toml!")
+    sys.exit(1)
 
-debug: bool = conf["server"]["debug"]
-domain: str = conf["server"]["domain"]
-port: int = conf["server"]["port"]
+config: Dynaconf = Dynaconf(settings_files=["config.toml"])
+
+debug: bool = config.server.debug
+domain: str = config.server.domain
+port: int = config.server.port
 
 packets: dict[int, "Packet"] = {}
 
 bot: "Bot"
 
 prefix: str = "!"
-
-config: dict[str, dict[str, Any]] = conf
 
 
 @dataclass
@@ -91,7 +100,7 @@ channels: "Channels"
 matches: "Matches"
 beatmaps: "Beatmaps"
 
-osu_key: str = config["api_conf"]["osu_api_key"]
+osu_key: str = config.api.key
 
 achievements: list[Achievement] = []
 

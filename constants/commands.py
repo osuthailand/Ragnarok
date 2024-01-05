@@ -633,7 +633,7 @@ async def change_size(ctx: Context) -> str | None:
 @ensure_match(host=False)
 async def get_beatmap(ctx: Context) -> str | None:
     m = ctx.author.match
-    mirrors = services.config["api_conf"]["mirrors"]
+    mirrors = services.config.api.mirrors
 
     if not ctx.args:
         return f"Wrong usage: !mp get <{'|'.join(mirrors.keys())}>"

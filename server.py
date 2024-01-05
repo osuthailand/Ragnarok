@@ -1,4 +1,6 @@
 import asyncio
+import time
+import aiohttp
 import uvicorn
 
 from starlette.applications import Starlette
@@ -30,6 +32,7 @@ from redis import asyncio as aioredis
 
 import os
 import tasks
+
 
 REQUIRED_DIRECTORIES = (
     ".data/avatars",
@@ -77,26 +80,11 @@ async def startup() -> None:
     await Bot.initialize()
 
     log.info("✓ Successfully connected Louise!")
-    log.info("... Adding channels")
 
-    async for _channel in services.sql.iterall(
-        "SELECT name, description, public, staff, auto_join, read_only FROM channels"
-    ):
-        channel = Channel(**_channel)
-        services.channels.add(channel)
+    log.info("... Caching required data")
+    await tasks.run_cache_task()
+    log.info("✓ Finished caching everything needed!")
 
-    log.info("✓ Successfully added all avaliable channels")
-    log.info("... Caching achievements")
-
-    async for achievement in services.sql.iterall("SELECT * FROM achievements"):
-        services.achievements.append(Achievement(**achievement))
-
-    log.info("✓ Successfully cached all achievements")
-    log.info("... Getting bancho settings from database")
-
-    await services.osu_settings.initialize_from_db()
-
-    log.info("✓ Successfully got bancho settings")
     log.info("... Starting background tasks")
 
     asyncio.create_task(tasks.run_all_tasks())

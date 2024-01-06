@@ -1,10 +1,11 @@
+import logging
 import os
 import re
 import sys
 import tomllib
 
 
-from typing import Any, Pattern, TYPE_CHECKING
+from typing import Pattern, TYPE_CHECKING
 
 from attr import dataclass
 from dynaconf import Dynaconf
@@ -12,16 +13,65 @@ from redis import asyncio as aioredis
 
 from lib.database import Database
 from objects.achievement import Achievement
-from utils import log
+
+from colorama import Fore, Style
 
 if TYPE_CHECKING:
     from objects.collections import Tokens, Channels, Matches, Beatmaps
     from packets.reader import Packet
     from objects.bot import Bot
 
+
+logger = logging.getLogger(__name__)
+
+
+class Formatting(logging.Formatter):
+    level_colors = {
+        logging.WARNING: Fore.YELLOW,
+        logging.DEBUG: Fore.GREEN,
+        logging.INFO: Fore.BLUE,
+        logging.ERROR: Fore.RED,
+        logging.CRITICAL: Style.BRIGHT + Fore.RED,
+    }
+
+    template: str = (
+        Style.DIM
+        + "[%(asctime)s] | "
+        + Style.RESET_ALL
+        + "{level}"
+        + "%(levelname)-8s"
+        + Fore.RESET
+        + Style.DIM
+        + " | ["
+        + Style.RESET_ALL
+        + Fore.CYAN
+        + "%(filename)s:%(funcName)s():%(lineno)s"
+        + Fore.RESET
+        + Style.RESET_ALL
+        + Style.DIM
+        + "] "
+        + Style.RESET_ALL
+        + "%(message)s"
+    )
+
+    def format(self, record):
+        log_color = self.level_colors[record.levelno]
+
+        formatter = logging.Formatter(
+            self.template.format(level=log_color), datefmt="%H:%M:%S"
+        )
+
+        return formatter.format(record)
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(Formatting())
+
+logger.addHandler(handler)
+
 if not os.path.exists("config.toml"):
     os.rename("config.example.toml", "config.toml")
-    log.warn("You have to edit the config.toml!")
+    logger.warn("You have to edit the config.toml!")
     sys.exit(1)
 
 config: Dynaconf = Dynaconf(settings_files=["config.toml"])

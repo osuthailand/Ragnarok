@@ -13,7 +13,7 @@ from constants.playmode import Gamemode
 from objects.achievement import UserAchievement
 from packets import writer
 
-from utils import log
+
 from utils import general
 from functools import wraps
 from objects import services
@@ -142,7 +142,7 @@ async def save_beatmap_file(id: int) -> None | Response:
                 headers={"user-agent": "osu!"},
             ) as resp:
                 if not await resp.text():
-                    log.fail(
+                    services.logger.critical(
                         f"Couldn't fetch the .osu file of {
                             id}. Maybe because api rate limit?"
                     )
@@ -472,7 +472,7 @@ async def score_submission(req: Request) -> Response:
         # with the score, it should be unlocked.
         try:
             if eval(ach.condition):
-                log.info(f"{stats.username} unlocked {ach.name} that has condition: {ach.condition}")
+                services.logger.info(f"{stats.username} unlocked {ach.name} that has condition: {ach.condition}")
                 await services.sql.execute(
                     "INSERT INTO users_achievements "
                     "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, %s, %s)",
@@ -483,7 +483,7 @@ async def score_submission(req: Request) -> Response:
                 _achievements.append(ach)
         except:
             # TODO: fix the failed conditions
-            log.error(f"failed to eval condition: {ach.condition}")
+            services.logger.error(f"failed to eval condition: {ach.condition}")
             continue
 
 
@@ -496,7 +496,7 @@ async def score_submission(req: Request) -> Response:
         else ""
     )
 
-    log.info(
+    services.logger.info(
         f"{stats.username} submitted a score on {
             s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) {gamemode}"
     )
@@ -617,7 +617,7 @@ async def score_submission(req: Request) -> Response:
 @check_auth("u", "h")
 async def get_replay(req: Request, p: Player) -> Response:
     if not os.path.isfile(path := f".data/replays/{req.query_params['c']}.osr"):
-        log.info(
+        services.logger.info(
             f"Replay ID {req.query_params['c']
                          } cannot be loaded! (File not found?)"
         )
@@ -656,7 +656,7 @@ async def lastfm(req: Request, p: Player) -> Response:
 
     flag = int(_flag[1:])
 
-    log.debug(flag)
+    services.logger.debug(flag)
 
     # if nothing odd happens... then keep checking
     return Response(content=b"")
@@ -666,7 +666,7 @@ async def lastfm(req: Request, p: Player) -> Response:
 async def get_seasonal(req: Request) -> Response:
     # hmmm... it seems like there's nothing special yet
     # TODO: make a config file for this?
-    log.debug("getting seasonal background")
+    services.logger.debug("getting seasonal background")
     return general.ORJSONResponse(
         [
             "https://steamuserimages-a.akamaihd.net/ugc/1756934458426121120/870EB09212BCB5CC5FEFA9619BE83242DAECE498/?imw=637&imh=358&ima=fit&impolicy=Letterbox&imcolor=%23000000&letterbox=true"
@@ -678,7 +678,7 @@ async def get_seasonal(req: Request) -> Response:
 async def get_osu_error(req: Request) -> Response:
     # not really our problem though :trolley:
     # let's just send this empty thing
-    log.error("osu sent an error")
+    services.logger.error("osu sent an error")
     return Response(content=b"")
 
 
@@ -799,7 +799,7 @@ async def osu_search_set(req: Request, p: Player) -> Response:
             bmap = None
 
     if not bmap:  # if beatmap doesn't exists in db then fetch!
-        log.fail(
+        services.logger.critical(
             "/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
         return Response(content=b"xoxo gossip girl")
 

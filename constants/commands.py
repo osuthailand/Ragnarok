@@ -12,7 +12,6 @@ from objects.beatmap import Beatmap
 from objects.match import Match
 from objects.score import SubmitStatus
 
-from utils import log
 from typing import Union
 from packets import writer
 from typing import Callable
@@ -240,7 +239,7 @@ async def verify_with_key(ctx: Context) -> str | None:
     )
     ctx.author.shout("Please login again to prevent any corruption to your user data!")
 
-    log.info(
+    services.logger.info(
         f"{ctx.author.username} successfully verified their account with a key")
 
     return "Successfully verified your account."

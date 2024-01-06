@@ -5,10 +5,9 @@ import uuid
 import asyncio
 import aiohttp
 
-from utils import log
+
 from copy import copy
 from packets import writer
-from typing import Optional
 from objects import services
 from typing import TYPE_CHECKING
 
@@ -195,7 +194,7 @@ class Player:
         p.spectating = self
 
         self.enqueue(writer.spectator_joined(p.id))
-        log.info(f"{p.username} started spectating {self.username}")
+        services.logger.info(f"{p.username} started spectating {self.username}")
 
     def remove_spectator(self, p: "Player") -> None:
         """``remove_spectator()`` makes player `p` stop spectating the player"""
@@ -203,9 +202,8 @@ class Player:
         self.spectators.remove(p)
         p.spectating = None
 
-        #debug
         if not spec_channel:
-            log.debug("WHAT!")
+            services.logger.debug("WHAT!")
             return
 
         spec_channel.disconnect(p)
@@ -229,7 +227,7 @@ class Player:
 
         if (free_slot := m.get_free_slot()) == -1:
             self.enqueue(writer.match_fail())
-            log.warn(f"{self.username} tried to join a full match ({m!r})")
+            services.logger.warn(f"{self.username} tried to join a full match ({m!r})")
             return
 
         self.match = m
@@ -258,9 +256,9 @@ class Player:
 
         self.match.connected.append(self)
 
-        self.enqueue(writer.match_join(self.match))  # join success
+        self.enqueue(writer.match_join(self.match))
 
-        log.info(f"{self.username} joined {m}")
+        services.logger.info(f"{self.username} joined {m}")
         self.match.enqueue_state(lobby=True)
 
     def leave_match(self) -> None:
@@ -276,19 +274,19 @@ class Player:
         slot.reset()
         m.connected.remove(self)
 
-        log.info(f"{self.username} left {m}")
+        services.logger.info(f"{self.username} left {m}")
 
         # if that was the last person
         # to leave the multiplayer
         # delete the multi lobby
         if not m.connected:
-            log.info(f"{m} is empty! Removing...")
+            services.logger.info(f"{m} is empty! Removing...")
             m.enqueue(writer.match_dispose(m.match_id), lobby=True)
             services.matches.remove(m)
             return
 
         if m.host == self.id:
-            log.info("Host left, rotating host.")
+            services.logger.info("Host left, rotating host.")
             for slot in m.slots:
                 if not slot.host and slot.status & SlotStatus.OCCUPIED:
                     m.transfer_host(slot)
@@ -326,9 +324,8 @@ class Player:
             "WHERE user_id = %s",
             (self.id),
         ):
-            # TODO: make mode and relax for user achievements
             if not (ach := services.get_achievement_by_id(achievement["achievement_id"])):
-                log.fail(
+                services.logger.critical(
                     f"user_achievements: Failed to fetch achievements (id: {
                         achievement['achievement_id']})"
                 )
@@ -365,7 +362,7 @@ class Player:
             )
             self.friends.remove(user)
 
-            log.info(f"{self.username} removed {t.username} as friends.")
+            services.logger.info(f"{self.username} removed {t.username} as friends.")
             return
 
         # add friend
@@ -374,7 +371,7 @@ class Player:
         )
         self.friends.add(user)
 
-        log.info(f"{self.username} added {t.username} as friends.")
+        services.logger.info(f"{self.username} added {t.username} as friends.")
 
     async def restrict(self) -> None:
         if self.is_restricted:
@@ -403,7 +400,7 @@ class Player:
         # notify user
         self.shout("Your account has been put in restricted mode!")
 
-        log.info(f"{self.username} has been put in restricted mode!")
+        services.logger.info(f"{self.username} has been put in restricted mode!")
 
     async def update_stats(self, s: "Score") -> None:
         se = ("std", "taiko", "catch", "mania")[s.mode]
@@ -468,7 +465,7 @@ class Player:
                     return  # sus
 
                 if ret["status"] == "fail":
-                    log.fail(
+                    services.logger.critical(
                         f"Unable to get {self.username}'s location. Response: {
                             ret['message']}"
                     )

@@ -1,5 +1,5 @@
 from enum import IntFlag
-from utils import log
+from objects import services
 
 
 class Mods(IntFlag):
@@ -106,7 +106,7 @@ class Mods(IntFlag):
                     mods |= key
                     break
             else:
-                log.fail(f"Mod: {mod} doesn't exist.")
+                services.logger.critical(f"Mod: {mod} doesn't exist.")
 
         return mods
 
@@ -115,7 +115,7 @@ class Mods(IntFlag):
         for mod in mods:
             if not mod & self:
                 return False
-                
+
         return True
 
     # mainly used for achievement conditions
@@ -123,5 +123,5 @@ class Mods(IntFlag):
         for mod in mods:
             if mod & self:
                 return True
-                
+
         return False

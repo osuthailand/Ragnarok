@@ -1,14 +1,12 @@
 import types
-from typing import Any, Callable
+from typing import Callable
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Router
 from constants.playmode import Gamemode, Mode
 from objects import services
-from objects.beatmap import Beatmap
-from utils import log
+
 from utils.general import ORJSONResponse
-from starlette import status
 
 from functools import wraps
 

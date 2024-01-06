@@ -1,6 +1,5 @@
 import asyncio
-import time
-import aiohttp
+import logging
 import uvicorn
 
 from starlette.applications import Starlette
@@ -9,8 +8,6 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 from starlette.routing import Host
 
-from objects.achievement import Achievement
-from objects.channel import Channel
 from objects.collections import Tokens, Channels, Matches, Beatmaps
 
 # routers
@@ -27,7 +24,6 @@ from constants import commands
 from lib.database import Database
 from objects.bot import Bot
 from objects import services
-from utils import log
 from redis import asyncio as aioredis
 
 import os
@@ -51,22 +47,28 @@ async def startup() -> None:
     services.matches = Matches()
     services.beatmaps = Beatmaps()
 
+    services.logger.setLevel(
+        logging.DEBUG if services.config.server.debug else logging.INFO
+    )
+
     for _path in REQUIRED_DIRECTORIES:
         if not os.path.exists(_path):
-            log.warn(
+            services.logger.warn(
                 f"You're missing the folder {_path}! Don't worry we'll add it for you!"
             )
 
             os.makedirs(_path)
 
-    log.info(f"Running Ragnarok on `{services.domain}` (port: {services.port})")
-    log.info("... Connecting to the database")
+    services.logger.info(
+        f"Running Ragnarok on `{services.domain}` (port: {services.port})"
+    )
+    services.logger.info("... Connecting to the database")
 
     services.sql = Database()
     await services.sql.connect(services.config.database)
 
-    log.info("✓ Connected to the database!")
-    log.info("... Initalizing redis")
+    services.logger.info("✓ Connected to the database!")
+    services.logger.info("... Initalizing redis")
 
     redisconf = services.config.redis
     services.redis = aioredis.from_url(
@@ -74,27 +76,26 @@ async def startup() -> None:
     )
     await services.redis.initialize()
 
-    log.info("✓ Successfully initalized redis")
-    log.info("... Connecting Louise to the server")
+    services.logger.info("✓ Successfully initalized redis")
+    services.logger.info("... Connecting Louise to the server")
 
     await Bot.initialize()
 
-    log.info("✓ Successfully connected Louise!")
+    services.logger.info("✓ Successfully connected Louise!")
 
-    log.info("... Caching required data")
+    services.logger.info("... Caching required data")
     await tasks.run_cache_task()
-    log.info("✓ Finished caching everything needed!")
-
-    log.info("... Starting background tasks")
+    services.logger.info("✓ Finished caching everything needed!")
+    services.logger.info("... Starting background tasks")
 
     asyncio.create_task(tasks.run_all_tasks())
 
-    log.info("✓ Successfully started all background tasks")
-    log.info("Finished up connecting to everything!")
+    services.logger.info("✓ Successfully started all background tasks")
+    services.logger.info("Finished up connecting to everything!")
 
 
 async def not_found(req: Request, exc: HTTPException) -> Response:
-    log.fail(f"[{req.method}] {req.url._url[8:]} not found")
+    services.logger.critical(f"[{req.method}] {req.url._url[8:]} not found")
     return Response(content=exc.detail.encode(), status_code=404)
 
 

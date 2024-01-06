@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING
 
 from objects import services
 from packets import writer
-from utils import log
+
 
 if TYPE_CHECKING:
     from objects.player import Player
@@ -49,7 +49,7 @@ class Channel:
 
     def connect(self, player: "Player"):
         if self in player.channels:
-            log.fail(
+            services.logger.critical(
                 f"{player.username} tried to joined {self.name}, which they're already connected to."
             )
             return
@@ -57,7 +57,7 @@ class Channel:
         # if the player is not a staff and tries to join
         # a staff channel, it'll return false.
         if not player.is_staff and self.is_staff:
-            log.fail(
+            services.logger.critical(
                 f"{player.username} tried to join {self.name} with insufficient privileges."
             )
             return
@@ -68,11 +68,11 @@ class Channel:
         player.enqueue(writer.channel_join(self.display_name))
         self.update_info()
 
-        log.info(f"{player.username} joined {self.name}")
+        services.logger.info(f"{player.username} joined {self.name}")
 
     def disconnect(self, player: "Player"):
         if self not in player.channels:
-            log.fail(
+            services.logger.critical(
                 f"{player.username} tried to leave {self.name}, which they aren't connected to."
             )
             return
@@ -87,7 +87,7 @@ class Channel:
 
         self.update_info()
 
-        log.info(f"{player.username} parted from {self.name}")
+        services.logger.info(f"{player.username} parted from {self.name}")
 
     def send(self, message: str, sender: "Player") -> None:
         if not sender.bot:
@@ -103,4 +103,4 @@ class Channel:
 
         self.enqueue(ret, ignore=(sender.id,))
 
-        log.chat(f"<{sender.username}> {message} [{self.name}]")
+        services.logger.info(f"<{sender.username}> {message} [{self.name}]")

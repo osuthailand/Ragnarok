@@ -8,7 +8,7 @@ from objects.match import Match
 from constants.mods import Mods
 from constants.match import *
 from objects import services
-from utils import log
+
 import struct
 
 IGNORED_PACKETS = [4, 79]
@@ -69,7 +69,7 @@ class Reader:
 
             if self.packet not in services.packets:
                 if services.debug and self.packet not in IGNORED_PACKETS:
-                    log.warn(
+                    services.logger.warn(
                         f"Packet <{BanchoPackets(self.packet)} | {BanchoPackets(self.packet).name}> has been requested although it's an unregistered packet."
                     )
 
@@ -94,7 +94,7 @@ class Reader:
 
     @property
     def data(self):
-        return self.packet_data[self.offset:]
+        return self.packet_data[self.offset :]
 
     def read_bytes(self, size: int):
         ret = struct.unpack("<" + "B" * size, self.data[:size])

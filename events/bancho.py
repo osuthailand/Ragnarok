@@ -7,8 +7,7 @@ import struct
 import asyncio
 import math
 
-from utils import log
-from utils import general
+
 from packets import writer
 from typing import Callable
 from objects import services
@@ -69,7 +68,7 @@ async def handle_bancho(req: Request) -> Response:
     try:
         body = await req.body()
     except ClientDisconnect:
-        log.info(f"{player.username} logged out.")
+        services.logger.info(f"{player.username} logged out.")
         player.logout()
 
         return Response(content=player.dequeue())
@@ -85,7 +84,7 @@ async def handle_bancho(req: Request) -> Response:
         end = (time.time_ns() - start) / 1e6
 
         if services.debug and p.packet not in IGNORED_PACKETS:
-            log.debug(
+            services.logger.debug(
                 f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {
                     player.username} - {end:.2f}ms"
             )
@@ -148,7 +147,7 @@ async def login(req: Request) -> Response:
             [login_info[0].lower().replace(" ", "_")],
         )
     ):
-        return failed_login(-1)
+        return failed_login(LoginResponse.INCORRECT_LOGIN)
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -157,14 +156,14 @@ async def login(req: Request) -> Response:
     # check if the password is correct
     if phash in services.bcrypt_cache:
         if pmd5 != services.bcrypt_cache[phash]:
-            log.warn(
+            services.logger.warn(
                 f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
             return failed_login(LoginResponse.INCORRECT_LOGIN)
     else:
         if not bcrypt.checkpw(pmd5, phash):
-            log.warn(
+            services.logger.warn(
                 f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
             )
 
@@ -174,7 +173,7 @@ async def login(req: Request) -> Response:
 
     if _p := services.players.get(user_info["username"]):
         # user is already online? sus
-        log.warn(
+        services.logger.warn(
             f"A user tried to login onto the account {
                 _p.username} ({_p.id}), but user already online."
         )
@@ -194,7 +193,7 @@ async def login(req: Request) -> Response:
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
-        log.info(
+        services.logger.info(
             f"{user_info['username']} tried to login, but failed to do so, since they're banned."
         )
 
@@ -290,7 +289,7 @@ async def login(req: Request) -> Response:
 
     data += writer.notification(f"Authorization took {et:.2f} ms.")
 
-    log.info(f"{p!r} logged in.")
+    services.logger.info(f"{p!r} logged in.")
 
     return Response(content=bytes(data), headers={"cho-token": p.token})
 
@@ -370,7 +369,7 @@ async def send_public_message(p: Player, sr: Reader) -> None:
     # if so, post the 100%, 99%, etc.
     # pp for the map.
     if np := services.regex["np"].search(msg):
-        log.info(np.groups())
+        services.logger.info(np.groups())
         p.last_np = await Beatmap._get_beatmap_from_sql("", np.groups(0), 0)
         asyncio.create_task(_handle_command(chan, "!pp ", p))
 
@@ -398,7 +397,7 @@ async def logout(p: Player, sr: Reader) -> None:
     if (time.time() - p.login_time) < 1:
         return
 
-    log.info(f"{p.username} logged out.")
+    services.logger.info(f"{p.username} logged out.")
 
     p.logout()
 
@@ -564,7 +563,7 @@ async def mp_change_slot(p: Player, sr: Reader) -> None:
     slot = m.slots[slot_id]
 
     if slot.status == SlotStatus.OCCUPIED:
-        log.error(f"{p.username} tried to change to an occupied slot ({m!r})")
+        services.logger.error(f"{p.username} tried to change to an occupied slot ({m!r})")
         return
 
     if not (old_slot := m.find_user(p)):
@@ -584,7 +583,7 @@ async def mp_ready_up(p: Player, sr: Reader) -> None:
         return
 
     if not (slot := m.find_user(p)):
-        log.debug("Slot not found?")
+        services.logger.debug("Slot not found?")
         return
 
     if slot.status == SlotStatus.READY:
@@ -661,7 +660,7 @@ async def mp_start(p: Player, sr: Reader) -> None:
         return
 
     if p.id != m.host:
-        log.warn(
+        services.logger.warn(
             f"{p.username} tried to start the match, while not being the host.")
         return
 
@@ -710,12 +709,12 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
 
             s.score = math.ceil(calc.performance(bmap).pp)  # type: ignore
         else:
-            log.fail(f"MATCH {m.match_id}: Couldn't find the osu beatmap.")
+            services.logger.critical(f"MATCH {m.match_id}: Couldn't find the osu beatmap.")
 
     slot_id = m.find_user_slot(p)
 
     if services.debug:
-        log.debug(f"{p.username} has slot id {
+        services.logger.debug(f"{p.username} has slot id {
                   slot_id} and has incoming score update.")
 
     m.enqueue(writer.match_score_update(s, slot_id, raw))
@@ -934,7 +933,7 @@ async def part_channel(p: Player, sr: Reader) -> None:
         return
 
     if not (chan := services.channels.get(_chan)):
-        log.warn(f"{p.username} tried to part from {
+        services.logger.warn(f"{p.username} tried to part from {
                  _chan}, but channel doesn't exist.")
         return
 

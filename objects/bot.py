@@ -10,7 +10,6 @@ from objects import services
 import discord
 
 from objects.player import Player
-from utils import log
 
 
 class Bot(Player):
@@ -26,7 +25,7 @@ class Bot(Player):
                 "SELECT id, username, privileges, passhash FROM users WHERE id = 1"
             )
         ):
-            log.fail(f"✗ Couldn't find the bot in the database.")
+            services.logger.critical(f"✗ Couldn't find the bot in the database.")
             sys.exit()
 
         bot = cls(bot["username"], bot["id"], bot["privileges"], bot["passhash"])
@@ -42,7 +41,9 @@ class Bot(Player):
         try:
             await bot.discord.login(services.config.discord.token)
         except discord.LoginFailure:
-            log.fail("✗ Failed to login into discord bot (invalid token).")
+            services.logger.critical(
+                "✗ Failed to login into discord bot (invalid token)."
+            )
             sys.exit()
 
         services.bot = bot

@@ -1,11 +1,8 @@
 import hashlib
 from objects.OSZ2 import OSZ2
 from objects.player import Player
-from utils import log
+
 from events.osu import osu, check_auth
-from constants.beatmap import Approved
-from urllib.parse import unquote
-from urllib.parse import unquote
 from starlette.requests import Request
 from starlette.responses import Response
 from objects import services
@@ -23,7 +20,7 @@ async def get_last_id(req: Request, p: Player) -> Response:
     # z = Osz2Hash (if available)
 
     """
-    error codes (if value more than 4 will display custom error dialog.):
+    error codes (if value more than 4 will display custom error dialog):
     1 - This beatmap you're trying to submit isn't yours!
     3 - This beatmap is already ranked. You cannot update ranked maps.
     4 - This beatmap is currently in the beatmap graveyard. You can ungraveyard your map by visiting the beatmaps section of your profile on the osu! website.
@@ -49,12 +46,12 @@ async def get_last_id(req: Request, p: Player) -> Response:
         return Response(content=b"6\nNo permission to upload (yet)")
 
     set_id = int(req.query_params["s"])
-    log.debug(set_id)
+    services.logger.debug(set_id)
     map_ids = req.query_params["b"].split(",")
     old_osz2_hash = req.query_params["z"]
 
     new_submit = old_osz2_hash == ""
-    log.debug(new_submit)
+    services.logger.debug(new_submit)
     osz2_available = False
 
     if set_id < BASE_ID_INCREMENT and set_id != -1:

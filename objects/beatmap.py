@@ -2,7 +2,6 @@ import copy
 import aiohttp
 from constants.mods import Mods
 from objects import services
-from utils import log
 from constants.playmode import Mode
 from constants.beatmap import Approved
 
@@ -177,7 +176,7 @@ class Beatmap:
             values,
         )
 
-        log.info(f"Saved {self.full_title} ({self.map_md5}) into database")
+        services.logger.info(f"Saved {self.full_title} ({self.map_md5}) into database")
 
     @classmethod
     async def _get_beatmap_from_osuapi(

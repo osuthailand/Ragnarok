@@ -6,7 +6,6 @@ from objects.channel import Channel
 from objects.match import Match
 from objects.player import Player
 from objects.beatmap import Beatmap
-from utils import log
 
 
 class Tokens:
@@ -140,7 +139,7 @@ class Beatmaps:
             return self.beatmaps[map_md5]
 
         if not (b := await Beatmap.get_beatmap(map_md5)):
-            log.fail(f"Failed to get beatmaps with hash {map_md5}")
+            services.logger.critical(f"Failed to get beatmaps with hash {map_md5}")
             return
 
         # when getting from the api, it'll save into cache
@@ -149,7 +148,7 @@ class Beatmaps:
 
     async def get_by_map_id(self, map_id: int) -> Beatmap | None:
         if not (b := await Beatmap.get_beatmap(beatmap_id=map_id)):
-            log.fail(f"Failed to get beatmaps with map_id {map_id}")
+            services.logger.critical(f"Failed to get beatmaps with map_id {map_id}")
             return
 
         self.beatmaps[b.map_md5] = b
@@ -157,7 +156,7 @@ class Beatmaps:
 
     async def get_by_set_id(self, set_id: int) -> Beatmap | None:
         if not (b := await Beatmap.get_beatmap(set_id=set_id)):
-            log.fail(f"Failed to get beatmaps with map_id {set_id}")
+            services.logger.critical(f"Failed to get beatmaps with map_id {set_id}")
             return
 
         self.beatmaps[b.map_md5] = b

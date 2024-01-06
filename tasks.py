@@ -6,7 +6,7 @@ from constants.player import bStatus
 from objects import services
 from objects.achievement import Achievement
 from objects.channel import Channel
-from utils import log
+
 
 import time
 import asyncio
@@ -43,7 +43,7 @@ async def removed_expired_tokens() -> None:
             and player.status != bStatus.AFK
         ):
             player.logout()
-            log.info(
+            services.logger.info(
                 f"{player.username} has been logged out, due to loss of connection."
             )
 

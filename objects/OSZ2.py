@@ -14,10 +14,10 @@ from datetime import datetime
 from utils.general import datetime_frombinary
 
 from objects.xxtea import xxtea_decrypt, xtea_decrypt
-
+from objects import services
 from struct import pack
 
-from utils import log
+
 
 
 @unique
@@ -210,7 +210,7 @@ class OSZ2:
                 return cls().parse_patch(raw)
             case _:
                 # TODO: maybe read the header and determine from there? or maybe that'd be useless
-                log.warn(f"Someone tried to parse an invalid beatmap file type ({file_type}).")    
+                services.logger.warn(f"Someone tried to parse an invalid beatmap file type ({file_type}).")    
 
         return
 
@@ -231,7 +231,7 @@ class OSZ2:
         # TODO patch parsing
         # the file should start with "BSDIFF40" otherwise it is NOT a patch file
         if reader.read_bytes(8) != (0x42, 0x53, 0x44, 0x49, 0x46, 0x46, 0x34, 0x30):
-            log.fail("A user tried to parse a non-patch file!")
+            services.logger.critical("A user tried to parse a non-patch file!")
             return
 
         # read length in BSDIFF40's header
@@ -240,7 +240,7 @@ class OSZ2:
         new_size = self._offtin(bytes(reader.read_bytes(8)))
 
         if (len_control < 0 or len_data < 0 or new_size < 0):
-            log.fail(":WTF: (invalid patch file (sizes are corrupt))")
+            services.logger.critical(":WTF: (invalid patch file (sizes are corrupt))")
             return
 
         # decrypt starts here
@@ -263,18 +263,18 @@ class OSZ2:
         while new_pos < new_size:
             for i in range(3):
                 if gz_control.readinto(buffer) < 8:
-                    log.debug("corrupted patch (bad control)")
+                    services.logger.debug("corrupted patch (bad control)")
                     return
                 ctrl[i] = self._offtin(buffer)
 
             if new_pos + ctrl[0] > new_size:
-                log.debug("corrupted patch (bad position)")
+                services.logger.debug("corrupted patch (bad position)")
                 return
 
             # read data (stuck here)
             for i in range(new_pos, new_pos + ctrl[0], 65536):
                 if gz_data.readinto(memoryview(new_file_bytes[i:i+65536])) < ctrl[0]:
-                    log.debug("corrupted patch (bad data)")
+                    services.logger.debug("corrupted patch (bad data)")
                     return
 
             # add old data to... new data?
@@ -287,12 +287,12 @@ class OSZ2:
             old_pos += ctrl[0]
 
             if new_pos > new_size:
-                log.debug("corrupted patch (size too big???)")
+                services.logger.debug("corrupted patch (size too big???)")
                 return
 
             # read extra stuff if there's any
             if gz_extra_data.readinto(new_file_bytes[new_pos:new_pos+ctrl[1]]) < ctrl[1]:
-                log.debug("corrupted patch (bad extra data)")
+                services.logger.debug("corrupted patch (bad extra data)")
                 return
 
             # sanity check
@@ -304,7 +304,7 @@ class OSZ2:
         gz_data.close()
         gz_extra_data.close()
         
-        log.info("OK!")
+        services.logger.info("OK!")
         
 
     def parse_full_submit(self, raw: bytes) -> "OSZ2":
@@ -313,7 +313,7 @@ class OSZ2:
 
         # the file should start with 0xEC, 0x48 and 0x4F otherwise it is NOT osz2
         if reader.read_bytes(3) != (0xEC, 0x48, 0x4F):
-            log.fail("A user tried to submit an invalid osz2 file")
+            services.logger.critical("A user tried to submit an invalid osz2 file")
             return
 
         # unused
@@ -373,9 +373,9 @@ class OSZ2:
             calculated_hash_meta = OSZ2.compute_osz_hash(meta_buffer, metadata_entries * 3, 0xa7)
 
             if calculated_hash_meta != pack('16B', *hash_meta):
-                log.fail(f"calculated: {calculated_hash_meta.hex()}")
-                log.fail(f"osz2 report: {pack('16B', *hash_meta).hex()}")
-                log.fail("bad hashes (hash_meta)")
+                services.logger.critical(f"calculated: {calculated_hash_meta.hex()}")
+                services.logger.critical(f"osz2 report: {pack('16B', *hash_meta).hex()}")
+                services.logger.critical("bad hashes (hash_meta)")
 
                 return
 
@@ -398,9 +398,9 @@ class OSZ2:
         # Verify this magic block using XTEA
         magic_key = xtea_decrypt(bytearray(reader.read_bytes(64)), KEY)
         if magic_key != known_plain:
-            log.fail(f"calculated: {known_plain.hex()}")
-            log.fail(f"osz2 report: {magic_key.hex()}")
-            log.fail("bad hashes (magic xtea block)")
+            services.logger.critical(f"calculated: {known_plain.hex()}")
+            services.logger.critical(f"osz2 report: {magic_key.hex()}")
+            services.logger.critical("bad hashes (magic xtea block)")
 
             return
 
@@ -419,9 +419,9 @@ class OSZ2:
             file_info_count = xxtea_reader.read_int32()
             calculated_hash_file = OSZ2.compute_osz_hash(bytearray(file_info), file_info_count * 4, 0xd1)
             if calculated_hash_file != pack('16B', *hash_file):
-                 log.fail(f"calculated: {calculated_hash_file.hex()}")
-                 log.fail(f"osz2 report: {pack('16B', *hash_file).hex()}")
-                 log.fail("bad hashes (hash_file)")
+                 services.logger.critical(f"calculated: {calculated_hash_file.hex()}")
+                 services.logger.critical(f"osz2 report: {pack('16B', *hash_file).hex()}")
+                 services.logger.critical("bad hashes (hash_file)")
                  return
             
             current_fileinfo_offset = xxtea_reader.read_int32()

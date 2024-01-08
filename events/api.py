@@ -1,3 +1,4 @@
+import time
 import types
 from typing import Callable
 from starlette.requests import Request
@@ -86,7 +87,7 @@ async def leaderboard(
     gamemode: Gamemode = Gamemode.VANILLA,
     page: int = 1,
     order: str = "pp",
-) -> JSONResponse:
+) -> ORJSONResponse:
     if mode == Mode.MANIA and gamemode == Gamemode.RELAX:
         return error(400, "Mania doesn't exist on relax...")
 
@@ -125,6 +126,24 @@ async def leaderboard(
     leaderboard = await services.sql.fetchall(query, params, _dict=True)
 
     return ORJSONResponse(content={"data": leaderboard})
+
+
+@api.route("/get_server_stats")
+async def get_server_stats(req: Request) -> ORJSONResponse:
+    registered_players = await services.sql.fetch("SELECT COUNT(*) as count FROM users")
+    playcount_in_a_day = await services.sql.fetch(
+        "COUNT(*) as count FROM scores WHERE submitted >= %s",
+        (time.time() - (24 * 60 * 60)),
+    )
+
+    return ORJSONResponse(
+        content={
+            "players": len(services.players),
+            "registered_players": registered_players["count"],
+            "matches": len(services.matches),
+            "playcount_in_24h": playcount_in_a_day["count"],
+        }
+    )
 
 
 @api.route("/get_profile_stats")

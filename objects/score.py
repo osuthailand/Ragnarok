@@ -212,8 +212,6 @@ class Score:
         s.gamemode = (
             Gamemode.RELAX
             if mods & Mods.RELAX
-            else Gamemode.AUTOPILOT
-            if mods & Mods.AUTOPILOT
             else Gamemode.VANILLA
         )
 

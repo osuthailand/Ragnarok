@@ -911,13 +911,13 @@ async def recalc_scores(ctx: Context) -> str | None:
     """Recalculate all the scores on either relax or vanilla."""
 
     if len(ctx.args) < 2:
-        return "Usage: !recalc <relax/vanilla/autopilot> <std/taiko/catch/mania>"
+        return "Usage: !recalc <relax/vanilla> <std/taiko/catch/mania>"
 
     gamemode = Gamemode.from_str(ctx.args[0].lower())
     mode = Mode.from_str(ctx.args[1].lower())
 
     if gamemode == Gamemode.UNKNOWN or mode == Mode.NONE:
-        return "Usage: !recalc <relax/vanilla/autopilot> <std/taiko/catch/mania>"
+        return "Usage: !recalc <relax/vanilla> <std/taiko/catch/mania>"
 
     ctx.reciever.send(
         message=f"Fetching EVERY SCORE on the server for {

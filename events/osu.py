@@ -199,8 +199,6 @@ async def get_scores(req: Request, p: Player) -> Response:
     p.gamemode = (
         Gamemode.RELAX
         if mods & Mods.RELAX
-        else Gamemode.AUTOPILOT
-        if mods & Mods.AUTOPILOT
         else Gamemode.VANILLA
     )
 
@@ -444,8 +442,6 @@ async def score_submission(req: Request) -> Response:
             gamemode = (
                 "[Relax]"
                 if s.gamemode == Gamemode.RELAX
-                else "[Autopilot]"
-                if s.gamemode == Gamemode.AUTOPILOT
                 else ""
             )
 
@@ -491,8 +487,6 @@ async def score_submission(req: Request) -> Response:
     gamemode = (
         "[Relax]"
         if s.gamemode == Gamemode.RELAX
-        else "[Autopilot]"
-        if s.gamemode == Gamemode.AUTOPILOT
         else ""
     )
 

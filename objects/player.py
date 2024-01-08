@@ -513,8 +513,7 @@ class Player:
     async def get_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
         mod = (
             "vanilla" if gamemode == Gamemode.VANILLA else
-            "relax" if gamemode == Gamemode.RELAX else
-            "autopilot"  # gamemode == Gamemode.AUTOPILOT
+            "relax" # if gamemode == Gamemode.RELAX
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{mode}",
@@ -525,8 +524,7 @@ class Player:
     async def get_country_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
         mod = (
             "vanilla" if gamemode == Gamemode.VANILLA else
-            "relax" if gamemode == Gamemode.RELAX else
-            "autopilot"  # gamemode == Gamemode.AUTOPILOT
+            "relax" # if gamemode == Gamemode.RELAX
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
@@ -538,8 +536,7 @@ class Player:
         if not self.is_restricted:
             mod = (
                 "vanilla" if gamemode == Gamemode.VANILLA else
-                "relax" if gamemode == Gamemode.RELAX else
-                "autopilot"  # gamemode == Gamemode.AUTOPILOT
+                "relax" # if gamemode == Gamemode.RELAX
             )
             await services.redis.zadd(
                 f"ragnarok:leaderboard:{mod}:{mode}",

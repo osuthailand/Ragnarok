@@ -60,7 +60,6 @@ class Gamemode(IntEnum):
 
     VANILLA = 0
     RELAX = 1
-    AUTOPILOT = 2
 
     @property
     def table(self):
@@ -69,8 +68,6 @@ class Gamemode(IntEnum):
             if self == self.VANILLA
             else "stats_rx"
             if self == self.RELAX
-            else "stats_ap"
-            if self == self.AUTOPILOT
             else "error"
         )
 
@@ -85,6 +82,5 @@ class Gamemode(IntEnum):
                 return cls.VANILLA
             case "rx" | "relax":
                 return cls.RELAX
-            case "ap" | "autopilot":
-                return cls.AUTOPILOT
-            case _: return cls.UNKNOWN
+            case _:
+                return cls.UNKNOWN

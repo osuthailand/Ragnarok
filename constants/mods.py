@@ -53,7 +53,7 @@ class Mods(IntFlag):
 
     MULTIPLAYER = DOUBLETIME | NIGHTCORE | HALFTIME
 
-    DISABLED = CINEMA | TARGET | AUTOPLAY
+    DISABLED = CINEMA | TARGET | AUTOPLAY | AUTOPILOT
 
     def __dict__(self) -> dict["Mods", str]:
         return {

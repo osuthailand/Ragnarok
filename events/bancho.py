@@ -306,7 +306,6 @@ async def change_action(p: Player, sr: Reader) -> None:
 
     p.gamemode = (
         Gamemode.RELAX if p.current_mods & Mods.RELAX else
-        Gamemode.AUTOPILOT if p.current_mods & Mods.AUTOPILOT else
         Gamemode.VANILLA
     )
 

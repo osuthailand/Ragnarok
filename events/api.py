@@ -91,9 +91,6 @@ async def leaderboard(
     if mode == Mode.MANIA and gamemode == Gamemode.RELAX:
         return error(400, "Mania doesn't exist on relax...")
 
-    if mode != Mode.OSU and gamemode == Gamemode.AUTOPILOT:
-        return error(400, "That mode doesn't exist on autopilot...")
-
     if page <= 0:
         page = 1
 
@@ -161,9 +158,6 @@ async def get_profile_stats(
 ) -> ORJSONResponse:
     if mode == Mode.MANIA and gamemode == Gamemode.RELAX:
         return error(400, "Mania doesn't exist on relax...")
-
-    if mode != Mode.OSU and gamemode == Gamemode.AUTOPILOT:
-        return error(400, "That mode doesn't exist on autopilot...")
 
     # get_offline always checks cache first
     p = await services.players.get_offline(id)

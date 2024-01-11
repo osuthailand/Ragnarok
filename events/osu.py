@@ -501,7 +501,7 @@ async def score_submission(req: Request) -> Response:
     # only do charts if the score isn't relax
     # but do charts if the user is playing on rina
     ret: list = []
-    if s.gamemode != Gamemode.VANILLA and not stats.on_rina:
+    if s.gamemode != Gamemode.VANILLA and not stats.using_rina:
         return Response(content=b"error: no")
 
     ret.append(

@@ -188,7 +188,7 @@ async def login(req: Request) -> Response:
         data += writer.notification(RESTRICTED_MSG)
 
     # remove the little b infront of the version
-    if client_info[0][1:] not in services.ALLOWED_BUILDS:
+    if client_info[0][1:] not in services.ALLOWED_BUILDS and not client_info[0].endswith("rina"):
         return failed_login(LoginResponse.INVALID_CLIENT)
 
     # check if the user is banned.

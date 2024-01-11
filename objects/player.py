@@ -96,7 +96,7 @@ class Player:
         self.is_restricted: bool = not (self.privileges & Privileges.VERIFIED) and (
             not self.privileges & Privileges.PENDING
         )
-        self.on_rina: bool = self.client_version.endswith("rina")
+        self.using_rina: bool = self.client_version.endswith("rina")
         self.is_staff: bool = self.privileges & Privileges.BAT
         self.is_verified: bool = not self.privileges & Privileges.PENDING
 

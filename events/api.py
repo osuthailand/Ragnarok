@@ -129,7 +129,7 @@ async def leaderboard(
 async def get_server_stats(req: Request) -> ORJSONResponse:
     registered_players = await services.sql.fetch("SELECT COUNT(*) as count FROM users")
     playcount_in_a_day = await services.sql.fetch(
-        "COUNT(*) as count FROM scores WHERE submitted >= %s",
+        "SELECT COUNT(*) as count FROM scores WHERE submitted >= %s",
         (time.time() - (24 * 60 * 60)),
     )
 

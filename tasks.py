@@ -121,5 +121,10 @@ async def cache_achievements() -> None:
 
 async def run_cache_task() -> None:
     await asyncio.gather(
-        *[cache_allowed_osu_builds(), cache_achievements(), cache_channels()]
+        *[
+            cache_allowed_osu_builds(),
+            cache_achievements(),
+            cache_channels(),
+            services.osu_settings.initialize_from_db(),
+        ]
     )

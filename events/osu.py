@@ -101,12 +101,12 @@ async def registration(req: Request) -> Response:
             status_code=400, content={"form_error": {"user": error_response}}
         )
 
-    if not services.osu_settings.allow_game_registration.value:
+    if not services.osu_settings.allow_ingame_registration.value:
         # osu! will attempt to go to https://url?username={username}&email={email}
         return general.ORJSONResponse(
             status_code=403,
             content={
-                "error": "please register from Rina website",
+                "error": "Please register from Rina website",
                 "url": f"https://{services.domain}/register",
             },
         )

@@ -104,7 +104,7 @@ class LoginResponse(IntEnum):
     INVALID_CLIENT = -2 # usually just too old
     # -3 is also lock client
     LOCK_CLIENT = -4
-    BANNED_HWID = -5
+    SERVER_SIDE_ERROR = -5
     UNAUTHORIZED_CUTTING_EDGE_BUILD = -6
     PASSWORD_RESET = -7
 
@@ -179,10 +179,6 @@ async def login(req: Request) -> Response:
         )
         return failed_login(LoginResponse.INCORRECT_LOGIN, extra=writer.notification(ALREADY_ONLINE))
 
-    # invalid security hash (old ver probably using that)
-    if len(client_info[3].split(":")) < 4:
-        return failed_login(LoginResponse.INCORRECT_LOGIN)
-
     # check if user is restricted; pretty sure its like this lol
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
         data += writer.notification(RESTRICTED_MSG)
@@ -199,18 +195,41 @@ async def login(req: Request) -> Response:
 
         return failed_login(LoginResponse.LOCK_CLIENT)
 
-    # TODO: hwid checks
+    user_hash = client_info[3].split(":")
 
-    # TODO: Hardware ban check (security[3] and [4])
-    """
-    if (UserManager.CheckBannedHardwareId(securityHashParts[3], securityHashParts[4]))
-    {
-        SendRequest(RequestType.Bancho_LoginReply, new bInt(-5));
-        return false;
-    }
-    """
-    # if my_balls > sussy_balls:
-    #   return BanchoResponse(await writer.UserID(-5))
+    # invalid security hash (old ver probably using that)
+    if len(user_hash) < 4:
+        return failed_login(LoginResponse.INCORRECT_LOGIN)
+
+    raw_mac_address = user_hash[1]
+    mac_address = user_hash[2]
+    unique_id = user_hash[3]
+    disk_id = user_hash[4]
+
+    linked_hardware = await services.sql.fetch(
+        "SELECT user_id, banned FROM hwid_links WHERE "
+        "mac_address = %s AND unique_id = %s AND disk_id = %s", 
+        (mac_address, unique_id, disk_id))
+
+    if not linked_hardware:
+        await services.sql.execute(
+            "INSERT INTO hwid_links "
+            "(user_id, raw_mac_address, mac_address, unique_id, disk_id) "
+            "VALUES (%s, %s, %s, %s, %s)", (user_info["id"], raw_mac_address, mac_address, unique_id, disk_id))
+    else:
+        if linked_hardware["banned"]:
+            services.logger.warning("Player tried to login with banned hardware.")
+            return failed_login(LoginResponse.LOCK_CLIENT)
+
+        if linked_hardware["user_id"] != user_info["id"]:
+            services.logger.warning(f"Player ID {user_info['id']} logged in with other hardware. Matches player {linked_hardware['user_id']}'s hardware")
+            await services.bot.log(f"Player ID {user_info['id']} logged in with other hardware. Matches player {linked_hardware['user_id']}'s hardware")
+
+            data += writer.notification(
+                "You have been caught logging in to another account on the same machine!\n\n"
+                "If you believe this is a mistake, please contact either Aoba or Carlohman1. "
+                "Nothing crucial will happen to your account other than the staffs has been notified and will check your account. "
+                "If the staff finds you multiaccounting, it will lead to your main account getting restricted aswell as the one you're currently on.")
 
     kwargs = {
         "block_nonfriend": client_info[4],

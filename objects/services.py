@@ -95,7 +95,7 @@ class SettingField(object):
 
 class OsuSettings:
     def __init__(self) -> None:
-        self.allow_game_registration = SettingField(False)
+        self.allow_ingame_registration = SettingField(False)
         self.server_maintenance = SettingField(False)
         self.welcome_message = SettingField(False)
         self.osu_menu_icon = SettingField(False)

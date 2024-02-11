@@ -8,6 +8,7 @@ import time
 import random
 import asyncio
 from events import osu
+from objects.achievement import UserAchievement
 from objects.beatmap import Beatmap
 from objects.match import Match
 from objects.score import SubmitStatus
@@ -1076,6 +1077,9 @@ async def system(ctx: Context) -> str | None:
 
 #     return f"Created group `{name}`"
 
+@register_command("forceerror", hidden=True, required_perms=Privileges.DEV)
+async def force_error(ctx: Context) -> str | None:
+    raise Exception("forced error...")
 
 async def handle_commands(
     message: str, sender: "Player", reciever: Union["Channel", "Player"]
@@ -1102,5 +1106,23 @@ async def handle_commands(
             response = await command.trigger(ctx)
         except Exception as e:
             response = f"unhandled error: {e} (contact Simon about this)"
+
+            assert (ach := services.get_achievement_by_id(190)) is not None
+            user_achievement = UserAchievement(
+                **ach.__dict__,
+                gamemode=Gamemode.UNKNOWN,
+                mode=Mode.NONE
+            )
+
+            if user_achievement not in sender.achievements:
+                await services.sql.execute(
+                    "INSERT INTO users_achievements "
+                    "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, -1, -1)",
+                    (sender.id, 190),
+                )
+
+                sender.achievements.append(user_achievement)
+
+                sender.shout("You've unlocked \"IT'S A FEATURE!\" achievement!")
 
         return response

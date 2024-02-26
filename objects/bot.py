@@ -59,7 +59,7 @@ class Bot(Player):
         description: str,
         title: str = "Unsual score",
     ) -> None:
-        await self.log(f"has caugth {score.player.username} triggering the anticheat")
+        await self.log(f"has caught {score.player.username} triggering the anticheat")
 
         await services.sql.execute(
             "INSERT INTO anticheat (user_id, bad_flag) VALUES (%s, %s)",

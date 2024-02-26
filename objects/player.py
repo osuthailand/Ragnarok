@@ -1,8 +1,8 @@
 from dataclasses import dataclass
+from enum import IntEnum
 import math
 import time
 import uuid
-import asyncio
 import aiohttp
 
 
@@ -23,6 +23,14 @@ from constants.player import PresenceFilter, bStatus, Privileges, country_codes
 if TYPE_CHECKING:
     from objects.beatmap import Beatmap
     from objects.score import Score
+
+
+class LoggingType(IntEnum):
+    ANY = -1
+    HWID_CHECKS = 0
+    RECALCULATIONS = 1
+    RESTRICTIONS = 2
+    # add more???
 
 class Player:
     def __init__(
@@ -573,8 +581,8 @@ class Player:
             (self.id, target.id, reason, int(time.time())),
         )
 
-    async def log(self, note: str) -> None:
+    async def log(self, note: str, type: LoggingType = LoggingType.ANY) -> None:
         await services.sql.execute(
-            "INSERT INTO logs (user_id, note, time) VALUES (%s, %s, %s)",
-            (self.id, note, int(time.time())),
+            "INSERT INTO logs (user_id, note, type, time) VALUES (%s, %s, %s, %s)",
+            (self.id, note, type, int(time.time())),
         )

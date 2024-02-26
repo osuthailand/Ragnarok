@@ -29,7 +29,7 @@ from constants.packets import BanchoPackets
 from constants.match import SlotStatus, ScoringType
 
 from objects.channel import Channel
-from objects.player import Player
+from objects.player import LoggingType, LoggingType, Player
 
 
 from functools import wraps
@@ -790,7 +790,7 @@ async def restrict_user(ctx: Context) -> str | None:
     target.privileges -= Privileges.VERIFIED
     target.shout("An admin has set your account in restricted mode!")
 
-    await ctx.author.log(f"restricted {target.username}")
+    await ctx.author.log(f"restricted {target.username}", type = LoggingType.RESTRICTIONS)
 
     return f"Successfully restricted {target.username}"
 
@@ -820,7 +820,7 @@ async def unrestrict_user(ctx: Context) -> str | None:
     if target.token:  # if user is online
         target.shout("An admin has unrestricted your account!")
 
-    await ctx.author.log(f"unrestricted {target.username}")
+    await ctx.author.log(f"unrestricted {target.username}", type = LoggingType.RESTRICTIONS)
 
     return f"Successfully unrestricted {target.username}"
 
@@ -982,7 +982,7 @@ async def recalc_scores(ctx: Context) -> str | None:
             sender=services.bot,
         )
 
-    await ctx.author.log(f"recalculated all scores for {ctx.args[0]}")
+    await ctx.author.log(f"recalculated all scores for {ctx.args[0]}", type = LoggingType.RECALCULATIONS)
 
     return f"Finished recalculating all scores for {ctx.args[0]}"
 

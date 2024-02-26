@@ -16,7 +16,7 @@ from rina_pp_pyb import Calculator, Beatmap as BMap
 
 from constants.match import *
 from constants.mods import Mods
-from objects.player import Player
+from objects.player import LoggingType, Player
 from objects.channel import Channel
 from objects.beatmap import Beatmap
 from constants.playmode import Gamemode, Mode
@@ -207,9 +207,10 @@ async def login(req: Request) -> Response:
     disk_id = user_hash[4]
 
     linked_hardware = await services.sql.fetch(
-        "SELECT user_id, banned FROM hwid_links WHERE "
-        "mac_address = %s AND unique_id = %s AND disk_id = %s", 
+        "SELECT * FROM hwid_links WHERE "
+        "mac_address = %s OR unique_id = %s OR disk_id = %s", 
         (mac_address, unique_id, disk_id))
+        
 
     if not linked_hardware:
         await services.sql.execute(
@@ -221,10 +222,25 @@ async def login(req: Request) -> Response:
             services.logger.warning("Player tried to login with banned hardware.")
             return failed_login(LoginResponse.LOCK_CLIENT)
 
-        if linked_hardware["user_id"] != user_info["id"]:
-            services.logger.warning(f"Player ID {user_info['id']} logged in with other hardware. Matches player {linked_hardware['user_id']}'s hardware")
-            await services.bot.log(f"Player ID {user_info['id']} logged in with other hardware. Matches player {linked_hardware['user_id']}'s hardware")
+        mismatched_ids = []
 
+        if linked_hardware["mac_address"] != mac_address:
+            mismatched_ids.append("`mac_address`")
+
+        if linked_hardware["unique_id"] != unique_id:
+            mismatched_ids.append("`unique_id`")
+
+        if linked_hardware["disk_id"] != disk_id:
+            mismatched_ids.append("`disk_id`")
+
+        if mismatched_ids:
+            msg = f"Player {user_info['id']} has mismatched hardware ids. Mismatched IDs are {", ".join(mismatched_ids)}"
+
+            services.logger.warning(msg)
+            await services.bot.log(msg, type = LoggingType.HWID_CHECKS)
+
+        # if the user, has matched someone elses
+        if linked_hardware["user_id"] != user_info["id"]:
             data += writer.notification(
                 "You have been caught logging in to another account on the same machine!\n\n"
                 "If you believe this is a mistake, please contact either Aoba or Carlohman1. "

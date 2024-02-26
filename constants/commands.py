@@ -29,7 +29,7 @@ from constants.packets import BanchoPackets
 from constants.match import SlotStatus, ScoringType
 
 from objects.channel import Channel
-from objects.player import LoggingType, LoggingType, Player
+from objects.player import LoggingType, Player
 
 
 from functools import wraps

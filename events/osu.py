@@ -233,8 +233,7 @@ async def get_scores(req: Request, p: Player) -> Response:
             # this is absolutely so fucking ugly
             # but i dont know what else works rn
             friends = f"({', '.join(str(x) for x in (p.friends | {p.id}))})"
-            query += f"AND s.user_id IN %s "
-            params.append(friends)
+            query += f"AND s.user_id IN {friends} "
 
     query += f"ORDER BY score DESC, s.submitted ASC LIMIT 50"
     personal_best = await services.sql.fetch(

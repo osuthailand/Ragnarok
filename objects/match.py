@@ -30,8 +30,8 @@ class Players:
         self.loaded = False
         self.skipped = False
 
-    def copy_from(self, old):
-        self.player = old.p
+    def copy_from(self, old: "Players"):
+        self.player = old.player
         self.mods = old.mods
         self.host = old.host
         self.status = old.status

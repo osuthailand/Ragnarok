@@ -131,7 +131,7 @@ def ensure_channel(cb: Callable) -> Callable:
         if type(ctx.reciever) is Channel:
             return await cb(ctx, *args, **kwargs)
 
-        return "This command can only be performed in a channel"
+        return "This command can only be performed in a channel."
 
     return wrapper
 
@@ -139,10 +139,10 @@ def ensure_channel(cb: Callable) -> Callable:
 def ensure_player(cb: Callable) -> Callable:
     @wraps(cb)
     async def wrapper(ctx: Context, *args, **kwargs):
-        if type(ctx.reciever) is Player:
+        if type(ctx.reciever) in (Bot, Player):
             return await cb(ctx, *args, **kwargs)
 
-        return "This command can only be performed in a channel"
+        return "This command can only be performed in the bots DMs."
 
     return wrapper
 
@@ -471,7 +471,7 @@ async def change_multi_name(ctx: Context) -> str | None:
 
 @rmp_command("lock")
 @ensure_match(host=True)
-async def lock_slot(ctx: Context) -> str | None:
+async def lock_match(ctx: Context) -> str | None:
     m = ctx.author.match
     m.locked = True
 
@@ -481,12 +481,12 @@ async def lock_slot(ctx: Context) -> str | None:
 
 @rmp_command("unlock")
 @ensure_match(host=True)
-async def unlock_slot(ctx: Context) -> str | None:
+async def unlock_match(ctx: Context) -> str | None:
     m = ctx.author.match
     m.locked = True
 
     m.enqueue_state()
-    return f"Locked the match"
+    return f"Unlocked the match"
 
 
 @rmp_command("start")
@@ -586,14 +586,14 @@ async def move_slot(ctx: Context) -> str | None:
     if len(ctx.args) < 2:
         return "Wrong usage: !mp move <player> <to_slot>"
 
-    ctx.args[1] = int(ctx.args[1]) - 1
+    slot_id = int(ctx.args[1]) - 1
 
     player = services.players.get(ctx.args[0])
 
     if not (target := m.find_user(player)):
         return "Slot is not occupied."
 
-    to = m.find_slot(ctx.args[1])
+    to = m.find_slot(slot_id)
     assert to is not None
 
     if to.status & SlotStatus.OCCUPIED:
@@ -604,7 +604,7 @@ async def move_slot(ctx: Context) -> str | None:
 
     m.enqueue_state(lobby=True)
 
-    return f"Moved {to.player.username} to slot {ctx.args[1] + 1}"
+    return f"Moved {to.player.username} to slot {slot_id + 1}"
 
 
 @rmp_command("size")

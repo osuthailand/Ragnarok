@@ -407,7 +407,7 @@ async def score_submission(req: Request) -> Response:
             "SELECT s.pp, s.accuracy FROM scores s "
             "WHERE s.user_id = %s AND s.mode = %s "
             "AND s.status = 3 AND s.gamemode = %s "
-            "ORDER BY s.pp DESC",
+            "ORDER BY s.pp DESC LIMIT 100",
             (stats.id, s.mode.value, s.gamemode.value),
         )
 

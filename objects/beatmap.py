@@ -1,4 +1,6 @@
 import copy
+import os
+from typing import Union
 import aiohttp
 from constants.mods import Mods
 from objects import services
@@ -92,16 +94,14 @@ class Beatmap:
 
     @classmethod
     async def _get_beatmap_from_sql(
-        cls, hash: str, beatmap_id: int, set_id: int
-    ) -> "Beatmap":
+        cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0
+    ) -> Union["Beatmap", None]:
         b = cls()
 
         params = (
             ("set_id", set_id)
             if set_id
-            else ("map_md5", hash)
-            if hash
-            else ("map_id", beatmap_id)
+            else ("map_md5", hash) if hash else ("map_id", beatmap_id)
         )
 
         ret = await services.sql.fetch(
@@ -178,10 +178,35 @@ class Beatmap:
 
         services.logger.info(f"Saved {self.full_title} ({self.map_md5}) into database")
 
+    async def map_md5_check(self, map_md5: str, map_id: int) -> bool:
+        md5_check = await self._get_beatmap_from_sql(beatmap_id=map_id)
+
+        if md5_check:
+            if md5_check.map_md5 != map_md5:
+                # just delete that shit
+                await services.sql.execute(
+                    "DELETE FROM beatmaps WHERE map_id = %s", (map_id)
+                )
+                services.logger.info(
+                    "Removed previous saved beatmap from database and added the updated one."
+                )
+
+                # also delete previous .osu file in .data/beatmaps
+                if os.path.exists(f".data/beatmaps/{map_id}.osu"):
+                    os.remove(f".data/beatmaps/{map_id}.osu")
+
+                    services.logger.info(
+                        "Removed previous `.osu` file from .data/beatmaps"
+                    )
+
+                return True
+
+        return False
+
     @classmethod
     async def _get_beatmap_from_osuapi(
         cls, hash: str, beatmap_id: int, set_id: int
-    ) -> "Beatmap":
+    ) -> Union["Beatmap", None]:
         b = cls()
 
         async with aiohttp.ClientSession() as session:
@@ -189,9 +214,7 @@ class Beatmap:
             params = (
                 ("s", set_id)
                 if set_id
-                else ("b", beatmap_id)
-                if beatmap_id
-                else ("h", hash)
+                else ("b", beatmap_id) if beatmap_id else ("h", hash)
             )
 
             async with session.get(
@@ -207,6 +230,9 @@ class Beatmap:
 
         b.set_id = int(ret["beatmapset_id"])
         b.map_id = int(ret["beatmap_id"])
+
+        await b.map_md5_check(hash, b.map_id)
+
         b.map_md5 = ret["file_md5"]
 
         b.title = ret["title"]
@@ -262,7 +288,7 @@ class Beatmap:
     @classmethod
     async def get_beatmap(
         cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0
-    ) -> "Beatmap":
+    ) -> Union["Beatmap", None]:
         self = cls()  # trollface
 
         if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id, set_id)):

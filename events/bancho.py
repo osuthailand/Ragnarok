@@ -59,9 +59,18 @@ async def handle_bancho(req: Request) -> Response:
 
     token = req.headers["osu-token"]
 
+    # client has osu-token, but isn't saved in players cache
+    # player either lost connection or the server restarted
     if not (player := services.players.get(token)):
+        cur_time = time.time()
+
+        # the client has 20 seconds to reconnect 
+        if cur_time - services.startup < 20:
+            return Response(content=writer.notification("Server has restarted")
+                                    + writer.server_restart())
+
         return Response(
-            content=writer.notification("Server has restarted")
+            content=writer.notification("You lost connection to the server!")
                     + writer.server_restart()
         )
 
@@ -743,7 +752,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
                 mods=slot.mods | m.mods,
             )
 
-            pp = calc.performance(bmap).pp
+            pp = calc.performance(bmap).pp # type: ignore
 
             if math.isnan(pp) or math.isinf(pp):
                 pp = 0

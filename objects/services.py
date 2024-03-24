@@ -2,7 +2,7 @@ import logging
 import os
 import re
 import sys
-import tomllib
+import time
 
 
 from typing import Pattern, TYPE_CHECKING
@@ -79,6 +79,7 @@ config: Dynaconf = Dynaconf(settings_files=["config.toml"])
 debug: bool = config.server.debug
 domain: str = config.server.domain
 port: int = config.server.port
+startup: float = time.time()
 
 packets: dict[int, "Packet"] = {}
 

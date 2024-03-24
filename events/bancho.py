@@ -59,9 +59,18 @@ async def handle_bancho(req: Request) -> Response:
 
     token = req.headers["osu-token"]
 
+    # client has osu-token, but isn't saved in players cache
+    # player either lost connection or the server restarted
     if not (player := services.players.get(token)):
+        cur_time = time.time()
+
+        # the client has 20 seconds to reconnect 
+        if cur_time - services.startup < 20:
+            return Response(content=writer.notification("Server has restarted")
+                                    + writer.server_restart())
+
         return Response(
-            content=writer.notification("Server has restarted")
+            content=writer.notification("You lost connection to the server!")
                     + writer.server_restart()
         )
 
@@ -726,10 +735,8 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
 
     if m.pp_win_condition:
         if os.path.isfile(f".data/beatmaps/{m.map.map_id}.osu"):
-            slot = m.find_user(p)
-            
             # should not happen
-            if not slot:
+            if not (slot := m.find_user(p)):
                 return
             
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
@@ -745,7 +752,12 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
                 mods=slot.mods | m.mods,
             )
 
-            s.score = math.ceil(calc.performance(bmap).pp)  # type: ignore
+            pp = calc.performance(bmap).pp # type: ignore
+
+            if math.isnan(pp) or math.isinf(pp):
+                pp = 0
+
+            s.score = round(pp)  # type: ignore
         else:
             services.logger.critical(f"MATCH {m.match_id}: Couldn't find the osu beatmap.")
 

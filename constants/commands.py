@@ -314,7 +314,6 @@ def pp_message_format(
 
     return " ".join(response)
 
-
 @register_command("pp", category="Tillerino-like")
 async def calc_pp_for_map(ctx: Context) -> str | None:
     """Show PP for the previous requested beatmap with requested info (Don't use spaces for multiple mods (eg: !pp +HDHR))"""
@@ -334,7 +333,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
     bmap = BMap(path=f".data/beatmaps/{_map.file}")
 
     # if the original map mode is standard, but
-    # the user is on another mode, it should convert pp
+    # the user is on another mode, it should convert ppa
     mode = _map.mode
 
     if mode == Mode.OSU and mode != ctx.author.play_mode:
@@ -354,18 +353,33 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
                 mods = Mods.from_str(arg[1:])
 
             elif arg.endswith("%"):
+                if not ("." in arg[:-1] and arg[:-1].isdecimal()):
+                    return "invalid argument: accuracy has to be a number."
+
                 pp_builder.accuracy = float(arg[:-1])
 
             elif arg.endswith("x"):
+                if not arg[:-1].isdecimal():
+                    return "invalid argument: combo has to be a number."
+                
                 pp_builder.combo = int(arg[:-1])
 
             elif arg.endswith("x100"):
+                if not arg[:-4].isdecimal():
+                    return "invalid argument: 100 count has to be a number."
+                
                 pp_builder.x100 = int(arg[:-4])
 
             elif arg.endswith("x50"):
+                if not arg[:-3].isdecimal():
+                    return "invalid argument: 50 count has to be a number."
+
                 pp_builder.x50 = int(arg[:-3])
 
             elif arg.endswith("m"):
+                if not arg[:-1].isdecimal():
+                    return "invalid argument: miss count has to be a number."
+                
                 pp_builder.misses = int(arg[:-1])
 
     return pp_message_format(bmap, _map, pp_builder, calc, mods)

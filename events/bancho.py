@@ -27,6 +27,8 @@ from constants.packets import BanchoPackets
 from constants.player import bStatus, Privileges
 from starlette.requests import Request, ClientDisconnect
 
+from tasks import cache_allowed_osu_builds
+
 
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
@@ -119,7 +121,10 @@ class LoginResponse(IntEnum):
 
 
 
-def failed_login(code: LoginResponse, /, extra: bytes = b"") -> Response:
+def failed_login(code: LoginResponse, /, msg: str = "", extra: bytes = b"") -> Response:
+    if msg:
+        services.logger.warn(f"{msg} ({code.name})")
+
     return Response(
         content=writer.user_id(code.value) + extra, headers={"cho-token": "no"}
     )
@@ -156,7 +161,7 @@ async def login(req: Request) -> Response:
             [login_info[0].lower().replace(" ", "_")],
         )
     ):
-        return failed_login(LoginResponse.INCORRECT_LOGIN)
+        return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"A user tried logging in with the username \"{login_info[0]}\", but the user doesn't exist.")
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -165,44 +170,38 @@ async def login(req: Request) -> Response:
     # check if the password is correct
     if phash in services.bcrypt_cache:
         if pmd5 != services.bcrypt_cache[phash]:
-            services.logger.warn(
-                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-            )
-
-            return failed_login(LoginResponse.INCORRECT_LOGIN)
+            return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.")
     else:
         if not bcrypt.checkpw(pmd5, phash):
-            services.logger.warn(
-                f"USER {user_info['username']} ({user_info['id']}) | Login fail. (WRONG PASSWORD)"
-            )
-
-            return failed_login(LoginResponse.INCORRECT_LOGIN)
+            return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.")
 
         services.bcrypt_cache[phash] = pmd5
 
     if _p := services.players.get(user_info["username"]):
         # user is already online? sus
-        services.logger.warn(
-            f"A user tried to login onto the account {
-                _p.username} ({_p.id}), but user already online."
-        )
-        return failed_login(LoginResponse.INCORRECT_LOGIN, extra=writer.notification(ALREADY_ONLINE))
+        return failed_login(LoginResponse.INCORRECT_LOGIN, msg="A user tried to sign in to an already connected account.", extra=writer.notification(ALREADY_ONLINE))
 
-    # check if user is restricted; pretty sure its like this lol
+    # check if user is restricted
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
         data += writer.notification(RESTRICTED_MSG)
 
-    # remove the little b infront of the version
+    # [1:] removes the little b infront of the version
     if client_info[0][1:] not in services.ALLOWED_BUILDS and not client_info[0].endswith("rina"):
-        return failed_login(LoginResponse.INVALID_CLIENT)
+        # since allowed osu builds is cached from startup
+        # we should check if there has been any new builds
+        # since startup.
+        await cache_allowed_osu_builds()
+
+        # if again the client_info is not in `services.ALLOWED_BUILDS`
+        # then return invalid client response.
+        if client_info[0][1:] not in services.ALLOWED_BUILDS:
+            return failed_login(LoginResponse.INVALID_CLIENT)
+
+        services.logger.debug("allowed osu! builds cache has been updated.")
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
-        services.logger.info(
-            f"{user_info['username']} tried to login, but failed to do so, since they're banned."
-        )
-
-        return failed_login(LoginResponse.LOCK_CLIENT)
+        return failed_login(LoginResponse.LOCK_CLIENT, msg=f"{user_info['username']} tried to login, but were unable to do so, since they're banned.")
 
     user_hash = client_info[3].split(":")
 
@@ -228,8 +227,7 @@ async def login(req: Request) -> Response:
             "VALUES (%s, %s, %s, %s, %s)", (user_info["id"], raw_mac_address, mac_address, unique_id, disk_id))
     else:
         if linked_hardware["banned"]:
-            services.logger.warning("Player tried to login with banned hardware.")
-            return failed_login(LoginResponse.LOCK_CLIENT)
+            return failed_login(LoginResponse.LOCK_CLIENT, msg=f"{user_info['username']} tried to login with banned hardware.")
 
         mismatched_ids = []
 
@@ -243,7 +241,7 @@ async def login(req: Request) -> Response:
             mismatched_ids.append("`disk_id`")
 
         if mismatched_ids:
-            msg = f"Player {user_info['id']} has mismatched hardware ids. Mismatched IDs are {", ".join(mismatched_ids)}"
+            msg = f"{user_info['username']} ({user_info['id']}) has mismatched hardware ids. Mismatched IDs are {", ".join(mismatched_ids)}"
 
             services.logger.warning(msg)
             await services.bot.log(msg, type = LoggingType.HWID_CHECKS)

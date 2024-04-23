@@ -99,7 +99,6 @@ class OsuSettings:
         self.allow_ingame_registration = SettingField(False)
         self.server_maintenance = SettingField(False)
         self.welcome_message = SettingField(False)
-        self.osu_menu_icon = SettingField(False)
 
     async def initialize_from_db(self) -> None:
         async for setting in sql.iterall(

@@ -307,13 +307,6 @@ def user_presence(p: "Player", spoof: bool = False) -> bytes:
     )
 
 
-def main_menu_icon(image_url: str, url: str) -> bytes:
-    return write(
-        BanchoPackets.CHO_MAIN_MENU_ICON,
-        (f"{image_url}|{url}", Types.string),
-    )
-
-
 def channel_join(name: str) -> bytes:
     return write(BanchoPackets.CHO_CHANNEL_JOIN_SUCCESS, (name, Types.string))
 

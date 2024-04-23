@@ -286,13 +286,6 @@ async def login(req: Request) -> Response:
 
     data += writer.user_id(p.id)
     data += writer.user_privileges(p.privileges)
-
-    if services.osu_settings.osu_menu_icon.value:
-        data += writer.main_menu_icon(
-            image_url=services.osu_settings.osu_menu_icon.string,
-            url=f"https://{services.domain}",
-        )
-
     data += writer.friends_list(p.friends)
     data += writer.user_presence(p, spoof=True)
     data += writer.update_stats(p)

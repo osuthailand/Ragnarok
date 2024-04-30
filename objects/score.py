@@ -93,7 +93,7 @@ class Score:
         # previous_best
         self.pb: "Score" = None  # type: ignore
 
-        self._awards_pp: bool = False
+        self.awards_pp: bool = False
 
     @property
     def web_format(self) -> str:
@@ -238,7 +238,7 @@ class Score:
                 if math.isnan(s.pp) or math.isinf(s.pp):
                     s.pp = 0
 
-                s._awards_pp = s.map.approved & Approved.AWARDS_PP
+                s.awards_pp = s.map.approved & Approved.AWARDS_PP
 
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(
@@ -336,6 +336,6 @@ class Score:
                 self.mode.value,
                 self.submitted,
                 self.gamemode.value,
-                self._awards_pp,
+                self.awards_pp,
             ),
         )

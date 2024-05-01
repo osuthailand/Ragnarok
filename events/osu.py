@@ -401,7 +401,7 @@ async def score_submission(req: Request) -> Response:
         stats.ranked_score += sus
 
         scores = await services.sql.fetchall(
-            "SELECT s.pp, s.accuracy FROM scores s "
+            "SELECT s.pp, s.accuracy, s.awards_pp FROM scores s "
             "WHERE s.user_id = %s AND s.mode = %s "
             "AND s.status = 3 AND s.gamemode = %s "
             "ORDER BY s.pp DESC LIMIT 100",
@@ -410,18 +410,20 @@ async def score_submission(req: Request) -> Response:
 
         stats.accuracy = np.sum(
             [score[1] * 0.95**place for place, score in enumerate(scores)]
-        )
+        ) # type: ignore
         stats.accuracy *= 100 / (20 * (1 - 0.95 ** len(scores)))
         stats.accuracy /= 100
 
-        if s.map.approved & Approved.AWARDS_PP:
+        if s.awards_pp:
+            all_awarded_pp_scores = [score for score in scores if score[2]]
+
             weighted = np.sum(
                 [
                     score[0] * 0.95 ** (place)
-                    for place, score in enumerate(scores)
+                    for place, score in enumerate(all_awarded_pp_scores)
                 ]
-            )
-            weighted += 416.6667 * (1 - 0.9994 ** len(scores))
+            ) # type: ignore
+            weighted += 416.6667 * (1 - 0.9994 ** len(all_awarded_pp_scores))
             stats.pp = math.ceil(weighted)
 
             stats.rank = await stats.update_rank(s.gamemode, s.mode)

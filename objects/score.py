@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional
 from base64 import b64decode
 from objects import services
 from dataclasses import dataclass
-from rina_pp_pyb import Calculator, Beatmap as BMap
+from rina_pp_pyb import Performance, Beatmap as BMap
 
 from constants.mods import Mods
 from objects.beatmap import Beatmap
@@ -221,24 +221,26 @@ class Score:
             if s.map.approved & Approved.HAS_LEADERBOARD:
                 bmap = BMap(path=f".data/beatmaps/{s.map.file}")
 
-                calc = Calculator(
-                    mode=s.mode,
+                if s.mode != bmap.mode:
+                    bmap.convert(s.mode)
+
+                perf = Performance(
                     n300=s.count_300,
                     n100=s.count_100,
                     n50=s.count_50,
-                    n_misses=s.count_miss,
+                    misses=s.count_miss,
                     n_geki=s.count_geki,
                     n_katu=s.count_katu,
                     combo=s.max_combo,
-                    mods=s.mods,
-                )
+                    mods=s.mods
+                ).calculate(bmap)
 
-                s.pp = calc.performance(bmap).pp
+                s.pp = perf.pp
 
                 if math.isnan(s.pp) or math.isinf(s.pp):
                     s.pp = 0
 
-                s._awards_pp = s.map.approved & Approved.AWARDS_PP
+                s.awards_pp = s.map.approved & Approved.AWARDS_PP # type: ignore
 
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(

@@ -8,7 +8,7 @@ from starlette.responses import Response
 from objects import services
 from objects.beatmap import Beatmap
 
-from rina_pp_pyb import Calculator, Beatmap as BMap
+from rina_pp_pyb import Performance, Beatmap as BMap
 
 
 @osu.route("/web/osu-osz2-bmsubmit-getid.php")
@@ -164,13 +164,9 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
     metadata = osz2_data.metadata
 
     for beatmap in beatmaps:
-        # TODO: .osu file parser
-        # TODO: save to db
-        _bmap = BMap(bytes=beatmap.raw_data)
-        _calculator = Calculator()
-
-        difficulty = _calculator.difficulty(_bmap)
-        attributes = _calculator.map_attributes(_bmap)
+        # TODO: .osu specifically made for this, instead of using external libraries
+        attributes = BMap(bytes=beatmap.raw_data)
+        difficulty = Performance().calculate(attributes).difficulty
 
         bmap = await services.beatmaps.get_by_map_id(beatmap._map_id) or Beatmap()
 
@@ -202,7 +198,7 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
         bmap.hp = attributes.hp
         bmap.cs = attributes.cs
         bmap.bpm = attributes.bpm
-        bmap.mode = attributes.mode
+        bmap.mode = attributes.mode.value
 
         bmap.stars = difficulty.stars
         bmap.max_combo = difficulty.max_combo

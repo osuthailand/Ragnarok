@@ -18,7 +18,7 @@ from packets import writer
 from typing import Callable
 from objects import services
 from dataclasses import dataclass
-from rina_pp_pyb import Beatmap as BMap, Calculator
+from rina_pp_pyb import Beatmap as BMap, Performance
 
 from objects.bot import Bot
 from constants.mods import Mods
@@ -156,7 +156,7 @@ def ensure_player(cb: Callable) -> Callable:
 async def help(ctx: Context) -> str | None:
     """The help message"""
 
-    cmds: dict[str, dict[str, str]] = {}
+    cmds: dict[str, dict[str, str | None]] = {}
     for cmd in commands:
         if cmd.hidden or not cmd.perms & ctx.author.privileges:
             continue
@@ -254,42 +254,42 @@ class PPBuilder:
     x50: int = 0
     misses: int = 0
 
-    def message(self, calculator: Calculator, bmap: BMap):
+    def message(self, perf: Performance, bmap: BMap):
         if not self.accuracy and not (self.x100 or self.x50):
             pp_values = []
             for acc in (95, 98, 99, 100):
-                calculator.set_acc(acc)
-                pp = calculator.performance(bmap).pp
+                perf.set_accuracy(acc)
+                pp = perf.calculate(bmap).pp
                 pp_values.append(f"{acc}%: {pp:.2f}pp")
 
             return " | ".join(pp_values)
 
-        calculator.set_n_misses(self.misses)
+        perf.set_misses(self.misses)
 
         if self.accuracy:
             if self.combo:
-                calculator.set_combo(self.combo)
+                perf.set_combo(self.combo)
 
-            calculator.set_acc(self.accuracy)
-            performance = calculator.performance(bmap)
+            perf.set_accuracy(self.accuracy)
+            calculator = perf.calculate(bmap)
 
-            return f"{self.accuracy}% {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {performance.pp:.2f}pp"
+            return f"{self.accuracy}% {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {calculator.pp:.2f}pp"
 
         if self.combo:
-            calculator.set_combo(self.combo)
+            perf.set_combo(self.combo)
 
-        calculator.set_n100(self.x100)
-        calculator.set_n50(self.x50)
-        performance = calculator.performance(bmap)
+        perf.set_n100(self.x100)
+        perf.set_n50(self.x50)
+        calculator = perf.calculate(bmap)
 
-        return f"{self.x100}x100 {self.x50}x50 {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {performance.pp:.2f}pp"
+        return f"{self.x100}x100 {self.x50}x50 {f'{self.combo}x' if self.combo else ''} {self.misses} miss(es): {calculator.pp:.2f}pp"
 
 
 def pp_message_format(
     bmap: BMap,
     map: Beatmap,
     pp_builder: PPBuilder,
-    calculator: Calculator,
+    perf: Performance,
     mods: Mods = Mods.NONE,
 ) -> str | None:
     response = []
@@ -299,18 +299,18 @@ def pp_message_format(
         response.append(mods.short_name)
 
     response.append("|")
-    calculator.set_mods(mods.value)
+    perf.set_mods(mods.value)
 
-    response.append(pp_builder.message(calculator, bmap))
+    response.append(pp_builder.message(perf, bmap))
 
-    map_attributes = calculator.map_attributes(bmap)
-    difficulty_attributes = calculator.difficulty(bmap)
+    calculator = perf.calculate(bmap)
+    attributes = calculator.difficulty
 
     response.append("| " + map.length_in_minutes_seconds(mods))
-    response.append(f"★ {difficulty_attributes.stars:.2f}")
-    response.append(f"♫ {map_attributes.bpm:.0f}")
-    response.append(f"AR {map_attributes.ar:.1f}")
-    response.append(f"OD {map_attributes.od:.1f}")
+    response.append(f"★ {attributes.stars:.2f}")
+    response.append(f"♫ {bmap.bpm:.0f}")
+    response.append(f"AR {attributes.ar:.1f}")
+    response.append(f"OD {attributes.od:.1f}")
 
     return " ".join(response)
 
@@ -339,7 +339,10 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
     if mode == Mode.OSU and mode != ctx.author.play_mode:
         mode = ctx.author.play_mode
 
-    calc = Calculator(mode=mode)
+    if mode != bmap.mode:
+        bmap.convert(mode)
+
+    calc = Performance()
 
     pp_builder = PPBuilder()
     mods = Mods.NONE
@@ -353,7 +356,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
                 mods = Mods.from_str(arg[1:])
 
             elif arg.endswith("%"):
-                if not ("." in arg[:-1] and arg[:-1].isdecimal()):
+                if not all(num.isdecimal() for num in arg[:-1].split(".")):
                     return "invalid argument: accuracy has to be a number."
 
                 pp_builder.accuracy = float(arg[:-1])
@@ -963,20 +966,20 @@ async def recalc_scores(ctx: Context) -> str | None:
                 ctx.reciever.send(message="welp couldn't find beatmap lol", sender=services.bot)
                 continue
 
-        calc = Calculator(
+        calc = Performance(
             mode=score["mode"],
             n300=score["count_300"],
             n100=score["count_100"],
             n50=score["count_50"],
-            n_misses=score["count_miss"],
+            misses=score["count_miss"],
             n_geki=score["count_geki"],
             n_katu=score["count_katu"],
             combo=score["max_combo"],
-            acc=score["accuracy"],
+            accuracy=score["accuracy"],
             mods=score["mods"],
-        )
+        ).calculate(bmap)
 
-        pp = calc.performance(bmap).pp
+        pp = calc.pp
 
         if math.isnan(pp):
             ctx.reciever.send(

@@ -32,8 +32,6 @@ from constants.player import Privileges
 from objects.score import Score, SubmitStatus
 from starlette.responses import FileResponse, Response, RedirectResponse
 
-from rina_pp_pyb import Beatmap as BMap
-
 def check_auth(
     u: str,
     pw: str,

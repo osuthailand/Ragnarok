@@ -12,7 +12,7 @@ from packets import writer
 from typing import Callable
 from objects import services
 from constants import commands as cmd
-from rina_pp_pyb import Calculator, Beatmap as BMap
+from rina_pp_pyb import Performance, Beatmap as BMap
 
 from constants.match import *
 from constants.mods import Mods
@@ -731,26 +731,29 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
                 return
             
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
-            calc = Calculator(
-                mode=m.mode,
+
+            if bmap.mode != m.mode:
+                bmap.convert(m.mode)
+
+            calc = Performance(
                 n300=s.count_300,
                 n100=s.count_100,
                 n50=s.count_50,
                 n_geki=s.count_geki,
                 n_katu=s.count_katu,
                 combo=s.max_combo,
-                n_misses=s.count_miss,
+                misses=s.count_miss,
                 mods=slot.mods | m.mods,
-            )
+            ).calculate(bmap)
 
-            pp = calc.performance(bmap).pp # type: ignore
+            pp = calc.pp
 
             if math.isnan(pp) or math.isinf(pp):
                 pp = 0
 
-            s.score = round(pp)  # type: ignore
+            s.score = round(pp)
         else:
-            services.logger.critical(f"MATCH {m.match_id}: Couldn't find the osu beatmap.")
+            services.logger.critical(f"MATCH {m.match_id}: Failed to update pp, because the .osu file doesn't exist.")
 
     slot_id = m.find_user_slot(p)
 

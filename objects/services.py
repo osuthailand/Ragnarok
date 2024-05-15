@@ -7,7 +7,7 @@ import time
 
 from typing import Pattern, TYPE_CHECKING
 
-from attr import dataclass
+from dataclasses import dataclass
 from dynaconf import Dynaconf
 from redis import asyncio as aioredis
 

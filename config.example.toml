@@ -1,7 +1,7 @@
 [server]
 debug = false
 domain = "CHANGE THIS"
-port = 1000
+port = 2006
 
 [database]
 host = "localhost"
@@ -23,9 +23,6 @@ key = "CHANGE THIS"
 chimu = "https://api.chimu.moe/v1/"
 katsu = "https://katsu.moe/"
 nerinyan = "https://api.nerinyan.moe/"
-
-[discord]
-token = "CHANGE THIS"
 
 [fun]
 rank_all_maps = true

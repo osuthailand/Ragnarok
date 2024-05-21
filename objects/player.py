@@ -414,7 +414,6 @@ class Player:
         se = ("std", "taiko", "catch", "mania")[s.mode]
         self.get_level()
 
-        # important stuff
         await services.sql.execute(
             f"UPDATE {s.gamemode.table} SET pp_{
                 se} = %s, playcount_{se} = %s, "
@@ -430,7 +429,7 @@ class Player:
                 self.id,
             ),
         )
-        # less important
+
         await services.sql.execute(
             f"UPDATE {s.gamemode.table} SET total_hits_{
                 se} = %s, "
@@ -441,6 +440,13 @@ class Player:
         )
 
     def get_level(self):
+        # TODO: relax score 
+        # required score for lvl 100.
+        if self.total_score < 26_931_190_828.629:
+            # > lvl 100
+            return (self.total_score - 26_931_190_827 + 9_999_999_999_900) / 99_999_999_999 
+        
+        # for anything below 100
         for idx, req_score in enumerate(levels):
             if req_score < self.total_score < levels[idx + 1]:
                 self.level = idx + 1

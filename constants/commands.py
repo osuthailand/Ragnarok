@@ -402,8 +402,9 @@ async def last_score(ctx: Context) -> str:
         bmap.embed + f"{Mods(score.mods).short_name if score.mods else ''} "
         f"({score.accuracy:.2f}%, {score.rank}) "
         f"{score.max_combo}x/{bmap.max_combo}x | "
+        f"{score.pp:.2f}pp (gained {score.gained_pp:+d}pp) | "
         # TODO: difficulty changing mods changes stars
-        f"{score.pp:.2f}pp (gained {score.gained_pp:+d}pp)| ★ {bmap.stars:.2f} "
+        f"★ {bmap.stars:.2f}"
     )
 
     if not score.status & SubmitStatus.PASSED:

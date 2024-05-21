@@ -9,10 +9,10 @@ We will not help setting up the whole server (nginx, mysql and those stuff), but
 
 We suggest making an environment before doing anything. You can create one by installing pipenv.
 ```
-$ python3.11 -m pip install pipenv
+$ python3.12 -m pip install pipenv
 ...
 
-$ python3.11 -m pipenv install
+$ python3.12 -m pipenv install
 Creating a virtualenv for this project...
 ...
 
@@ -26,8 +26,8 @@ $ pip install -r requirements.txt
 
 Once that's finished, you can go ahead and make a copy of the config.sample.py, by doing:
 ```
-$ mv config.sample.py config.py
-$ nano config.py
+$ mv config.sample.toml config.toml
+$ nano config.toml
 ```
 
 Then you can go ahead and change the needed stuff in there. *MARKED WITH "CHANGE THIS"*

@@ -77,13 +77,11 @@ class Score:
 
         self.rank: str = "F"
 
+        self.mode: Mode = Mode.OSU
         self.mods: Mods = Mods.NONE
         self.status: SubmitStatus = SubmitStatus.FAILED
 
         self.playtime: int = 0
-
-        self.mode: Mode = Mode.OSU
-
         self.submitted: int = math.ceil(time.time())
 
         self.gamemode: Gamemode = Gamemode.VANILLA
@@ -94,6 +92,7 @@ class Score:
         self.pb: "Score" = None  # type: ignore
 
         self.awards_pp: bool = False
+        self.gained_pp: bool = False
 
     @property
     def web_format(self) -> str:
@@ -218,7 +217,7 @@ class Score:
         if passed:
             await s.calculate_position()
 
-            if s.map.approved & Approved.HAS_LEADERBOARD:
+            if s.map.approved.has_leaderboard:
                 bmap = BMap(path=f".data/beatmaps/{s.map.file}")
 
                 if s.mode != bmap.mode:
@@ -240,7 +239,7 @@ class Score:
                 if math.isnan(s.pp) or math.isinf(s.pp):
                     s.pp = 0
 
-                s.awards_pp = s.map.approved & Approved.AWARDS_PP
+                s.awards_pp = s.map.approved.awards_pp
 
             # find our previous best score on the map
             if prev_best := await services.sql.fetch(

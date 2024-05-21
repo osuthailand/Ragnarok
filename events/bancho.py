@@ -147,11 +147,6 @@ async def login(req: Request) -> Response:
     # the players ip address
     ip = req.headers["X-Real-IP"]
 
-    if services.osu_settings.server_maintenance.value:
-        return failed_login(
-            LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD, 
-            extra=writer.notification("Server is currently under maintenance."))
-
     # get all user needed information
     if not (
         user_info := await services.sql.fetch(
@@ -162,6 +157,14 @@ async def login(req: Request) -> Response:
         )
     ):
         return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"A user tried logging in with the username \"{login_info[0]}\", but the user doesn't exist.")
+
+    if services.osu_settings.server_maintenance.value:
+        if not user_info["privileges"] & Privileges.DEV:
+            return failed_login(
+                LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD, 
+                extra=writer.notification("Server is currently under maintenance."))
+
+        data += writer.notification("Server is currently under maintenance. Remember to turn it off, when everything is done and ready.")
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -448,7 +451,7 @@ async def update_stats(p: Player, sr: Reader) -> None:
     p.enqueue(writer.update_stats(p))
 
 
-# id: 4
+# # id: 4
 @register_event(BanchoPackets.OSU_PING, restricted=True)
 async def pong(p: Player, sr: Reader) -> None:
     p.enqueue(writer.pong())

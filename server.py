@@ -62,40 +62,37 @@ async def startup() -> None:
     services.logger.info(
         f"Running Ragnarok on `{services.domain}` (port: {services.port})"
     )
-    services.logger.info("... Connecting to the database")
 
+    services.logger.info("... Connecting to the database")
     services.sql = Database()
     await services.sql.connect(services.config.database)
-
     services.logger.info("✓ Connected to the database!")
-    services.logger.info("... Initalizing redis")
 
+    services.logger.info("... Initalizing redis")
     redisconf = services.config.redis
     services.redis = aioredis.from_url(
         f"redis://{redisconf.username}:{redisconf.password}@{redisconf.host}:{redisconf.port}"
     )
     await services.redis.initialize()
-
     services.logger.info("✓ Successfully initalized redis")
-    services.logger.info("... Connecting Louise to the server")
 
+    services.logger.info("... Connecting the bot to the server")
     await Bot.initialize()
-
     services.logger.info("✓ Successfully connected Louise!")
 
     services.logger.info("... Caching required data")
     await tasks.run_cache_task()
     services.logger.info("✓ Finished caching everything needed!")
+
     services.logger.info("... Starting background tasks")
-
     asyncio.create_task(tasks.run_all_tasks())
-
     services.logger.info("✓ Successfully started all background tasks")
+
     services.logger.info("Finished up connecting to everything!")
 
 
 async def not_found(req: Request, exc: HTTPException) -> Response:
-    services.logger.critical(f"[{req.method}] {req.url._url[8:]} not found")
+    services.logger.debug(f"[{req.method}] {req.url._url[8:]} not found")
     return Response(content=exc.detail.encode(), status_code=404)
 
 

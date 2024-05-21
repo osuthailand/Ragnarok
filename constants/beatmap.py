@@ -12,8 +12,18 @@ class Approved(IntEnum):
     QUALIFIED = 4
     LOVED = 5
 
-    HAS_LEADERBOARD = RANKED | APPROVED | QUALIFIED | LOVED
-    AWARDS_PP = RANKED | APPROVED
+    @property
+    def has_leaderboard(self) -> bool:
+        return self.value in (
+            self.RANKED,
+            self.APPROVED,
+            self.QUALIFIED,
+            self.LOVED
+        )
+    
+    @property
+    def awards_pp(self) -> bool:
+        return self.value in (self.RANKED, self.APPROVED)
 
     @property
     def to_osu(self) -> int:

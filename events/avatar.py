@@ -8,6 +8,7 @@ from starlette.routing import Router
 avatar = Router()
 a_path = ".data/avatars/"
 
+# TODO: make nginx handle this
 
 @avatar.route("/{uid}")
 async def handle(req: Request) -> FileResponse:

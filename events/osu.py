@@ -185,7 +185,7 @@ async def get_scores(req: Request, p: Player) -> Response:
         return Response(content=b"-1|true")
 
     # don't cache maps that doesn't have leaderboard
-    if not b.approved & Approved.HAS_LEADERBOARD:
+    if not b.approved.has_leaderboard:
         services.beatmaps.remove(b.map_md5)
 
         return Response(content=f"{b.approved.to_osu}|false".encode())
@@ -320,7 +320,7 @@ async def score_submission(req: Request) -> Response:
     )
 
     if not s or not s.player or not s.map or s.player.is_restricted:
-        return Response(content=b"error: no")
+        return Response(content=b"error: beatmap")
 
     if not s.player.privileges & Privileges.VERIFIED:
         return Response(content=b"error: verify")
@@ -385,7 +385,7 @@ async def score_submission(req: Request) -> Response:
     )
 
     # calculate new stats
-    if not s.map.approved & Approved.HAS_LEADERBOARD:
+    if not s.map.approved.has_leaderboard:
         return Response(content=b"error: no")
 
     stats.playcount += 1
@@ -404,7 +404,7 @@ async def score_submission(req: Request) -> Response:
             "SELECT s.pp, s.accuracy, s.awards_pp FROM scores s "
             "WHERE s.user_id = %s AND s.mode = %s "
             "AND s.status = 3 AND s.gamemode = %s "
-            "ORDER BY s.pp DESC LIMIT 100",
+            "AND s.awards_pp = 1 ORDER BY s.pp DESC LIMIT 100",
             (stats.id, s.mode.value, s.gamemode.value),
         )
 
@@ -414,9 +414,8 @@ async def score_submission(req: Request) -> Response:
         stats.accuracy *= 100 / (20 * (1 - 0.95 ** len(scores)))
         stats.accuracy /= 100
 
-        if s.awards_pp:
-            all_awarded_pp_scores = [score for score in scores if score[2]]
-
+        if s.map.approved.awards_pp:
+            all_awarded_pp_scores = [score for score in scores if score[2] == 1]
             weighted = np.sum(
                 [
                     score[0] * 0.95 ** (place)
@@ -425,6 +424,8 @@ async def score_submission(req: Request) -> Response:
             ) # type: ignore
             weighted += 416.6667 * (1 - 0.9994 ** len(all_awarded_pp_scores))
             stats.pp = math.ceil(weighted)
+
+            s.gained_pp = stats.pp - prev_stats.pp
 
             stats.rank = await stats.update_rank(s.gamemode, s.mode)
 
@@ -502,7 +503,7 @@ async def score_submission(req: Request) -> Response:
     ret: list = []
     if s.gamemode != Gamemode.VANILLA and not stats.using_rina:
         return Response(content=b"error: no")
-
+    
     ret.append(
         "|".join(
             (
@@ -798,7 +799,7 @@ async def osu_search_set(req: Request, p: Player) -> Response:
 
     return Response(
         content=f"{bmap.set_id}.osz|{bmap.artist}|{bmap.title}|"
-        f"{bmap.creator}|{bmap.approved}|{bmap.rating}|"
+        f"{bmap.creator}|{bmap.approved.to_osu}|{bmap.rating}|"
         f"{bmap.latest_update}|{bmap.set_id}|"
         "0|0|0|0|0".encode()
     )

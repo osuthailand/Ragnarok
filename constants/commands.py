@@ -1082,19 +1082,6 @@ async def system(ctx: Context) -> str | None:
             return "Argument is invalid."
 
 
-# group commands
-# @register_command("group", hidden=True, required_perms=Privileges.DEV)
-# async def creategroup(ctx: Context) -> str | None:
-#     if len(ctx.args) != 1:
-#         return "Usage: !group <name>"
-
-#     if services.channels.get(name := ctx.args[0]):
-#         return "Group name already created (fix)"
-
-#     await Group.create(ctx.author, name)
-
-#     return f"Created group `{name}`"
-
 @register_command("forceerror", hidden=True, required_perms=Privileges.DEV)
 async def force_error(ctx: Context) -> str | None:
     raise Exception("forced error...")

@@ -766,7 +766,7 @@ async def kick_user(ctx: Context) -> str | None:
             if (p == ctx.author) or p.bot:
                 continue
 
-            p.logout()
+            await p.logout()
 
         return "Kicked every. single. user online."
 
@@ -776,7 +776,7 @@ async def kick_user(ctx: Context) -> str | None:
     if t.bot:
         return "You can't kick me from the server!"
 
-    t.logout()
+    await t.logout()
     t.enqueue(writer.notification("You've been kicked!"))
 
     return f"Successfully kicked {t.username}"

@@ -1,5 +1,5 @@
 from enum import IntEnum
-from typing import AnyStr, Callable, Iterator
+from typing import Callable, Iterator
 from constants.packets import BanchoPackets
 from objects.score import ScoreFrame
 from constants.playmode import Mode

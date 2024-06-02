@@ -1,5 +1,3 @@
-from base64 import b64decode
-
 from dataclasses import dataclass
 from enum import IntEnum, unique
 import zipfile

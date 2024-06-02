@@ -1,4 +1,4 @@
-from typing import Any, Iterator
+from typing import Iterator
 
 from objects import services
 from objects.bot import Bot

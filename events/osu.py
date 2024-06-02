@@ -432,10 +432,9 @@ async def score_submission(req: Request) -> Response:
         await stats.update_stats(s)
         services.players.enqueue(writer.update_stats(stats))
 
-        # if the player got a position on
-        # the leaderboard lower than or equal to 10
-        # announce it
-        if s.position <= 10 and not stats.is_restricted:
+        # if the player got first place 
+        # on the map announce it
+        if s.position == 1 and not stats.is_restricted:
             chan = services.channels.get("#announce")
             assert chan is not None
 
@@ -478,8 +477,7 @@ async def score_submission(req: Request) -> Response:
                 stats.achievements.append(user_achievement)
                 _achievements.append(ach)
         except:
-            # TODO: fix the failed conditions
-            services.logger.error(f"failed to eval condition: {ach.condition}")
+            # usual "failed" conditions, if because the Player.last_score is none
             continue
 
 

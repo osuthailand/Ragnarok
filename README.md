@@ -1,4 +1,4 @@
-Ragnarok is both a bancho and /web/ server, written in python3.11!
+Ragnarok is both a bancho and /web/ server, written in python3.12!
 
 Ragnarok will provide more stablibilty:tm: and way faster performance than Ripple's bancho emulator (Second login takes about 4-5ms).
 

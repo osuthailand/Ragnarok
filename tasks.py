@@ -42,7 +42,7 @@ async def removed_expired_tokens() -> None:
             and not player.bot
             and player.status != bStatus.AFK
         ):
-            player.logout()
+            await player.logout()
             services.logger.info(
                 f"{player.username} has been logged out, due to loss of connection."
             )

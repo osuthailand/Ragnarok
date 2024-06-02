@@ -152,7 +152,7 @@ class Player:
         """``shout()`` alerts the player."""
         self.enqueue(writer.notification(text))
 
-    def logout(self) -> None:
+    async def logout(self) -> None:
         """``logout()`` logs the player out."""
         if self.channels:
             while self.channels:
@@ -169,6 +169,8 @@ class Player:
         for player in services.players:
             if player != self:
                 player.enqueue(writer.logout(self.id))
+
+        await services.redis.delete(f"ragnarok:session:{self.id}")
 
     def add_spectator(self, p: "Player") -> None:
         """``add_spectator()`` makes player `p` spectate the player"""

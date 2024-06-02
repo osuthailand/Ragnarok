@@ -14,7 +14,6 @@ from objects.collections import Tokens, Channels, Matches, Beatmaps
 from events.bancho import bancho
 from events.osu import osu
 from events.avatar import avatar
-from events.api import api
 
 from events import map  # don't remove
 
@@ -102,7 +101,6 @@ app = Starlette(
         Host(f"c4.{services.domain}", bancho),
         Host(f"osu.{services.domain}", osu),
         Host(f"a.{services.domain}", avatar),
-        Host(f"api.{services.domain}", api),
     ],
     on_startup=[startup],
     exception_handlers={404: not_found},  # type: ignore

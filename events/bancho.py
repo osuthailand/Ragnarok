@@ -80,7 +80,7 @@ async def handle_bancho(req: Request) -> Response:
         body = await req.body()
     except ClientDisconnect:
         services.logger.info(f"{player.username} logged out.")
-        player.logout()
+        await player.logout()
 
         return Response(content=player.dequeue())
 
@@ -286,6 +286,19 @@ async def login(req: Request) -> Response:
         await p.save_location()
 
     asyncio.create_task(p.check_loc())
+    
+    # add user session data to redis
+    await services.redis.hset(f"ragnarok:session:{p.id}", mapping={
+        "token": p.token,
+        "session_start": time.time(),
+        ###
+        "gamemode": p.gamemode.name,
+        "mode": p.play_mode.name,
+        ###
+        "status": p.status.name,
+        "status_text": p.status_text,
+        "beatmap_id": p.beatmap_id
+    })
 
     data += writer.user_id(p.id)
     data += writer.user_privileges(p.privileges)
@@ -350,6 +363,15 @@ async def change_action(p: Player, sr: Reader) -> None:
     p.status_text = f"{status_text.strip()} on {p.gamemode.name.lower()}"
 
     asyncio.create_task(p.update_stats_cache())
+
+    await services.redis.hset(f"ragnarok:session:{p.id}", mapping={
+        "gamemode": p.gamemode.name,
+        "mode": p.play_mode.name,
+        ###
+        "status": p.status.name,
+        "status_text": p.status_text,
+        "beatmap_id": p.beatmap_id
+    })
 
     if not p.is_restricted:
         services.players.enqueue(writer.update_stats(p))
@@ -440,7 +462,7 @@ async def logout(p: Player, sr: Reader) -> None:
 
     services.logger.info(f"{p.username} logged out.")
 
-    p.logout()
+    await p.logout()
 
 
 # id: 3

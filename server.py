@@ -13,7 +13,6 @@ from objects.collections import Tokens, Channels, Matches, Beatmaps
 # routers
 from events.bancho import bancho
 from events.osu import osu
-from events.avatar import avatar
 
 from events import map  # don't remove
 
@@ -30,7 +29,6 @@ import tasks
 
 
 REQUIRED_DIRECTORIES = (
-    ".data/avatars",
     ".data/replays",
     ".data/beatmaps",
     ".data/ss",
@@ -100,7 +98,6 @@ app = Starlette(
         Host(f"c.{services.domain}", bancho),
         Host(f"c4.{services.domain}", bancho),
         Host(f"osu.{services.domain}", osu),
-        Host(f"a.{services.domain}", avatar),
     ],
     on_startup=[startup],
     exception_handlers={404: not_found},  # type: ignore

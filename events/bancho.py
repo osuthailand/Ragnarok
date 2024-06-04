@@ -26,6 +26,7 @@ from packets.reader import Reader, Packet
 from constants.packets import BanchoPackets
 from constants.player import bStatus, Privileges
 from starlette.requests import Request, ClientDisconnect
+from utils.general import ORJSONResponse
 
 from tasks import cache_allowed_osu_builds
 
@@ -47,11 +48,15 @@ IGNORED_PACKETS = (BanchoPackets.OSU_PING, BanchoPackets.OSU_RECEIVE_UPDATES, Ba
 @bancho.route("/", methods=["POST", "GET"])
 async def handle_bancho(req: Request) -> Response:
     if req.method == "GET":
-        msg = services.title_card
         online_players = len(services.players)
-        msg += f"\ncurrently {online_players} players online"
+        uptime = time.time() - services.startup
+        registered_players = await services.sql.fetch("SELECT COUNT(*) AS count FROM users")
 
-        return Response(content=msg.encode())
+        return ORJSONResponse(content={
+            "uptime": uptime,
+            "online_players": online_players,
+            "registered_players": registered_players["count"]
+        })
 
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
         return Response(content=b"no")

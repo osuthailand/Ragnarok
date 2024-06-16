@@ -330,6 +330,13 @@ async def score_submission(req: Request) -> Response:
 
     passed = s.status >= SubmitStatus.PASSED
 
+    # get current first place holder, if any
+    cur_fp = await services.sql.fetch(
+        "SELECT user_id FROM scores WHERE map_md5 = %s "
+        "AND mode = %s AND gamemode = %s ORDER BY pp DESC LIMIT 1",
+        (s.map.map_md5, s.mode, s.gamemode)
+    )
+
     s.playtime = int(form["st" if passed else "ft"]) // 1000  # milliseconds
     s.id = await s.save_to_db()
     s.map.plays += 1
@@ -449,6 +456,23 @@ async def score_submission(req: Request) -> Response:
                     s.map.embed} ({s.mode.to_string()}) {gamemode}",
                 sender=services.bot,
             )
+
+            # announce that the previous first place holder
+            # lost their rank 1 on this map in their recent activities
+            if cur_fp and cur_fp["user_id"] != s.player.id:
+                await services.sql.execute(
+                    "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
+                    "VALUES (%s, %s, %s, %s, %s)", 
+                    (cur_fp["user_id"], "lost rank #1 on", s.map.map_md5, s.mode, s.gamemode)
+                )
+
+            # put it into the new first place holders recent activities.
+            await services.sql.execute(
+                "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
+                    "VALUES (%s, %s, %s, %s, %s)", 
+                    (s.player.id, "achieved rank #1 on", s.map.map_md5, s.mode, s.gamemode)
+            )
+
 
     # TODO: map difficulty changing mods 
 

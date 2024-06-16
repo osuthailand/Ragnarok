@@ -332,8 +332,9 @@ async def score_submission(req: Request) -> Response:
 
     # get current first place holder, if any
     cur_fp = await services.sql.fetch(
-        "SELECT user_id FROM scores WHERE map_md5 = %s "
-        "AND mode = %s AND gamemode = %s ORDER BY pp DESC LIMIT 1",
+        "SELECT s.user_id FROM scores s INNER JOIN users u ON u.id = s.user_id "
+        "WHERE s.map_md5 = %s AND s.mode = %s AND s.gamemode = %s AND u.privileges & 4 "
+        "ORDER BY pp DESC LIMIT 1",
         (s.map.map_md5, s.mode, s.gamemode)
     )
 

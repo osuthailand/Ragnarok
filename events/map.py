@@ -42,7 +42,7 @@ async def get_last_id(req: Request, p: Player) -> Response:
 
     BASE_ID_INCREMENT = 100_000_000
 
-    if p.username not in ("Aoba", "real"):
+    if p.id not in (1000, 1106):
         return Response(content=b"6\nNo permission to upload (yet)")
 
     set_id = int(req.query_params["s"])

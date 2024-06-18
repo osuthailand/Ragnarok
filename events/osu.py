@@ -250,7 +250,7 @@ async def get_scores(req: Request, p: Player) -> Response:
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
             f"WHERE s.{p.gamemode.score_order} > {personal_best['score']} "
-            "AND s.gamemode = %s AND b.map_md5 = %s  "
+            "AND s.gamemode = %s AND s.map_md5 = %s "
             "AND u.privileges & 4 AND s.status = 3 "
             "AND s.mode = %s",
             (p.gamemode.value, b.map_md5, mode),
@@ -633,12 +633,36 @@ async def score_submission(req: Request) -> Response:
 @osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
 async def get_replay(req: Request, p: Player) -> Response:
-    if not os.path.isfile(path := f".data/replays/{req.query_params['c']}.osr"):
+    score_id = req.query_params["c"]
+
+    if not os.path.isfile(path := f".data/replays/{score_id}.osr"):
         services.logger.info(
-            f"Replay ID {req.query_params['c']
-                         } cannot be loaded! (File not found?)"
+            f"Replay ID {score_id} cannot be loaded! (File not found?)"
         )
         return Response(content=b"")
+    
+    score_info = await services.sql.fetch(
+        "SELECT user_id, mode, gamemode FROM scores WHERE id = %s",
+        (score_id)
+    )
+
+    if score_info["user_id"] != p.id:
+        await services.sql.execute(
+            "INSERT INTO replay_views (user_id, score_id) VALUES (%s, %s)",
+            (p.id, score_id)
+        )
+
+        gamemode = Gamemode(score_info["gamemode"])
+        play_mode = Mode(score_info["mode"])
+
+        # since the Mode.to_db() function returns the 
+        # field with a new name we have to remove it.
+        to_db = play_mode.to_db("replays_watched_by_others").split(" as")[0]
+
+        await services.sql.execute(
+            f"UPDATE {gamemode.table} SET {to_db} = {to_db} + 1 "
+            "WHERE id = %s", (score_info["user_id"])
+        )
 
     return FileResponse(path=path)
 

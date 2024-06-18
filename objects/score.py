@@ -258,7 +258,7 @@ class Score:
                     "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
                     "INNER JOIN users u ON u.id = s.user_id "
                     "WHERE s.score > %s AND s.gamemode = %s "
-                    "AND b.map_md5 = %s AND u.privileges & 4 "
+                    "AND s.map_md5 = %s AND u.privileges & 4 "
                     "AND s.status = 3 AND s.mode = %s "
                     "ORDER BY s.score DESC, s.submitted DESC",
                     (s.pb.score, s.pb.gamemode, s.map.map_md5, s.pb.mode.value),
@@ -298,7 +298,7 @@ class Score:
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
             "WHERE s.score > %s AND s.gamemode = %s "
-            "AND b.map_md5 = %s AND u.privileges & 4 "
+            "AND s.map_md5 = %s AND u.privileges & 4 "
             "AND s.status = 3 AND s.mode = %s "
             "ORDER BY s.score DESC, s.submitted DESC",
             (self.score, self.gamemode, self.map.map_md5, self.mode.value),

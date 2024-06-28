@@ -1,9 +1,12 @@
 import copy
 import os
-from typing import Union
 import aiohttp
-from constants.mods import Mods
+import settings
+
+from typing import Union
 from objects import services
+
+from constants.mods import Mods
 from constants.playmode import Mode
 from constants.beatmap import Approved
 
@@ -137,7 +140,7 @@ class Beatmap:
         b.mode = ret["mode"]
         b.bpm = ret["bpm"]
 
-        if services.config.fun.rank_all_maps:
+        if settings.RANK_ALL_MAPS:
             b.approved = Approved.RANKED
         else:
             b.approved = Approved(ret["approved"])
@@ -255,7 +258,7 @@ class Beatmap:
         )  # fix taiko and mania "null" combo
 
         # for some reason, the api shows approved as one behind?
-        if services.config.fun.rank_all_maps:
+        if settings.RANK_ALL_MAPS:
             b.approved = Approved.RANKED
         else:
             if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:

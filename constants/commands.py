@@ -7,6 +7,8 @@ import uuid
 import time
 import random
 import asyncio
+import settings
+
 from events import osu
 from objects.achievement import UserAchievement
 from objects.beatmap import Beatmap
@@ -651,7 +653,11 @@ async def change_size(ctx: Context) -> str | None:
 @ensure_match(host=False)
 async def get_beatmap(ctx: Context) -> str | None:
     m = ctx.author.match
-    mirrors = services.config.api.mirrors
+    mirrors = {
+        "chimu": settings.MIRROR_CHIMU,
+        "nerinyan": settings.MIRROR_NERINYAN,
+        "katsu": settings.MIRROR_KATSU
+    }
 
     if not ctx.args:
         return f"Wrong usage: !mp get <{'|'.join(mirrors.keys())}>"

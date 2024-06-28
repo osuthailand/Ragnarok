@@ -24,13 +24,13 @@ After that you can install the requirements.
 $ pip install -r requirements.txt
 ```
 
-Once that's finished, you can go ahead and make a copy of the config.sample.py, by doing:
+Once that's finished, you can go ahead and make a copy of the .env.example, by doing:
 ```
-$ mv config.sample.toml config.toml
-$ nano config.toml
+$ mv .env.example .env
+$ nano .env
 ```
 
-Then you can go ahead and change the needed stuff in there. *MARKED WITH "CHANGE THIS"*
+Then you can go ahead and add or change the needed stuff in there.
 
 And the last thing you have to do, is running the server.
 ```

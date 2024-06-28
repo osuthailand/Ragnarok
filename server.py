@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uvicorn
+import settings
 
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -44,9 +45,7 @@ async def startup() -> None:
     services.matches = Matches()
     services.beatmaps = Beatmaps()
 
-    services.logger.setLevel(
-        logging.DEBUG if services.config.server.debug else logging.INFO
-    )
+    services.logger.setLevel(logging.DEBUG if settings.SERVER_DEBUG else logging.INFO)
 
     for _path in REQUIRED_DIRECTORIES:
         if not os.path.exists(_path):
@@ -62,13 +61,12 @@ async def startup() -> None:
 
     services.logger.info("... Connecting to the database")
     services.sql = Database()
-    await services.sql.connect(services.config.database)
+    await services.sql.connect()
     services.logger.info("✓ Connected to the database!")
 
     services.logger.info("... Initalizing redis")
-    redisconf = services.config.redis
     services.redis = aioredis.from_url(
-        f"redis://{redisconf.username}:{redisconf.password}@{redisconf.host}:{redisconf.port}",
+        f"redis://{settings.REDIS_USERNAME}:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}",
         decode_responses=True,
     )
     await services.redis.initialize()

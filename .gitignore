@@ -1,7 +1,7 @@
 **/__pycache__
 **/build
 
-/config.toml
+.env
 /.data
 
 Pipfile

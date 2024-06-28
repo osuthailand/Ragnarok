@@ -68,7 +68,8 @@ async def startup() -> None:
     services.logger.info("... Initalizing redis")
     redisconf = services.config.redis
     services.redis = aioredis.from_url(
-        f"redis://{redisconf.username}:{redisconf.password}@{redisconf.host}:{redisconf.port}"
+        f"redis://{redisconf.username}:{redisconf.password}@{redisconf.host}:{redisconf.port}",
+        decode_responses=True,
     )
     await services.redis.initialize()
     services.logger.info("✓ Successfully initalized redis")

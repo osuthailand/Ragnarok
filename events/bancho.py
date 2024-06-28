@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import IntEnum
 import os
 import time
@@ -6,7 +7,7 @@ import bcrypt
 import struct
 import asyncio
 import math
-
+import timeago
 
 from packets import writer
 from typing import Callable
@@ -51,11 +52,15 @@ async def handle_bancho(req: Request) -> Response:
         online_players = len(services.players)
         uptime = time.time() - services.startup
         registered_players = await services.sql.fetch("SELECT COUNT(*) AS count FROM users")
+        scores_amount = await services.redis.get("ragnarok:total_scores")
+        accumulated_pp = await services.redis.get("ragnarok:total_pp")
 
         return ORJSONResponse(content={
             "uptime": uptime,
             "online_players": online_players,
-            "registered_players": registered_players["count"]
+            "registered_players": registered_players,
+            "total_scores": int(scores_amount),
+            "accumulated_pp": float(accumulated_pp),
         })
 
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
@@ -187,7 +192,12 @@ async def login(req: Request) -> Response:
 
     if _p := services.players.get(user_info["username"]):
         # user is already online? sus
-        return failed_login(LoginResponse.INCORRECT_LOGIN, msg="A user tried to sign in to an already connected account.", extra=writer.notification(ALREADY_ONLINE))
+        timeago_format = datetime.fromtimestamp(_p.last_update)
+        return failed_login(
+            LoginResponse.INCORRECT_LOGIN, 
+            msg=f"A user tried to sign in to an already connected account. (last update for session was {timeago.format(timeago_format)})", 
+            extra=writer.notification(ALREADY_ONLINE)
+        )
 
     # check if user is restricted
     if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:

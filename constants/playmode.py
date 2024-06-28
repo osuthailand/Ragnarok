@@ -66,9 +66,7 @@ class Gamemode(IntEnum):
         return (
             "stats"
             if self == self.VANILLA
-            else "stats_rx"
-            if self == self.RELAX
-            else "error"
+            else "stats_rx" if self == self.RELAX else "error"
         )
 
     @property

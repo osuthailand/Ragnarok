@@ -91,7 +91,6 @@ class Score:
         self.pb: "Score" = None  # type: ignore
 
         self.awards_pp: bool = False
-        self.gained_pp: bool = False
 
     @property
     def web_format(self) -> str:
@@ -148,7 +147,7 @@ class Score:
         score_enc: bytes,
         iv: bytes,
         key: str,
-        exited: int
+        exited: int,
         # ) -> "Score" | None:
     ) -> Optional["Score"]:
         score_latin = b64decode(score_enc).decode("latin_1")
@@ -178,7 +177,7 @@ class Score:
         s.count_50 = int(data[5])
         s.count_geki = int(data[6])
         s.count_katu = int(data[7])
-        s.count_miss = int(data[8]) 
+        s.count_miss = int(data[8])
         s.score = int(data[9])
         s.max_combo = int(data[10])
 
@@ -207,11 +206,7 @@ class Score:
             s.status = SubmitStatus.QUIT
 
         mods = int(data[13])
-        s.gamemode = (
-            Gamemode.RELAX
-            if mods & Mods.RELAX
-            else Gamemode.VANILLA
-        )
+        s.gamemode = Gamemode.RELAX if mods & Mods.RELAX else Gamemode.VANILLA
 
         if passed:
             await s.calculate_position()
@@ -230,7 +225,7 @@ class Score:
                     n_geki=s.count_geki,
                     n_katu=s.count_katu,
                     combo=s.max_combo,
-                    mods=s.mods
+                    mods=s.mods,
                 ).calculate(bmap)
 
                 s.pp = perf.pp
@@ -241,29 +236,39 @@ class Score:
                 s.awards_pp = s.map.approved.awards_pp
 
             # find our previous best score on the map
-            if prev_best := await services.sql.fetch(
+            if prev_best := await services.database.fetch_one(
                 "SELECT id, user_id, map_md5, score, pp, count_300, count_100, "
                 "count_50, count_geki, count_katu, count_miss, "
                 "max_combo, accuracy, perfect, rank, mods, status, "
                 "playtime, mode, submitted, gamemode FROM scores "
-                "WHERE user_id = %s AND gamemode = %s AND map_md5 = %s "
-                "AND mode = %s AND status = 3 LIMIT 1",
-                (s.player.id, s.gamemode, s.map.map_md5, s.mode.value),
+                "WHERE user_id = :user_id AND gamemode = :gamemode "
+                "AND map_md5 = :map_md5 AND mode = :mode AND status = 3",
+                {
+                    "user_id": s.player.id,
+                    "gamemode": s.gamemode,
+                    "map_md5": s.map.map_md5,
+                    "mode": s.mode.value,
+                },
             ):
-                s.pb = await Score.set_data_from_sql(prev_best)
+                s.pb = await Score.set_data_from_sql(dict(prev_best))
 
                 # identical to `calculate_position(self)`
-                position = await services.sql.fetch(
-                    "SELECT COUNT(*) AS rank FROM scores s "
+                position = await services.database.fetch_val(
+                    "SELECT COUNT(*) FROM scores s "
                     "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
                     "INNER JOIN users u ON u.id = s.user_id "
-                    "WHERE s.score > %s AND s.gamemode = %s "
-                    "AND s.map_md5 = %s AND u.privileges & 4 "
-                    "AND s.status = 3 AND s.mode = %s "
+                    "WHERE s.score > :pb_score AND s.gamemode = :gamemode "
+                    "AND s.map_md5 = :map_md5 AND u.privileges & 4 "
+                    "AND s.status = 3 AND s.mode = :mode "
                     "ORDER BY s.score DESC, s.submitted DESC",
-                    (s.pb.score, s.pb.gamemode, s.map.map_md5, s.pb.mode.value),
+                    {
+                        "pb_score": s.pb.score,
+                        "gamemode": s.pb.gamemode.value,
+                        "map_md5": s.map.map_md5,
+                        "mode": s.pb.mode.value,
+                    },
                 )
-                s.pb.position = position["rank"] + 1
+                s.pb.position = position + 1
 
                 # if we found a personal best score
                 # that has more score on the map,
@@ -276,10 +281,15 @@ class Score:
                     s.status = SubmitStatus.BEST
                     s.pb.status = SubmitStatus.PASSED
 
-                    await services.sql.execute(
-                        "UPDATE scores SET status = 2, awards_pp = 0 WHERE user_id = %s AND gamemode = %s "
-                        "AND map_md5 = %s AND mode = %s AND status = 3",
-                        (s.player.id, s.gamemode, s.map.map_md5, s.mode.value),
+                    await services.database.execute(
+                        "UPDATE scores SET status = 2, awards_pp = 0 WHERE user_id = :user_id "
+                        "AND gamemode = :gamemode AND map_md5 = :map_md5 AND mode = :mode AND status = 3",
+                        {
+                            "user_id": s.player.id,
+                            "gamemode": s.gamemode,
+                            "map_md5": s.map.map_md5,
+                            "mode": s.mode.value,
+                        },
                     )
                 else:
                     s.status = SubmitStatus.PASSED
@@ -293,49 +303,53 @@ class Score:
         return s
 
     async def calculate_position(self) -> None:
-        ret = await services.sql.fetch(
-            "SELECT COUNT(*) AS rank FROM scores s "
+        ret = await services.database.fetch_val(
+            "SELECT COUNT(*) FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
-            "WHERE s.score > %s AND s.gamemode = %s "
-            "AND s.map_md5 = %s AND u.privileges & 4 "
-            "AND s.status = 3 AND s.mode = %s "
+            "WHERE s.score > :score AND s.gamemode = :gamemode "
+            "AND s.map_md5 = :map_md5 AND u.privileges & 4 "
+            "AND s.status = 3 AND s.mode = :mode "
             "ORDER BY s.score DESC, s.submitted DESC",
-            (self.score, self.gamemode, self.map.map_md5, self.mode.value),
+            {
+                "score": self.score,
+                "gamemode": self.gamemode.value,
+                "map_md5": self.map.map_md5,
+                "mode": self.mode.value,
+            },
         )
 
-        self.position = ret["rank"] + 1
+        self.position = ret + 1
 
     async def save_to_db(self) -> int:
-        return await services.sql.execute(
-            "INSERT INTO scores (map_md5, user_id, score, pp, "
-            "count_300, count_100, count_50, count_geki, "
-            "count_katu, count_miss, max_combo, accuracy, "
-            "perfect, rank, mods, status, playtime, "
-            " mode, submitted, gamemode, awards_pp) VALUES "
-            "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                self.map.map_md5,
-                self.player.id,
-                self.score,
-                self.pp,
-                self.count_300,
-                self.count_100,
-                self.count_50,
-                self.count_geki,
-                self.count_katu,
-                self.count_miss,
-                self.max_combo,
-                self.accuracy,
-                self.perfect,
-                self.rank,
-                self.mods.value,
-                self.status.value,
-                self.playtime,
-                self.mode.value,
-                self.submitted,
-                self.gamemode.value,
-                self.awards_pp,
-            ),
+        return await services.database.execute(
+            "INSERT INTO scores (map_md5, user_id, score, pp, count_300, count_100, count_50, count_geki, "
+            "count_katu, count_miss, max_combo, accuracy, perfect, rank, mods, status, playtime, mode, submitted, "
+            "gamemode, awards_pp) "
+            "VALUES (:map_md5, :user_id, :score, :pp, :count_300, :count_100, :count_50, :count_geki, "
+            ":count_katu, :count_miss, :max_combo, :accuracy, :perfect, :rank, :mods, :status, :playtime, "
+            ":mode, :submitted, :gamemode, :awards_pp)",
+            {
+                "map_md5": self.map.map_md5,
+                "user_id": self.player.id,
+                "score": self.score,
+                "pp": self.pp,
+                "count_300": self.count_300,
+                "count_100": self.count_100,
+                "count_50": self.count_50,
+                "count_geki": self.count_geki,
+                "count_katu": self.count_katu,
+                "count_miss": self.count_miss,
+                "max_combo": self.max_combo,
+                "accuracy": self.accuracy,
+                "perfect": self.perfect,
+                "rank": self.rank,
+                "mods": self.mods.value,
+                "status": self.status.value,
+                "playtime": self.playtime,
+                "mode": self.mode.value,
+                "submitted": self.submitted,
+                "gamemode": self.gamemode.value,
+                "awards_pp": self.awards_pp,
+            },
         )

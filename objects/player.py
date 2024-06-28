@@ -8,7 +8,7 @@ import aiohttp
 from copy import copy
 from packets import writer
 from objects import services
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from constants.mods import Mods
 from objects.match import Match
@@ -30,6 +30,7 @@ class LoggingType(IntEnum):
     RECALCULATIONS = 1
     RESTRICTIONS = 2
     # add more???
+
 
 class Player:
     def __init__(
@@ -178,8 +179,8 @@ class Player:
 
         # create if there's no channel
         if not spec_channel:
-            spec_channel = Channel(**
-                {
+            spec_channel = Channel(
+                **{
                     "name": spec_name,
                     "display_name": "#spectator",
                     "description": f"spectator chat for {self.username}",
@@ -190,7 +191,7 @@ class Player:
 
             services.channels.add(spec_channel)
             spec_channel.connect(self)
-        
+
         spec_channel.connect(p)
 
         player_joined = writer.fellow_spectator_joined(p.id)
@@ -198,7 +199,7 @@ class Player:
         for spectator in self.spectators:
             spectator.enqueue(player_joined)
             p.enqueue(writer.fellow_spectator_joined(spectator.id))
-        
+
         self.spectators.append(p)
         p.spectating = self
 
@@ -251,13 +252,15 @@ class Player:
             slot.host = True
 
         if not self.match.chat:
-            mc = Channel(**{
-                "raw": f"#multi_{self.match.match_id}",
-                "name": "#multiplayer",
-                "description": self.match.match_name,
-                "public": False,
-                "ephemeral": True,
-            })
+            mc = Channel(
+                **{
+                    "raw": f"#multi_{self.match.match_id}",
+                    "name": "#multiplayer",
+                    "description": self.match.match_name,
+                    "public": False,
+                    "ephemeral": True,
+                }
+            )
             services.channels.add(mc)
             self.match.chat = mc
 
@@ -315,10 +318,11 @@ class Player:
         )
 
     async def get_clan_tag(self) -> None:
-        clan_tag = await services.sql.fetch(
-            "SELECT c.tag FROM clans c INNER JOIN users u ON c.id = u.clan_id "
-            "WHERE u.id = %s",
-            (self.id)
+        clan_tag = await services.database.fetch_one(
+            "SELECT c.tag FROM clans c "
+            "INNER JOIN users u ON c.id = u.clan_id "
+            "WHERE u.id = :user_id",
+            {"user_id": self.id},
         )
 
         if not clan_tag:
@@ -328,12 +332,16 @@ class Player:
         self.username_with_tag = f"[{clan_tag["tag"]}] {self.username}"
 
     async def get_achievements(self) -> None:
-        async for achievement in services.sql.iterall(
+        achievements = await services.database.fetch_all(
             "SELECT achievement_id, mode, gamemode FROM users_achievements "
-            "WHERE user_id = %s",
-            (self.id),
-        ):
-            if not (ach := services.get_achievement_by_id(achievement["achievement_id"])):
+            "WHERE user_id = :user_id",
+            {"user_id": self.id},
+        )
+
+        for achievement in achievements:
+            if not (
+                ach := services.get_achievement_by_id(achievement["achievement_id"])
+            ):
                 services.logger.critical(
                     f"user_achievements: Failed to fetch achievements (id: {
                         achievement['achievement_id']})"
@@ -343,17 +351,18 @@ class Player:
             gamemode = Gamemode(achievement["gamemode"])
             mode = Mode(achievement["mode"])
             user_achievement = UserAchievement(
-                **ach.__dict__,
-                gamemode=gamemode,
-                mode=mode
+                **ach.__dict__, gamemode=gamemode, mode=mode
             )
 
             self.achievements.append(user_achievement)
 
     async def get_friends(self) -> None:
-        async for player in services.sql.iterall(
-            "SELECT user_id2 as id FROM friends WHERE user_id1 = %s", (self.id)
-        ):
+        friends = await services.database.fetch_all(
+            "SELECT user_id2 as id FROM friends WHERE user_id1 = :user_id",
+            {"user_id": self.id},
+        )
+
+        for player in friends:
             self.friends.add(player["id"])
 
     async def handle_friend(self, user: int) -> None:
@@ -361,13 +370,13 @@ class Player:
             return  # user isn't online; ignore
 
         # remove friend
-        if await services.sql.fetch(
-            "SELECT 1 FROM friends WHERE user_id1 = %s AND user_id2 = %s",
-            (self.id, user),
+        if await services.database.fetch_one(
+            "SELECT 1 FROM friends WHERE user_id1 = :user_id1 AND user_id2 = :user_id2",
+            {"user_id": self.id, "user_id2": user},
         ):
-            await services.sql.execute(
-                "DELETE FROM friends WHERE user_id1 = %s AND user_id2 = %s",
-                (self.id, user),
+            await services.database.execute(
+                "DELETE FROM friends WHERE user_id1 = :user_id AND user_id2 = :user_id2",
+                {"user_id": self.id, "user_id2": user},
             )
             self.friends.remove(user)
 
@@ -375,8 +384,9 @@ class Player:
             return
 
         # add friend
-        await services.sql.execute(
-            "INSERT INTO friends (user_id1, user_id2) VALUES (%s, %s)", (self.id, user)
+        await services.database.execute(
+            "INSERT INTO friends (user_id1, user_id2) " "VALUES (:user_id1, :user_id2)",
+            {"user_id": self.id, "user_id2": user},
         )
         self.friends.add(user)
 
@@ -389,8 +399,8 @@ class Player:
 
         self.privileges -= Privileges.VERIFIED
 
-        await services.sql.execute(
-            "UPDATE users SET privileges -= 4 WHERE id = %s", (self.id)
+        await services.database.execute(
+            "UPDATE users SET privileges -= 4 WHERE id = :user_id", {"user_id": self.id}
         )
 
         # remove player from leaderboards
@@ -402,8 +412,8 @@ class Player:
 
                 # country rank
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod.value}:{
-                        self.country}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{mod.value}:{self.country}:{mode.value}",
+                    self.id,
                 )
 
         # notify user
@@ -415,47 +425,47 @@ class Player:
         se = ("std", "taiko", "catch", "mania")[s.mode]
         self.get_level()
 
-        await services.sql.execute(
-            f"UPDATE {s.gamemode.table} SET pp_{
-                se} = %s, playcount_{se} = %s, "
-            f"accuracy_{se} = %s, total_score_{se} = %s, "
-            f"ranked_score_{se} = %s, level_{se} = %s WHERE id = %s",
-            (
-                self.pp,
-                self.playcount,
-                round(self.accuracy, 2),
-                self.total_score,
-                self.ranked_score,
-                self.level,
-                self.id,
-            ),
-        )
-
-        await services.sql.execute(
-            f"UPDATE {s.gamemode.table} SET total_hits_{
-                se} = %s, "
-            f"playtime_{se} = playtime_{
-                se} + %s, max_combo_{se} = IF(max_combo_{se}<%s, %s, max_combo_{se}) "
-            "WHERE id = %s",
-            (self.total_hits, s.playtime, s.max_combo, s.max_combo, self.id)
+        await services.database.execute(
+            f"UPDATE {s.gamemode.table} SET pp_{se} = :pp, playcount_{se} = :playcount, "
+            f"accuracy_{se} = :accuracy, total_score_{se} = :total_score, total_hits_{se} = :total_hits, "
+            f"ranked_score_{se} = :ranked_score, level_{se} = :level, playtime_{se} = playtime_{se} + :playtime, "
+            f"max_combo_{se} = IF(max_combo_{se} < :max_combo, :max_combo, max_combo_{se}) WHERE id = :user_id",
+            {
+                "pp": self.pp,
+                "playcount": self.playcount,
+                "accuracy": round(self.accuracy, 2),
+                "total_score": self.total_score,
+                "total_hits": self.total_hits,
+                "ranked_score": self.ranked_score,
+                "level": self.level,
+                "playtime": s.playtime,
+                "max_combo": s.max_combo,
+                "user_id": self.id,
+            },
         )
 
     def get_level(self):
-        # TODO: relax score 
+        # TODO: relax score
         # required score for lvl 100.
         if self.total_score > 26_931_190_828.629:
             # > lvl 100
-            self.level = math.floor((self.total_score - 26_931_190_827 + 9_999_999_999_900) / 99_999_999_999)
+            self.level = math.floor(
+                (self.total_score - 26_931_190_827 + 9_999_999_999_900) / 99_999_999_999
+            )
         else:
             # < 100
             for idx, req_score in enumerate(levels):
                 if req_score < self.total_score < levels[idx + 1]:
                     self.level = idx + 1
 
-
     # used for background tasks
     async def check_loc(self):
-        lon, lat, cc, c = await self.set_location(get=True)
+        location = await self.set_location(get=True)
+
+        if not location:
+            return
+
+        lon, lat, cc, c = location
 
         if lon != self.longitude:
             self.longitude = lon
@@ -474,16 +484,14 @@ class Player:
     async def set_location(self, get: bool = False):
         async with aiohttp.ClientSession() as sess:
             async with sess.get(
-                f"http://ip-api.com/json/{
-                    self.ip}?fields=status,message,countryCode,region,lat,lon"
+                f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"
             ) as resp:
                 if not (ret := await resp.json()):
-                    return  # sus
+                    return
 
                 if ret["status"] == "fail":
                     services.logger.critical(
-                        f"Unable to get {self.username}'s location. Response: {
-                            ret['message']}"
+                        f"Unable to get {self.username}'s location. Response: {ret['message']}"
                     )
                     return
 
@@ -503,33 +511,42 @@ class Player:
                 )
 
     async def save_location(self):
-        await services.sql.execute(
-            "UPDATE users SET lon = %s, lat = %s, country = %s WHERE id = %s",
-            (self.longitude, self.latitude, self.country, self.id),
+        await services.database.execute(
+            "UPDATE users SET lon = :lon, lat = :lat, country = :country WHERE id = :user_id",
+            {
+                "lon": self.longitude,
+                "lat": self.latitude,
+                "country": self.country,
+                "user_id": self.id,
+            },
         )
 
-    async def get_stats(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> dict:
-        ret = await services.sql.fetch(
-            f"SELECT {mode.to_db("ranked_score")}, {
-                mode.to_db("total_score")}, "
-            f"{mode.to_db("accuracy")}, {mode.to_db(
-                "playcount")}, {mode.to_db("pp")}, "
-            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {
-                mode.to_db("max_combo")} "
-            f"FROM {gamemode.table} "
-            "WHERE id = %s",
-            (self.id),
+    async def get_stats(
+        self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
+    ) -> dict[str, Any]:
+        _ret = await services.database.fetch_one(
+            f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
+            f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
+            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
+            f"FROM {gamemode.table} WHERE id = :user_id",
+            {"user_id": self.id},
         )
+
+        assert _ret is not None
+        ret = dict(_ret)
 
         ret["rank"] = await self.get_rank(gamemode, mode)
         ret["country_rank"] = await self.get_country_rank(gamemode, mode)
 
         return ret
 
-    async def get_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
+    async def get_rank(
+        self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
+    ) -> int:
         mod = (
-            "vanilla" if gamemode == Gamemode.VANILLA else
-            "relax" # if gamemode == Gamemode.RELAX
+            "vanilla"
+            if gamemode == Gamemode.VANILLA
+            else "relax"  # if gamemode == Gamemode.RELAX
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{mode}",
@@ -537,10 +554,13 @@ class Player:
         )
         return _rank + 1 if _rank is not None else 0
 
-    async def get_country_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
+    async def get_country_rank(
+        self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
+    ) -> int:
         mod = (
-            "vanilla" if gamemode == Gamemode.VANILLA else
-            "relax" # if gamemode == Gamemode.RELAX
+            "vanilla"
+            if gamemode == Gamemode.VANILLA
+            else "relax"  # if gamemode == Gamemode.RELAX
         )
         _rank: int = await services.redis.zrevrank(
             f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
@@ -548,11 +568,14 @@ class Player:
         )
         return _rank + 1 if _rank is not None else 0
 
-    async def update_rank(self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU) -> int:
+    async def update_rank(
+        self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
+    ) -> int:
         if not self.is_restricted:
             mod = (
-                "vanilla" if gamemode == Gamemode.VANILLA else
-                "relax" # if gamemode == Gamemode.RELAX
+                "vanilla"
+                if gamemode == Gamemode.VANILLA
+                else "relax"  # if gamemode == Gamemode.RELAX
             )
             await services.redis.zadd(
                 f"ragnarok:leaderboard:{mod}:{mode}",
@@ -583,14 +606,14 @@ class Player:
         return True
 
     async def report(self, target: "Player", reason: str) -> None:
-        await services.sql.execute(
-            "INSERT INTO reports (reporter, reported, reason, time) "
-            "VALUES (%s, %s, %s, %s)",
-            (self.id, target.id, reason, int(time.time())),
+        await services.database.execute(
+            "INSERT INTO reports (reporter, reported, reason) "
+            "VALUES (:user_id, :target_id, :reason)",
+            {"user_id": self.id, "target_id": target.id, "reason": reason},
         )
 
     async def log(self, note: str, type: LoggingType = LoggingType.ANY) -> None:
-        await services.sql.execute(
-            "INSERT INTO logs (user_id, note, type, time) VALUES (%s, %s, %s, %s)",
-            (self.id, note, type, int(time.time())),
+        await services.database.execute(
+            "INSERT INTO logs (user_id, note, type) " "VALUES (:user_id, :note, :type)",
+            {"user_id": self.id, "note": note, "type": type},
         )

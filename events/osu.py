@@ -22,7 +22,7 @@ from typing import Callable
 
 from objects.player import Player
 from constants.mods import Mods
-from constants.playmode import Mode # this is being used for achievements condition 
+from constants.playmode import Mode  # this is being used for achievements condition
 from urllib.parse import unquote
 from objects.beatmap import Beatmap
 from starlette.routing import Router
@@ -31,6 +31,7 @@ from starlette.requests import Request
 from constants.player import Privileges
 from objects.score import Score, SubmitStatus
 from starlette.responses import FileResponse, Response, RedirectResponse
+
 
 def check_auth(
     u: str,
@@ -78,18 +79,22 @@ osu = Router()
 @osu.route("/users", methods=["POST"])
 async def registration(req: Request) -> Response:
     form = await req.form()
-    uname = form["user[username]"]
+    username = form["user[username]"]
     email = form["user[user_email]"]
     pwd = form["user[password]"]
 
     error_response = defaultdict(list)
 
-    if await services.sql.fetch("SELECT 1 FROM users WHERE username = %s", [uname]):
+    if await services.database.fetch_one(
+        "SELECT 1 FROM users WHERE username = :username", {"username": username}
+    ):
         error_response["username"].append(
             "A user with that name already exists in our database."
         )
 
-    if await services.sql.fetch("SELECT 1 FROM users WHERE email = %s", [email]):
+    if await services.database.fetch_one(
+        "SELECT 1 FROM users WHERE email = :email", {"email": email}
+    ):
         error_response["user_email"].append(
             "A user with that email already exists in our database."
         )
@@ -113,21 +118,25 @@ async def registration(req: Request) -> Response:
         pw_md5 = hashlib.md5(pwd.encode()).hexdigest().encode()
         pw_bcrypt = bcrypt.hashpw(pw_md5, bcrypt.gensalt())
 
-        id = await services.sql.execute(
-            "INSERT INTO users (id, username, safe_username, passhash, "
+        id = await services.database.execute(
+            "INSERT INTO users (username, safe_username, passhash, "
             "email, privileges, latest_activity_time, registered_time) "
-            "VALUES (NULL, %s, %s, %s, %s, %s, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())",
-            (
-                uname,
-                uname.lower().replace(" ", "_"),
-                pw_bcrypt,
-                email,
-                Privileges.PENDING.value,
-            ),
+            "VALUES (:username, :safe_username, :passhash, :email, :privileges, UNIX_TIMESTAMP(), UNIX_TIMESTAMP())",
+            {
+                "username": username,
+                "safe_username": username.lower().replace(" ", "_"),
+                "passhash": pw_bcrypt,
+                "email": email,
+                "privileges": Privileges.PENDING.value,
+            },
         )
 
-        await services.sql.execute("INSERT INTO stats (id) VALUES (%s)", [id])
-        await services.sql.execute("INSERT INTO stats_rx (id) VALUES (%s)", [id])
+        await services.database.execute(
+            "INSERT INTO stats (id) VALUES (:user_id)", {"user_id": id}
+        )
+        await services.database.execute(
+            "INSERT INTO stats_rx (id) VALUES (:user_id)", {"user_id": id}
+        )
 
     return Response(content=b"ok")
 
@@ -141,8 +150,7 @@ async def save_beatmap_file(id: int) -> None | Response:
             ) as resp:
                 if not await resp.text():
                     services.logger.critical(
-                        f"Couldn't fetch the .osu file of {
-                            id}. Maybe because api rate limit?"
+                        f"Couldn't fetch the .osu file of {id}. Maybe because api rate limit?"
                     )
                     return Response(content=b"")
 
@@ -179,8 +187,7 @@ class LeaderboardType(IntEnum):
 @check_auth("us", "ha")
 async def get_scores(req: Request, p: Player) -> Response:
     hash = req.query_params["c"]
-
-
+    
     if not (b := await services.beatmaps.get(hash)):
         return Response(content=b"-1|true")
 
@@ -194,11 +201,7 @@ async def get_scores(req: Request, p: Player) -> Response:
 
     # switch user to  the respective gamemode based on leaderboard mods.
     prev_gamemode = p.gamemode
-    p.gamemode = (
-        Gamemode.RELAX
-        if mods & Mods.RELAX
-        else Gamemode.VANILLA
-    )
+    p.gamemode = Gamemode.RELAX if mods & Mods.RELAX else Gamemode.VANILLA
 
     # enqueue respective stats if gamemode has changed
     if prev_gamemode != p.gamemode:
@@ -214,63 +217,73 @@ async def get_scores(req: Request, p: Player) -> Response:
         "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         f"CAST(s.{p.gamemode.score_order} as INT) as score, s.submitted, s.count_geki, s.perfect, "
         "s.mods, s.user_id, u.country FROM scores s INNER JOIN users u ON u.id = s.user_id "
-        "LEFT JOIN clans c ON c.id = u.clan_id WHERE s.map_md5 = %s AND "
-        "s.mode = %s AND s.status = 3 AND u.privileges & 4 AND s.gamemode = %s "
+        "LEFT JOIN clans c ON c.id = u.clan_id WHERE s.map_md5 = :map_md5 AND s.mode = :mode "
+        "AND s.status = 3 AND u.privileges & 4 AND s.gamemode = :gamemode "
     )
-    params = [hash, mode, p.gamemode.value]
+    params = {"map_md5": b.map_md5, "mode": mode, "gamemode": p.gamemode.value}
 
     board_type = LeaderboardType(int(req.query_params["v"]))
 
     match board_type:
         case LeaderboardType.MODS:
-            query += f"AND mods = %s "
-            params.append(mods)
+            query += "AND mods = :mods "
+            params["mods"] = mods
         case LeaderboardType.COUNTRY:
-            query += f"AND u.country = '{p.country}' "
+            query += "AND u.country = :country "
+            params["country"] = p.country
         case LeaderboardType.FRIENDS:
-            # this is absolutely so fucking ugly
-            # but i dont know what else works rn
-            friends = f"({', '.join(str(x) for x in (p.friends | {p.id}))})"
-            query += f"AND s.user_id IN {friends} "
+            query += "AND s.user_id IN :friends "
+            params["friends"] = p.friends
 
     query += f"ORDER BY score DESC, s.submitted ASC LIMIT 50"
-    personal_best = await services.sql.fetch(
+    personal_best = await services.database.fetch_one(
         f"SELECT s.id as id_, CAST(s.{p.gamemode.score_order} as INT) as score, "
         "s.max_combo, s.count_50, s.count_100, s.count_300, s.count_miss, s.count_katu, "
         "s.count_geki, s.perfect, s.mods, s.submitted FROM scores s WHERE s.status = 3 "
-        "AND s.map_md5 = %s AND s.gamemode = %s AND s.mode = %s AND s.user_id = %s LIMIT 1",
-        (b.map_md5, p.gamemode.value, mode, p.id),
+        "AND s.map_md5 = :map_md5 AND s.gamemode = :gamemode AND s.mode = :mode "
+        "AND s.user_id = :user_id LIMIT 1",
+        {
+            "map_md5": b.map_md5,
+            "gamemode": p.gamemode.value,
+            "mode": mode,
+            "user_id": p.id,
+        },
     )
 
     if not personal_best:
         ret.append("")
     else:
-        pb_position = await services.sql.fetch(
-            "SELECT COUNT(*) AS pos FROM scores s "
+        pb_position = await services.database.fetch_val(
+            "SELECT COUNT(*) FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
-            f"WHERE s.{p.gamemode.score_order} > {personal_best['score']} "
-            "AND s.gamemode = %s AND s.map_md5 = %s "
+            f"WHERE s.{p.gamemode.score_order} > :pb_score "
+            "AND s.gamemode = :gamemode AND s.map_md5 = :map_md5 "
             "AND u.privileges & 4 AND s.status = 3 "
-            "AND s.mode = %s",
-            (p.gamemode.value, b.map_md5, mode),
+            "AND s.mode = :mode",
+            {
+                "pb_score": personal_best["score"],
+                "gamemode": p.gamemode.value,
+                "map_md5": b.map_md5,
+                "mode": mode,
+            },
         )
 
         if pb_position:
             ret.append(
                 SCORES_FORMAT.format(
-                    **personal_best,
+                    **dict(personal_best),
                     user_id=p.id,
                     username=p.username_with_tag,
-                    position=pb_position["pos"] + 1,
+                    position=pb_position + 1,
                 )
             )  # type: ignore
 
-    top_scores = await services.sql.fetchall(query, params, _dict=True)
+    top_scores = await services.database.fetch_all(query, params)
 
     ret.extend(
         [
-            SCORES_FORMAT.format(**score, position=idx + 1)
+            SCORES_FORMAT.format(**dict(score), position=idx + 1)
             for idx, score in enumerate(top_scores)
         ]
     )
@@ -331,11 +344,11 @@ async def score_submission(req: Request) -> Response:
     passed = s.status >= SubmitStatus.PASSED
 
     # get current first place holder, if any
-    cur_fp = await services.sql.fetch(
+    cur_fp = await services.database.fetch_val(
         "SELECT s.user_id FROM scores s INNER JOIN users u ON u.id = s.user_id "
-        "WHERE s.map_md5 = %s AND s.mode = %s AND s.gamemode = %s AND u.privileges & 4 "
-        "ORDER BY pp DESC LIMIT 1",
-        (s.map.map_md5, s.mode, s.gamemode)
+        "WHERE s.map_md5 = :map_md5 AND s.mode = :mode AND s.gamemode = :gamemode "
+        " AND u.privileges & 4 ORDER BY s.pp DESC LIMIT 1",
+        {"map_md5": s.map.map_md5, "mode": s.mode, "gamemode": s.gamemode},
     )
 
     s.playtime = int(form["st" if passed else "ft"]) // 1000  # milliseconds
@@ -344,22 +357,31 @@ async def score_submission(req: Request) -> Response:
 
     # check if the beatmap playcount for player exists first
     # if it does, we just wanna update.
-    if beatmap_playcount := await services.sql.fetch(
-        "SELECT id FROM beatmap_playcount WHERE map_md5 = %s "
-        "AND user_id = %s AND mode = %s AND gamemode = %s",
-        (s.map.map_md5, s.player.id, s.mode, s.gamemode)
+    if beatmap_playcount := await services.database.fetch_val(
+        "SELECT id FROM beatmap_playcount WHERE map_md5 = :map_md5 "
+        "AND user_id = :user_id AND mode = :mode AND gamemode = :gamemode",
+        {
+            "map_md5": s.map.map_md5,
+            "user_id": s.player.id,
+            "mode": s.mode,
+            "gamemode": s.gamemode,
+        },
     ):
-        await services.sql.execute(
-            "UPDATE beatmap_playcount SET playcount = playcount + 1 "
-            "WHERE id = %s ",
-            (beatmap_playcount["id"])
+        await services.database.execute(
+            "UPDATE beatmap_playcount SET playcount = playcount + 1 WHERE id = :id ",
+            {"id": beatmap_playcount},
         )
     # else we want to insert
     else:
-        await services.sql.execute(
+        await services.database.execute(
             "INSERT INTO beatmap_playcount (map_md5, user_id, mode, gamemode, playcount) "
-            "VALUES (%s, %s, %s, %s, 1) ",
-            (s.map.map_md5, s.player.id, s.mode, s.gamemode)
+            "VALUES (:map_md5, :user_id, :mode, :gamemode, 1) ",
+            {
+                "map_md5": s.map.map_md5,
+                "user_id": s.player.id,
+                "mode": s.mode,
+                "gamemode": s.gamemode,
+            },
         )
 
     if not passed:
@@ -387,9 +409,9 @@ async def score_submission(req: Request) -> Response:
         await s.player.restrict()
         return Response(content=b"error: invalid")
 
-    await services.sql.execute(
-        "UPDATE beatmaps SET plays = %s, passes = %s WHERE map_md5 = %s",
-        (s.map.plays, s.map.passes, s.map.map_md5),
+    await services.database.execute(
+        "UPDATE beatmaps SET plays = :plays, passes = :passes WHERE map_md5 = :map_md5",
+        {"plays": s.map.plays, "passes": s.map.passes, "map_md5": s.map.map_md5},
     )
 
     # calculate new stats
@@ -408,17 +430,17 @@ async def score_submission(req: Request) -> Response:
 
         stats.ranked_score += sus
 
-        scores = await services.sql.fetchall(
-            "SELECT s.pp, s.accuracy, s.awards_pp FROM scores s "
-            "WHERE s.user_id = %s AND s.mode = %s "
-            "AND s.status = 3 AND s.gamemode = %s "
-            "AND s.awards_pp = 1 ORDER BY s.pp DESC LIMIT 100",
-            (stats.id, s.mode.value, s.gamemode.value),
+        scores = await services.database.fetch_all(
+            "SELECT pp, accuracy, awards_pp FROM scores "
+            "WHERE user_id = :user_id AND mode = :mode "
+            "AND status = 3 AND gamemode = :gamemode "
+            "AND awards_pp = 1 ORDER BY pp DESC LIMIT 100",
+            {"user_id": stats.id, "mode": s.mode.value, "gamemode": s.gamemode.value},
         )
 
         stats.accuracy = np.sum(
-            [score[1] * 0.95**place for place, score in enumerate(scores)]
-        ) # type: ignore
+            [score["accuracy"] * 0.95**place for place, score in enumerate(scores)]
+        )  # type: ignore
         stats.accuracy *= 100 / (20 * (1 - 0.95 ** len(scores)))
         stats.accuracy /= 100
 
@@ -426,31 +448,25 @@ async def score_submission(req: Request) -> Response:
             all_awarded_pp_scores = [score for score in scores if score[2] == 1]
             weighted = np.sum(
                 [
-                    score[0] * 0.95 ** (place)
+                    score["pp"] * 0.95 ** (place)
                     for place, score in enumerate(all_awarded_pp_scores)
                 ]
-            ) # type: ignore
+            )  # type: ignore
             weighted += 416.6667 * (1 - 0.9994 ** len(all_awarded_pp_scores))
             stats.pp = math.ceil(weighted)
-
-            s.gained_pp = stats.pp - prev_stats.pp
 
             stats.rank = await stats.update_rank(s.gamemode, s.mode)
 
         await stats.update_stats(s)
         services.players.enqueue(writer.update_stats(stats))
 
-        # if the player got first place 
+        # if the player got first place
         # on the map announce it
         if s.position == 1 and not stats.is_restricted:
             chan = services.channels.get("#announce")
             assert chan is not None
 
-            gamemode = (
-                "[Relax]"
-                if s.gamemode == Gamemode.RELAX
-                else ""
-            )
+            gamemode = "[Relax]" if s.gamemode == Gamemode.RELAX else ""
 
             chan.send(
                 f"{s.player.embed} achieved #{s.position} on {
@@ -461,28 +477,37 @@ async def score_submission(req: Request) -> Response:
             # announce that the previous first place holder
             # lost their rank 1 on this map in their recent activities
             if cur_fp and cur_fp["user_id"] != s.player.id:
-                await services.sql.execute(
+                await services.database.execute(
                     "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
-                    "VALUES (%s, %s, %s, %s, %s)", 
-                    (cur_fp["user_id"], "lost rank #1 on", s.map.map_md5, s.mode, s.gamemode)
+                    "VALUES (:user_id, :activity, :map_md5, :mode, :gamemode)",
+                    {
+                        "user_id": cur_fp,
+                        "activity": "lost rank #1 on",
+                        "map_md5": s.map.map_md5,
+                        "mode": s.mode,
+                        "gamemode": s.gamemode,
+                    },
                 )
 
             # put it into the new first place holders recent activities.
-            await services.sql.execute(
+            await services.database.execute(
                 "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
-                    "VALUES (%s, %s, %s, %s, %s)", 
-                    (s.player.id, "achieved rank #1 on", s.map.map_md5, s.mode, s.gamemode)
+                "VALUES (:user_id, :activity, :map_md5, :mode, :gamemode)",
+                {
+                    "user_id": cur_fp,
+                    "activity": "achieved rank #1 on",
+                    "map_md5": s.map.map_md5,
+                    "mode": s.mode,
+                    "gamemode": s.gamemode,
+                },
             )
 
-
-    # TODO: map difficulty changing mods 
+    # TODO: map difficulty changing mods
 
     _achievements = []
     for ach in services.achievements:
         user_achievement = UserAchievement(
-            **ach.__dict__,
-            gamemode=s.gamemode,
-            mode=s.mode
+            **ach.__dict__, gamemode=s.gamemode, mode=s.mode
         )
 
         if user_achievement in stats.achievements:
@@ -492,11 +517,18 @@ async def score_submission(req: Request) -> Response:
         # with the score, it should be unlocked.
         try:
             if eval(ach.condition):
-                services.logger.info(f"{stats.username} unlocked {ach.name} that has condition: {ach.condition}")
-                await services.sql.execute(
-                    "INSERT INTO users_achievements "
-                    "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, %s, %s)",
-                    (stats.id, ach.id, s.mode.value, s.gamemode.value),
+                services.logger.info(
+                    f"{stats.username} unlocked {ach.name} that has condition: {ach.condition}"
+                )
+                await services.database.execute(
+                    "INSERT INTO users_achievements (user_id, achievement_id, mode, gamemode) "
+                    "VALUES (:user_id, :achievement_id, :mode, :gamemode)",
+                    {
+                        "user_id": stats.id,
+                        "achievement_id": ach.id,
+                        "mode": s.mode.value,
+                        "gamemode": s.gamemode.value,
+                    },
                 )
 
                 stats.achievements.append(user_achievement)
@@ -505,13 +537,8 @@ async def score_submission(req: Request) -> Response:
             # usual "failed" conditions, if because the Player.last_score is none
             continue
 
-
     achievements = "/".join(str(ach) for ach in _achievements)
-    gamemode = (
-        "[Relax]"
-        if s.gamemode == Gamemode.RELAX
-        else ""
-    )
+    gamemode = "[Relax]" if s.gamemode == Gamemode.RELAX else ""
 
     services.logger.info(
         f"{stats.username} submitted a score on {
@@ -526,7 +553,7 @@ async def score_submission(req: Request) -> Response:
     ret: list = []
     if s.gamemode != Gamemode.VANILLA and not stats.using_rina:
         return Response(content=b"error: no")
-    
+
     ret.append(
         "|".join(
             (
@@ -556,24 +583,12 @@ async def score_submission(req: Request) -> Response:
                     )
                     if not s.pb
                     else (
-                        Beatmap.add_chart(
-                            "rank", s.pb.position, s.position
-                        ),
-                        Beatmap.add_chart(
-                            "accuracy", s.pb.accuracy, s.accuracy
-                        ),
-                        Beatmap.add_chart(
-                            "maxCombo", s.pb.max_combo, s.max_combo
-                        ),
-                        Beatmap.add_chart(
-                            "rankedScore", s.pb.score, s.score
-                        ),
-                        Beatmap.add_chart(
-                            "totalScore", s.pb.score, s.score
-                        ),
-                        Beatmap.add_chart(
-                            "pp", math.ceil(s.pb.pp), math.ceil(s.pp)
-                        ),
+                        Beatmap.add_chart("rank", s.pb.position, s.position),
+                        Beatmap.add_chart("accuracy", s.pb.accuracy, s.accuracy),
+                        Beatmap.add_chart("maxCombo", s.pb.max_combo, s.max_combo),
+                        Beatmap.add_chart("rankedScore", s.pb.score, s.score),
+                        Beatmap.add_chart("totalScore", s.pb.score, s.score),
+                        Beatmap.add_chart("pp", math.ceil(s.pb.pp), math.ceil(s.pp)),
                     )
                 ),
                 f"onlineScoreId:{s.id}",
@@ -592,19 +607,13 @@ async def score_submission(req: Request) -> Response:
                         Beatmap.add_chart("rank", after=stats.rank),
                         Beatmap.add_chart("accuracy", after=stats.accuracy),
                         Beatmap.add_chart("maxCombo", after=0),
-                        Beatmap.add_chart(
-                            "rankedScore", prev=stats.ranked_score
-                        ),
-                        Beatmap.add_chart(
-                            "totalScore", after=stats.total_score
-                        ),
+                        Beatmap.add_chart("rankedScore", prev=stats.ranked_score),
+                        Beatmap.add_chart("totalScore", after=stats.total_score),
                         Beatmap.add_chart("pp", after=stats.pp),
                     )
                     if not prev_stats
                     else (
-                        Beatmap.add_chart(
-                            "rank", prev_stats.rank, stats.rank
-                        ),
+                        Beatmap.add_chart("rank", prev_stats.rank, stats.rank),
                         Beatmap.add_chart(
                             "accuracy", prev_stats.accuracy, stats.accuracy
                         ),
@@ -640,28 +649,32 @@ async def get_replay(req: Request, p: Player) -> Response:
             f"Replay ID {score_id} cannot be loaded! (File not found?)"
         )
         return Response(content=b"")
-    
-    score_info = await services.sql.fetch(
-        "SELECT user_id, mode, gamemode FROM scores WHERE id = %s",
-        (score_id)
+
+    score_info = await services.database.fetch_one(
+        "SELECT user_id, mode, gamemode FROM scores WHERE id = :score_id",
+        {"score_id": score_id},
     )
 
+    if not score_info:
+        return Response(content=b"")
+
     if score_info["user_id"] != p.id:
-        await services.sql.execute(
-            "INSERT INTO replay_views (user_id, score_id) VALUES (%s, %s)",
-            (p.id, score_id)
+        await services.database.execute(
+            "INSERT INTO replay_views (user_id, score_id) "
+            "VALUES (:user_id, :score_id)",
+            {"user_id": p.id, "score_id": score_id},
         )
 
         gamemode = Gamemode(score_info["gamemode"])
         play_mode = Mode(score_info["mode"])
 
-        # since the Mode.to_db() function returns the 
+        # since the Mode.to_db() function returns the
         # field with a new name we have to remove it.
         to_db = play_mode.to_db("replays_watched_by_others").split(" as")[0]
 
-        await services.sql.execute(
-            f"UPDATE {gamemode.table} SET {to_db} = {to_db} + 1 "
-            "WHERE id = %s", (score_info["user_id"])
+        await services.database.execute(
+            f"UPDATE {gamemode.table} SET {to_db} = {to_db} + 1 WHERE id = :user_id",
+            {"user_id": score_info["user_id"]},
         )
 
     return FileResponse(path=path)
@@ -804,10 +817,8 @@ async def osu_direct(req: Request, p: Player) -> Response:
                 hasStoryboard = "1" if beatmapset["storyboard"] else ""
 
                 directList += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
-                directList += (
-                    f"10|{lastUpd}|{sid}|{threadId}|{
+                directList += f"10|{lastUpd}|{sid}|{threadId}|{
                         hasVideo}|{hasStoryboard}|0||"
-                )
 
                 for i, beatmaps in enumerate(beatmapset["beatmaps"]):
                     diffName = beatmaps["version"]
@@ -841,7 +852,8 @@ async def osu_search_set(req: Request, p: Player) -> Response:
 
     if not bmap:  # if beatmap doesn't exists in db then fetch!
         services.logger.critical(
-            "/web/osu-search-set.php: Failed to get map (probably doesn't exist)")
+            "/web/osu-search-set.php: Failed to get map (probably doesn't exist)"
+        )
         return Response(content=b"xoxo gossip girl")
 
     return Response(

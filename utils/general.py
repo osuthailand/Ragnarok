@@ -22,13 +22,13 @@ def random_string(len: int) -> str:
 
 
 def datetime_frombinary(time: int) -> datetime:
-    n_ticks = time & 0x3fffffffffffffff
+    n_ticks = time & 0x3FFFFFFFFFFFFFFF
     secs = n_ticks / 1e7
 
     d1 = datetime(1, 1, 1)
     t1 = timedelta(seconds=secs)
 
-    return d1+t1
+    return d1 + t1
 
 
 def compare_byte_sequence(a1: bytes, a2: bytes) -> bool:

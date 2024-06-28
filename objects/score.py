@@ -95,12 +95,9 @@ class Score:
     @property
     def web_format(self) -> str:
         return (
-            f"\n{self.id}|{self.player.username}|{
-                self.score if self.gamemode == Gamemode.VANILLA else math.ceil(self.pp)}|"
-            f"{self.max_combo}|{self.count_50}|{self.count_100}|{
-                self.count_300}|{self.count_miss}|"
-            f"{self.count_katu}|{self.count_geki}|{
-                self.perfect}|{self.mods}|{self.player.id}|"
+            f"\n{self.id}|{self.player.username}|{self.score if self.gamemode == Gamemode.VANILLA else math.ceil(self.pp)}|"
+            f"{self.max_combo}|{self.count_50}|{self.count_100}|{self.count_300}|{self.count_miss}|"
+            f"{self.count_katu}|{self.count_geki}|{self.perfect}|{self.mods}|{self.player.id}|"
             f"{self.position}|{self.submitted}|1"
         )
 

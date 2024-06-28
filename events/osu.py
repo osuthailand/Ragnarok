@@ -187,7 +187,7 @@ class LeaderboardType(IntEnum):
 @check_auth("us", "ha")
 async def get_scores(req: Request, p: Player) -> Response:
     hash = req.query_params["c"]
-    
+
     if not (b := await services.beatmaps.get(hash)):
         return Response(content=b"-1|true")
 

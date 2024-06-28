@@ -356,14 +356,13 @@ async def last_score(ctx: Context) -> str:
         bmap.embed + f"{Mods(score.mods).short_name if score.mods else ''} "
         f"({score.accuracy:.2f}%, {score.rank}) "
         f"{score.max_combo}x/{bmap.max_combo}x | "
-        f"{score.pp:.2f}pp (gained {score.gained_pp:+d}pp) | "
+        f"{score.pp:.2f}pp | "
         # TODO: difficulty changing mods changes stars
         f"★ {bmap.stars:.2f}"
     )
 
     if not score.status & SubmitStatus.PASSED:
-        initial_response += f"[{score.status.name} | {
-            int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
+        initial_response += f"[{score.status.name} | {int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
 
     return initial_response
 

@@ -24,4 +24,4 @@ MIRROR_CHIMU = os.environ["MIRROR_CHIMU"]
 MIRROR_KATSU = os.environ["MIRROR_KATSU"]
 MIRROR_NERINYAN = os.environ["MIRROR_NERINYAN"]
 
-RANK_ALL_MAPS = os.environ["RANK_ALL_MAPS"]
+RANK_ALL_MAPS = os.environ["RANK_ALL_MAPS"] == "true"

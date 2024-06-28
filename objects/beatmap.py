@@ -107,13 +107,13 @@ class Beatmap:
             else ("map_md5", hash) if hash else ("map_id", beatmap_id)
         )
 
-        ret = await services.sql.fetch(
+        ret = await services.database.fetch_one(
             "SELECT server, set_id, map_id, map_md5, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
             "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
             "latest_update, length, drain, plays, passes, favorites, rating "
-            f"FROM beatmaps WHERE {params[0]} = %s ORDER BY stars DESC",
-            (params[1]),
+            f"FROM beatmaps WHERE {params[0]} = :param ORDER BY stars DESC",
+            {"param": params[1]},
         )
 
         if not ret:
@@ -161,22 +161,27 @@ class Beatmap:
         return b
 
     async def add_to_db(self) -> None:
-        if await services.sql.fetch(
-            "SELECT 1 FROM beatmaps WHERE map_md5 = %s LIMIT 1", (self.map_md5)
+        if await services.database.fetch_one(
+            "SELECT 1 FROM beatmaps WHERE map_md5 = :map_md5 LIMIT 1",
+            {"map_md5": self.map_md5},
         ):
             return  # ignore beatmaps there are already in db
 
-        values = [*self.__dict__.values()][:-2]
-        values.append(self.approved.value)
+        obj = self.__dict__.copy()
+        obj.pop("scores")
+        obj.pop("server")
+        obj["approved"] = self.approved.value
 
-        await services.sql.execute(
-            "INSERT INTO beatmaps (server, set_id, map_id, map_md5, title, title_unicode, "
-            "version, artist, artist_unicode, creator, creator_id, stars, "
-            "od, ar, hp, cs, mode, bpm, max_combo, submit_date, approved_date, "
+        await services.database.execute(
+            "INSERT INTO beatmaps (server, set_id, map_id, map_md5, title, "
+            "title_unicode, version, artist, artist_unicode, creator, creator_id, "
+            "stars, od, ar, hp, cs, mode, bpm, max_combo, submit_date, approved_date, "
             "latest_update, length, drain, plays, passes, favorites, rating, approved) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            values,
+            "VALUES ('bancho', :set_id, :map_id, :map_md5, :title, :title_unicode, :version, "
+            ":artist, :artist_unicode, :creator, :creator_id, :stars, :od, :ar, :hp, :cs, "
+            ":mode, :bpm, :max_combo, :submit_date, :approved_date, :latest_update, :hit_length, "
+            ":drain, :plays, :passes, :favorites, :rating, :approved)",
+            obj,
         )
 
         services.logger.info(f"Saved {self.full_title} ({self.map_md5}) into database")
@@ -187,8 +192,8 @@ class Beatmap:
         if md5_check:
             if md5_check.map_md5 != map_md5:
                 # just delete that shit
-                await services.sql.execute(
-                    "DELETE FROM beatmaps WHERE map_id = %s", (map_id)
+                await services.database.execute(
+                    "DELETE FROM beatmaps WHERE map_id = :map_id", {"map_id": map_id}
                 )
                 services.logger.info(
                     "Removed previous saved beatmap from database and added the updated one."
@@ -257,14 +262,18 @@ class Beatmap:
             0 if ret["max_combo"] is None else int(ret["max_combo"])
         )  # fix taiko and mania "null" combo
 
-        # for some reason, the api shows approved as one behind?
         if settings.RANK_ALL_MAPS:
             b.approved = Approved.RANKED
         else:
-            if (ranked_status := Approved(int(ret["approved"]))) <= Approved.PENDING:
-                b.approved = ranked_status
-            else:
-                b.approved = Approved(ranked_status + 1)
+            approved_status = int(ret["approved"])
+
+            # conver approved status to ragnarok's desired
+            ragnarok_approved = {4: 5, 3: 4, 2: 3, 1: 2}
+
+            if approved_status in ragnarok_approved:
+                approved_status = ragnarok_approved[approved_status]
+
+            b.approved = Approved(approved_status)
 
         b.submit_date = ret["submit_date"]
 

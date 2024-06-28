@@ -7,9 +7,9 @@ import settings
 from typing import Pattern, TYPE_CHECKING
 
 from dataclasses import dataclass
+from databases import Database
 from redis import asyncio as aioredis
 
-from lib.database import Database
 from objects.achievement import Achievement
 
 from colorama import Fore, Style
@@ -30,8 +30,13 @@ packets: dict[int, "Packet"] = {}
 bot: "Bot"
 
 prefix: str = "!"
-sql: Database
-redis: aioredis.Redis
+database: Database = Database(
+    f"mysql+aiomysql://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}/{settings.DB_DATABASE}"
+)
+redis: aioredis.Redis = aioredis.from_url(
+    f"redis://{settings.REDIS_USERNAME}:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}",
+    decode_responses=True,
+)
 
 bcrypt_cache: dict[str, bytes] = {}
 
@@ -130,9 +135,11 @@ class OsuSettings:
         self.welcome_message = SettingField(False)
 
     async def initialize_from_db(self) -> None:
-        async for setting in sql.iterall(
+        settings = await database.fetch_all(
             "SELECT name, boolean_value, string_value FROM osu_settings"
-        ):
+        )
+
+        for setting in settings:
             if hasattr(self, setting["name"]):
                 attr: SettingField = getattr(self, setting["name"])
 

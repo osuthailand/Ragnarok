@@ -20,7 +20,6 @@ from events import map  # don't remove
 # dont remove
 from constants import commands
 
-from lib.database import Database
 from objects.bot import Bot
 from objects import services
 from redis import asyncio as aioredis
@@ -60,15 +59,10 @@ async def startup() -> None:
     )
 
     services.logger.info("... Connecting to the database")
-    services.sql = Database()
-    await services.sql.connect()
+    await services.database.connect()
     services.logger.info("✓ Connected to the database!")
 
     services.logger.info("... Initalizing redis")
-    services.redis = aioredis.from_url(
-        f"redis://{settings.REDIS_USERNAME}:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}",
-        decode_responses=True,
-    )
     await services.redis.initialize()
     services.logger.info("✓ Successfully initalized redis")
 

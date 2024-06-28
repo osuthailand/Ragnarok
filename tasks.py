@@ -107,16 +107,20 @@ async def cache_allowed_osu_builds() -> None:
 
 
 async def cache_channels() -> None:
-    async for _channel in services.sql.iterall(
+    channels = await services.database.fetch_all(
         "SELECT name, description, public, staff, auto_join, read_only FROM channels"
-    ):
-        channel = Channel(**_channel)
+    )
+
+    for _channel in channels:
+        channel = Channel(**dict(_channel))
         services.channels.add(channel)
 
 
 async def cache_achievements() -> None:
-    async for achievement in services.sql.iterall("SELECT * FROM achievements"):
-        services.achievements.append(Achievement(**achievement))
+    achievements = await services.database.fetch_all("SELECT * FROM achievements")
+
+    for achievement in achievements:
+        services.achievements.append(Achievement(**dict(achievement)))
 
 
 async def run_cache_task() -> None:

@@ -13,7 +13,7 @@ class Bot(Player):
     @classmethod
     async def initialize(cls) -> "Bot":
         if not (
-            bot := await services.sql.fetch(
+            bot := await services.database.fetch_one(
                 "SELECT id, username, privileges, passhash FROM users WHERE id = 1"
             )
         ):

@@ -199,55 +199,6 @@ async def roll(ctx: Context) -> str | None:
     return f"{ctx.author.username} rolled {random.randint(0, x)} point(s)"
 
 
-@register_command(
-    "verify", category="Player", hidden=True, required_perms=Privileges.PENDING
-)
-@ensure_player
-async def verify_with_key(ctx: Context) -> str | None:
-    """Verify your account with our key system!"""
-    if not ctx.reciever.bot:
-        return
-
-    if not ctx.args:
-        return "Usage: !verify <your beta key>"
-
-    key = ctx.args[0]
-
-    if not (
-        key_info := await services.sql.fetch(
-            "SELECT id, beta_key, made FROM beta_keys WHERE beta_key = %s", (
-                key)
-        )
-    ):
-        return "Invalid key"
-
-    asyncio.create_task(
-        services.sql.execute(
-            "UPDATE users SET privileges = %s WHERE id = %s",
-            (Privileges.USER.value + Privileges.VERIFIED.value, ctx.author.id),
-        )
-    )
-
-    asyncio.create_task(
-        services.sql.execute(
-            "DELETE FROM beta_keys WHERE id = %s", key_info["id"])
-    )
-
-    ctx.author.privileges = Privileges.USER + Privileges.VERIFIED
-    
-    ctx.author.shout(
-        "Welcome to Ragnarok. You've successfully verified your account and gained beta access! "
-        "If you see any bugs or anything unusal, please report it to one of the developers, through "
-        "Github issues or Discord."
-    )
-    ctx.author.shout("Please login again to prevent any corruption to your user data!")
-
-    services.logger.info(
-        f"{ctx.author.username} successfully verified their account with a key")
-
-    return "Successfully verified your account."
-
-
 @dataclass
 class PPBuilder:
     accuracy: float = 0.0
@@ -316,6 +267,7 @@ def pp_message_format(
 
     return " ".join(response)
 
+
 @register_command("pp", category="Tillerino-like")
 async def calc_pp_for_map(ctx: Context) -> str | None:
     """Show PP for the previous requested beatmap with requested info (Don't use spaces for multiple mods (eg: !pp +HDHR))"""
@@ -366,13 +318,13 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
             elif arg.endswith("x"):
                 if not arg[:-1].isdecimal():
                     return "invalid argument: combo has to be a number."
-                
+
                 pp_builder.combo = int(arg[:-1])
 
             elif arg.endswith("x100"):
                 if not arg[:-4].isdecimal():
                     return "invalid argument: 100 count has to be a number."
-                
+
                 pp_builder.x100 = int(arg[:-4])
 
             elif arg.endswith("x50"):
@@ -384,7 +336,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
             elif arg.endswith("m"):
                 if not arg[:-1].isdecimal():
                     return "invalid argument: miss count has to be a number."
-                
+
                 pp_builder.misses = int(arg[:-1])
 
     return pp_message_format(bmap, _map, pp_builder, calc, mods)
@@ -404,14 +356,13 @@ async def last_score(ctx: Context) -> str:
         bmap.embed + f"{Mods(score.mods).short_name if score.mods else ''} "
         f"({score.accuracy:.2f}%, {score.rank}) "
         f"{score.max_combo}x/{bmap.max_combo}x | "
-        f"{score.pp:.2f}pp (gained {score.gained_pp:+d}pp) | "
+        f"{score.pp:.2f}pp | "
         # TODO: difficulty changing mods changes stars
         f"★ {bmap.stars:.2f}"
     )
 
     if not score.status & SubmitStatus.PASSED:
-        initial_response += f"[{score.status.name} | {
-            int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
+        initial_response += f"[{score.status.name} | {int(score.playtime)/int(bmap.hit_length)*100:.2f}%]"
 
     return initial_response
 
@@ -656,7 +607,7 @@ async def get_beatmap(ctx: Context) -> str | None:
     mirrors = {
         "chimu": settings.MIRROR_CHIMU,
         "nerinyan": settings.MIRROR_NERINYAN,
-        "katsu": settings.MIRROR_KATSU
+        "katsu": settings.MIRROR_KATSU,
     }
 
     if not ctx.args:
@@ -687,9 +638,7 @@ async def invite_people(ctx: Context) -> str | None:
     m = ctx.author.match
 
     if not ctx.args:
-        ctx.reciever.send(
-            message="Who do you want to invite?", sender=services.bot
-        )
+        ctx.reciever.send(message="Who do you want to invite?", sender=services.bot)
         response = await ctx.await_response()
 
         if not (target := services.players.get(response)):
@@ -716,9 +665,7 @@ async def change_host(ctx: Context) -> str | None:
     m = ctx.author.match
 
     if not ctx.args:
-        ctx.reciever.send(
-            message="Who do you want to invite?", sender=services.bot
-        )
+        ctx.reciever.send(message="Who do you want to invite?", sender=services.bot)
 
         response = await ctx.await_response()
 
@@ -805,16 +752,16 @@ async def restrict_user(ctx: Context) -> str | None:
         return "Player is already restricted? Did you mean to unrestrict them?"
 
     asyncio.create_task(
-        services.sql.execute(
-            "UPDATE users SET privileges = privileges - 4 WHERE id = %s", (
-                target.id)
+        services.database.execute(
+            "UPDATE users SET privileges = privileges - 4 WHERE id = :user_id",
+            {"user_id": target.id},
         )
     )
 
     target.privileges -= Privileges.VERIFIED
     target.shout("An admin has set your account in restricted mode!")
 
-    await ctx.author.log(f"restricted {target.username}", type = LoggingType.RESTRICTIONS)
+    await ctx.author.log(f"restricted {target.username}", type=LoggingType.RESTRICTIONS)
 
     return f"Successfully restricted {target.username}"
 
@@ -835,8 +782,9 @@ async def unrestrict_user(ctx: Context) -> str | None:
     if not target.is_restricted:
         return "Player isn't even restricted?"
 
-    await services.sql.execute(
-        "UPDATE users SET privileges = privileges + 4 WHERE id = %s", (target.id)
+    await services.database.execute(
+        "UPDATE users SET privileges = privileges + 4 WHERE id = :user_id",
+        {"user_id": target.id},
     )
 
     target.privileges |= Privileges.VERIFIED
@@ -844,7 +792,9 @@ async def unrestrict_user(ctx: Context) -> str | None:
     if target.token:  # if user is online
         target.shout("An admin has unrestricted your account!")
 
-    await ctx.author.log(f"unrestricted {target.username}", type = LoggingType.RESTRICTIONS)
+    await ctx.author.log(
+        f"unrestricted {target.username}", type=LoggingType.RESTRICTIONS
+    )
 
     return f"Successfully unrestricted {target.username}"
 
@@ -863,7 +813,7 @@ async def bot_commands(ctx: Context) -> str | None:
         if services.players.get(1):
             return f"{services.bot.username} is already connected."
 
-        await Bot.init()
+        await Bot.initialize()
 
         return f"Successfully connected {services.bot.username}."
 
@@ -898,9 +848,12 @@ async def approve_map(ctx: Context) -> str | None:
 
     condition = {"map": "map_id", "set": "set_id"}[ctx.args[0]]
 
-    await services.sql.execute(
-        "UPDATE beatmaps SET approved = %s " f"WHERE {condition} = %s",
-        (ranked_status.value, bmap.map_id if condition == "map_id" else bmap.set_id),
+    await services.database.execute(
+        f"UPDATE beatmaps SET approved = :new_status WHERE {condition} = :cond",
+        {
+            "new_status": ranked_status.value,
+            "cond": bmap.map_id if condition == "map_id" else bmap.set_id,
+        },
     )
 
     if condition == "set_id":
@@ -931,129 +884,6 @@ async def approve_map(ctx: Context) -> str | None:
     return resp
 
 
-@register_command("recalc", category="Admin", required_perms=Privileges.ADMIN)
-async def recalc_scores(ctx: Context) -> str | None:
-    """Recalculate all the scores on either relax or vanilla."""
-
-    if len(ctx.args) < 2:
-        return "Usage: !recalc <relax/vanilla> <std/taiko/catch/mania>"
-
-    gamemode = Gamemode.from_str(ctx.args[0].lower())
-    mode = Mode.from_str(ctx.args[1].lower())
-
-    if gamemode == Gamemode.UNKNOWN or mode == Mode.NONE:
-        return "Usage: !recalc <relax/vanilla> <std/taiko/catch/mania>"
-
-    ctx.reciever.send(
-        message=f"Fetching EVERY SCORE on the server for {
-            ctx.args[1].lower()} {
-            ctx.args[0].lower()}...",
-        sender=services.bot,
-    )
-
-    async for score in services.sql.iterall(
-        "SELECT s.id, s.mods, s.count_300, s.count_100, s.count_50, "
-        "s.count_geki, s.count_katu, s.count_miss, s.max_combo, "
-        "s.accuracy, b.map_id, s.mode, s.pp, b.title, "
-        "b.version, b.artist FROM scores s "
-        "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
-        "WHERE s.gamemode = %s AND s.mode = %s AND s.status = 3",  # 3: best
-        (gamemode, mode.value),
-    ):
-        try:
-            bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
-        except:
-            ctx.reciever.send(message="No beatmap with that id found on server... Getting from osu api...", sender=services.bot)
-            await osu.save_beatmap_file(score["map_id"])
-            await asyncio.sleep(2)
-            ctx.reciever.send(message="Waiting 2 seconds before continuing to prevent rate limiting.", sender=services.bot)
-            try:
-                bmap = BMap(path=f".data/beatmaps/{score['map_id']}.osu")
-            except:
-                ctx.reciever.send(message="welp couldn't find beatmap lol", sender=services.bot)
-                continue
-
-        calc = Performance(
-            mode=score["mode"],
-            n300=score["count_300"],
-            n100=score["count_100"],
-            n50=score["count_50"],
-            misses=score["count_miss"],
-            n_geki=score["count_geki"],
-            n_katu=score["count_katu"],
-            combo=score["max_combo"],
-            accuracy=score["accuracy"],
-            mods=score["mods"],
-        ).calculate(bmap)
-
-        pp = calc.pp
-
-        if math.isnan(pp):
-            ctx.reciever.send(
-                message=f"Failed to recalculate pp for score {score['id']} on map {
-                    score['artist']} - {score['title']} [{score['version']}]",
-                sender=services.bot,
-            )
-            pp = 0
-
-        await services.sql.execute(
-            "UPDATE scores SET pp = %s WHERE id = %s", (pp, score["id"])
-        )
-
-        ctx.reciever.send(
-            message=f"Finished recalculating score {
-                score['id']} (before: {round(score['pp'], 4)}, after: {round(pp, 4)})",
-            sender=services.bot,
-        )
-
-    await ctx.author.log(f"recalculated all scores for {ctx.args[0]}", type = LoggingType.RECALCULATIONS)
-
-    return f"Finished recalculating all scores for {ctx.args[0]}"
-
-
-@register_command("key", category="Admin", required_perms=Privileges.ADMIN)
-async def beta_keys(ctx: Context) -> str | None:
-    """Create or delete keys."""
-
-    if len(ctx.args) < 1:
-        return "Usage: !key <create/delete> <name if create (OPTIONAL) / id if delete>"
-
-    if ctx.args[0] == "create":
-        if len(ctx.args) != 2:
-            key = uuid.uuid4().hex
-            id = await services.sql.execute(
-                "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
-                (key, time.time() + 432000),  # 5 days
-            )
-        else:
-            key = ctx.args[1]
-            id = await services.sql.execute(
-                "INSERT INTO beta_keys VALUES (NULL, %s, %s)",
-                (key, time.time() + 432000),  # 5 days
-            )
-
-        return f"Created key with the name {key} (id: {id})"
-
-    elif ctx.args[0] == "delete":
-        if len(ctx.args) != 2:
-            return "Usage: !key delete <key id>"
-
-        key_id = ctx.args[1]
-
-        if not await services.sql.fetch(
-            "SELECT 1 FROM beta_keys WHERE id = %s", (key_id)
-        ):
-            return "Key doesn't exist"
-
-        await services.sql.execute(
-                "DELETE FROM beta_keys WHERE id = %s", (key_id)
-        )
-
-        return f"Deleted key {key_id}"
-
-    return "Usage: !key <create/delete> <name if create (OPTIONAL) / id if delete>"
-
-
 @register_command(
     "system", aliases=["sys"], category="Admin", required_perms=Privileges.ADMIN
 )
@@ -1070,9 +900,7 @@ async def system(ctx: Context) -> str | None:
             os.execl(sys.executable, sys.executable, *sys.argv)
 
         case "shutdown":
-            ctx.reciever.send(
-                message="Shutting down server...", sender=services.bot
-            )
+            ctx.reciever.send(message="Shutting down server...", sender=services.bot)
             os.kill(os.getpid(), signal.SIGTERM)
 
         case "reload":
@@ -1091,6 +919,7 @@ async def system(ctx: Context) -> str | None:
 @register_command("forceerror", hidden=True, required_perms=Privileges.DEV)
 async def force_error(ctx: Context) -> str | None:
     raise Exception("forced error...")
+
 
 async def handle_commands(
     message: str, sender: "Player", reciever: Union["Channel", "Player"]
@@ -1120,16 +949,14 @@ async def handle_commands(
 
             assert (ach := services.get_achievement_by_id(190)) is not None
             user_achievement = UserAchievement(
-                **ach.__dict__,
-                gamemode=Gamemode.UNKNOWN,
-                mode=Mode.NONE
+                **ach.__dict__, gamemode=Gamemode.UNKNOWN, mode=Mode.NONE
             )
 
             if user_achievement not in sender.achievements:
-                await services.sql.execute(
+                await services.database.execute(
                     "INSERT INTO users_achievements "
-                    "(user_id, achievement_id, mode, gamemode) VALUES (%s, %s, -1, -1)",
-                    (sender.id, 190),
+                    "(user_id, achievement_id, mode, gamemode) VALUES (:user_id, :ach_id, -1, -1)",
+                    {"user_id": sender.id, "ach_id": 190},
                 )
 
                 sender.achievements.append(user_achievement)

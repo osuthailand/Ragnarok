@@ -35,15 +35,18 @@ from tasks import cache_allowed_osu_builds
 def register_event(packet: BanchoPackets, restricted: bool = False) -> Callable:
     def decorator(cb: Callable) -> None:
         services.packets |= {
-            packet.value: Packet(
-                packet=packet, callback=cb, restricted=restricted)
+            packet.value: Packet(packet=packet, callback=cb, restricted=restricted)
         }
 
     return decorator
 
 
 bancho = Router()
-IGNORED_PACKETS = (BanchoPackets.OSU_PING, BanchoPackets.OSU_RECEIVE_UPDATES, BanchoPackets.OSU_SPECTATE_FRAMES)
+IGNORED_PACKETS = (
+    BanchoPackets.OSU_PING,
+    BanchoPackets.OSU_RECEIVE_UPDATES,
+    BanchoPackets.OSU_SPECTATE_FRAMES,
+)
 
 
 @bancho.route("/", methods=["POST", "GET"])
@@ -51,17 +54,21 @@ async def handle_bancho(req: Request) -> Response:
     if req.method == "GET":
         online_players = len(services.players)
         uptime = time.time() - services.startup
-        registered_players = await services.sql.fetch("SELECT COUNT(*) AS count FROM users")
+        registered_players = await services.database.fetch_val(
+            "SELECT COUNT(*) FROM users"
+        )
         scores_amount = await services.redis.get("ragnarok:total_scores")
         accumulated_pp = await services.redis.get("ragnarok:total_pp")
 
-        return ORJSONResponse(content={
-            "uptime": uptime,
-            "online_players": online_players,
-            "registered_players": registered_players,
-            "total_scores": int(scores_amount),
-            "accumulated_pp": float(accumulated_pp),
-        })
+        return ORJSONResponse(
+            content={
+                "uptime": uptime,
+                "online_players": online_players,
+                "registered_players": registered_players,
+                "total_scores": int(scores_amount),
+                "accumulated_pp": float(accumulated_pp),
+            }
+        )
 
     if not "user-agent" in req.headers.keys() or req.headers["user-agent"] != "osu!":
         return Response(content=b"no")
@@ -76,14 +83,16 @@ async def handle_bancho(req: Request) -> Response:
     if not (player := services.players.get(token)):
         cur_time = time.time()
 
-        # the client has 20 seconds to reconnect 
+        # the client has 20 seconds to reconnect
         if cur_time - services.startup < 20:
-            return Response(content=writer.notification("Server has restarted")
-                                    + writer.server_restart())
+            return Response(
+                content=writer.notification("Server has restarted")
+                + writer.server_restart()
+            )
 
         return Response(
             content=writer.notification("You lost connection to the server!")
-                    + writer.server_restart()
+            + writer.server_restart()
         )
 
     try:
@@ -106,8 +115,7 @@ async def handle_bancho(req: Request) -> Response:
 
         if services.debug and p.packet not in IGNORED_PACKETS:
             services.logger.debug(
-                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {
-                    player.username} - {end:.2f}ms"
+                f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {player.username} - {end:.2f}ms"
             )
 
     player.last_update = time.time()
@@ -122,13 +130,12 @@ RESTRICTED_MSG = "Your account has been set in restricted mode."
 @unique
 class LoginResponse(IntEnum):
     INCORRECT_LOGIN = -1
-    INVALID_CLIENT = -2 # usually just too old
+    INVALID_CLIENT = -2  # usually just too old
     # -3 is also lock client
     LOCK_CLIENT = -4
     SERVER_SIDE_ERROR = -5
     UNAUTHORIZED_CUTTING_EDGE_BUILD = -6
     PASSWORD_RESET = -7
-
 
 
 def failed_login(code: LoginResponse, /, msg: str = "", extra: bytes = b"") -> Response:
@@ -159,22 +166,28 @@ async def login(req: Request) -> Response:
 
     # get all user needed information
     if not (
-        user_info := await services.sql.fetch(
+        user_info := await services.database.fetch_one(
             "SELECT username, id, privileges, "
             "passhash, lon, lat, country FROM users "
-            "WHERE safe_username = %s",
-            [login_info[0].lower().replace(" ", "_")],
+            "WHERE safe_username = :safe_uname",
+            {"safe_uname": login_info[0].lower().replace(" ", "_")},
         )
     ):
-        return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"A user tried logging in with the username \"{login_info[0]}\", but the user doesn't exist.")
+        return failed_login(
+            LoginResponse.INCORRECT_LOGIN,
+            msg=f'A user tried logging in with the username "{login_info[0]}", but the user doesn\'t exist.',
+        )
 
     if services.osu_settings.server_maintenance.value:
         if not user_info["privileges"] & Privileges.DEV:
             return failed_login(
-                LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD, 
-                extra=writer.notification("Server is currently under maintenance."))
+                LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD,
+                extra=writer.notification("Server is currently under maintenance."),
+            )
 
-        data += writer.notification("Server is currently under maintenance. Remember to turn it off, when everything is done and ready.")
+        data += writer.notification(
+            "Server is currently under maintenance. Remember to turn it off, when everything is done and ready."
+        )
 
     # encode user password and input password.
     phash = user_info["passhash"].encode("utf-8")
@@ -183,10 +196,16 @@ async def login(req: Request) -> Response:
     # check if the password is correct
     if phash in services.bcrypt_cache:
         if pmd5 != services.bcrypt_cache[phash]:
-            return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.")
+            return failed_login(
+                LoginResponse.INCORRECT_LOGIN,
+                msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.",
+            )
     else:
         if not bcrypt.checkpw(pmd5, phash):
-            return failed_login(LoginResponse.INCORRECT_LOGIN, msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.")
+            return failed_login(
+                LoginResponse.INCORRECT_LOGIN,
+                msg=f"{user_info['username']} ({user_info['id']}) tried logging in with the wrong password.",
+            )
 
         services.bcrypt_cache[phash] = pmd5
 
@@ -194,9 +213,9 @@ async def login(req: Request) -> Response:
         # user is already online? sus
         timeago_format = datetime.fromtimestamp(_p.last_update)
         return failed_login(
-            LoginResponse.INCORRECT_LOGIN, 
-            msg=f"A user tried to sign in to an already connected account. (last update for session was {timeago.format(timeago_format)})", 
-            extra=writer.notification(ALREADY_ONLINE)
+            LoginResponse.INCORRECT_LOGIN,
+            msg=f"A user tried to sign in to an already connected account. (last update for session was {timeago.format(timeago_format)})",
+            extra=writer.notification(ALREADY_ONLINE),
         )
 
     # check if user is restricted
@@ -204,7 +223,9 @@ async def login(req: Request) -> Response:
         data += writer.notification(RESTRICTED_MSG)
 
     # [1:] removes the little b infront of the version
-    if client_info[0][1:] not in services.ALLOWED_BUILDS and not client_info[0].endswith("rina"):
+    if client_info[0][1:] not in services.ALLOWED_BUILDS and not client_info[
+        0
+    ].endswith("rina"):
         # since allowed osu builds is cached from startup
         # we should check if there has been any new builds
         # since startup.
@@ -219,7 +240,10 @@ async def login(req: Request) -> Response:
 
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
-        return failed_login(LoginResponse.LOCK_CLIENT, msg=f"{user_info['username']} tried to login, but were unable to do so, since they're banned.")
+        return failed_login(
+            LoginResponse.LOCK_CLIENT,
+            msg=f"{user_info['username']} tried to login, but were unable to do so, since they're banned.",
+        )
 
     user_hash = client_info[3].split(":")
 
@@ -232,20 +256,30 @@ async def login(req: Request) -> Response:
     unique_id = user_hash[3]
     disk_id = user_hash[4]
 
-    linked_hardware = await services.sql.fetch(
-        "SELECT * FROM hwid_links WHERE "
-        "mac_address = %s OR unique_id = %s OR disk_id = %s", 
-        (mac_address, unique_id, disk_id))
-        
+    linked_hardware = await services.database.fetch_one(
+        "SELECT * FROM hwid_links WHERE mac_address = :mac_address "
+        "OR unique_id = :unique_id OR disk_id = :disk_id",
+        {"mac_address": mac_address, "unique_id": unique_id, "disk_id": disk_id},
+    )
 
     if not linked_hardware:
-        await services.sql.execute(
-            "INSERT INTO hwid_links "
-            "(user_id, raw_mac_address, mac_address, unique_id, disk_id) "
-            "VALUES (%s, %s, %s, %s, %s)", (user_info["id"], raw_mac_address, mac_address, unique_id, disk_id))
+        await services.database.execute(
+            "INSERT INTO hwid_links (user_id, raw_mac_address, mac_address, unique_id, disk_id) "
+            "VALUES (:user_id, :raw_mac_address, :mac_address, :unique_id, :disk_id)",
+            {
+                "user_id": user_info["id"],
+                "raw_mac_address": raw_mac_address,
+                "mac_address": mac_address,
+                "unique_id": unique_id,
+                "disk_id": disk_id,
+            },
+        )
     else:
         if linked_hardware["banned"]:
-            return failed_login(LoginResponse.LOCK_CLIENT, msg=f"{user_info['username']} tried to login with banned hardware.")
+            return failed_login(
+                LoginResponse.LOCK_CLIENT,
+                msg=f"{user_info['username']} tried to login with banned hardware.",
+            )
 
         mismatched_ids = []
 
@@ -262,7 +296,7 @@ async def login(req: Request) -> Response:
             msg = f"{user_info['username']} ({user_info['id']}) has mismatched hardware ids. Mismatched IDs are {", ".join(mismatched_ids)}"
 
             services.logger.warning(msg)
-            await services.bot.log(msg, type = LoggingType.HWID_CHECKS)
+            await services.bot.log(msg, type=LoggingType.HWID_CHECKS)
 
         # if the user, has matched someone elses
         if linked_hardware["user_id"] != user_info["id"]:
@@ -270,7 +304,8 @@ async def login(req: Request) -> Response:
                 "You have been caught logging in to another account on the same machine!\n\n"
                 "If you believe this is a mistake, please contact either Aoba or Carlohman1. "
                 "Nothing crucial will happen to your account other than the staffs has been notified and will check your account. "
-                "If the staff finds you multiaccounting, it will lead to your main account getting restricted aswell as the one you're currently on.")
+                "If the staff finds you multiaccounting, it will lead to your main account getting restricted aswell as the one you're currently on."
+            )
 
     kwargs = {
         "block_nonfriend": client_info[4],
@@ -285,7 +320,12 @@ async def login(req: Request) -> Response:
     services.players.add(p)
 
     await asyncio.gather(
-        *[p.get_friends(), p.update_stats_cache(), p.get_achievements(), p.get_clan_tag()]
+        *[
+            p.get_friends(),
+            p.update_stats_cache(),
+            p.get_achievements(),
+            p.get_clan_tag(),
+        ]
     )
 
     if not p.is_verified:
@@ -301,19 +341,22 @@ async def login(req: Request) -> Response:
         await p.save_location()
 
     asyncio.create_task(p.check_loc())
-    
+
     # add user session data to redis
-    await services.redis.hset(f"ragnarok:session:{p.id}", mapping={
-        "token": p.token,
-        "session_start": time.time(),
-        ###
-        "gamemode": p.gamemode.name,
-        "mode": p.play_mode.name,
-        ###
-        "status": p.status.name,
-        "status_text": p.status_text,
-        "beatmap_id": p.beatmap_id
-    })
+    await services.redis.hset(
+        f"ragnarok:session:{p.id}",
+        mapping={
+            "token": p.token,
+            "session_start": time.time(),
+            ###
+            "gamemode": p.gamemode.name,
+            "mode": p.play_mode.name,
+            ###
+            "status": p.status.name,
+            "status_text": p.status_text,
+            "beatmap_id": p.beatmap_id,
+        },
+    )
 
     data += writer.user_id(p.id)
     data += writer.user_privileges(p.privileges)
@@ -370,23 +413,23 @@ async def change_action(p: Player, sr: Reader) -> None:
     p.play_mode = Mode(sr.read_byte())
     p.beatmap_id = sr.read_int32()
 
-    p.gamemode = (
-        Gamemode.RELAX if p.current_mods & Mods.RELAX else
-        Gamemode.VANILLA
-    )
+    p.gamemode = Gamemode.RELAX if p.current_mods & Mods.RELAX else Gamemode.VANILLA
 
     p.status_text = f"{status_text.strip()} on {p.gamemode.name.lower()}"
 
     asyncio.create_task(p.update_stats_cache())
 
-    await services.redis.hset(f"ragnarok:session:{p.id}", mapping={
-        "gamemode": p.gamemode.name,
-        "mode": p.play_mode.name,
-        ###
-        "status": p.status.name,
-        "status_text": p.status_text,
-        "beatmap_id": p.beatmap_id
-    })
+    await services.redis.hset(
+        f"ragnarok:session:{p.id}",
+        mapping={
+            "gamemode": p.gamemode.name,
+            "mode": p.play_mode.name,
+            ###
+            "status": p.status.name,
+            "status_text": p.status_text,
+            "beatmap_id": p.beatmap_id,
+        },
+    )
 
     if not p.is_restricted:
         services.players.enqueue(writer.update_stats(p))
@@ -441,8 +484,11 @@ async def send_public_message(p: Player, sr: Reader) -> None:
 
     # little easter egg
     if "kill yourself now" in msg.lower():
-        chan.send("⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠄⠄⠄⠄⠄⠄⠄⠄⠙⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⠄⠄⢀⣀⣀⣀⡀⠄⢀⣠⡔⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣰⢿⣿⣿⣿⣿⣿⣿⣷⡆⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⣻⣟⣿⣿⡿⣟⣛⣿⡃⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣧⣿⣾⣿⣷⣿⣷⣿⣿⣿⣷⣽⣹⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⡟⣟⣿⣿⠺⣟⣻⣿⣿⣿⡏⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⡝⠻⠵⠿⠿⢿⣿⣿⢳⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣯⣧⠈⣛⣛⣿⣿⡿⣡⣞⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡧⠄⠙⠛⠛⢁⣴⣿⣿⣷⣿⢿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⡿⠟⠉⠄⠄⢠⠄⣀⣠⣾⣿⣿⡿⠟⠁⠄⠈⠛⢿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⡟⠉⠄⠄⢀⠠⠐⠒⠐⠾⠿⢟⠋⠁⠄⢀⣀⠠⠐⠄⠂⠈⠻⢿⣿⣿\n⣿⣿⣿⠋⠁⠄⢀⡈⠄⠄⠄⠄⠄⠄⠄⠄⠁⠒⠉⠄⢠⣶⠄⠄⠄⠄⠄⠈⠫⢿\n⣿⣿⡟⠄⢔⠆⡀⠄⠈⢀⠄⠄⠄⠄⠄⠄⠄⢄⡀⠄⠈⡐⢠⠒⠄⠄⠄⠄⢀⣂\n⣿⣿⠁⡀⠄⠄⢇⠄⠄⢈⠆⠄⠄⢀⠔⠉⠁⠉⠉⠣⣖⠉⡂⡔⠂⠄⢀⠔⠁⠄\n⣿⡿⠄⠄⠄⠄⢰⠹⣗⣺⠤⠄⠰⡎⠄⠄⠄⠄⠄⠄⠘⢯⡶⢟⡠⠰⠄⠄⠄⠄\n", services.bot)
-    
+        chan.send(
+            "⣿⣿⣿⣿⣿⣿⣿⣿⣿⠏⠄⠄⠄⠄⠄⠄⠄⠄⠙⢿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⠄⠄⢀⣀⣀⣀⡀⠄⢀⣠⡔⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣰⢿⣿⣿⣿⣿⣿⣿⣷⡆⢠⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⡏⣻⣟⣿⣿⡿⣟⣛⣿⡃⢸⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣧⣿⣾⣿⣷⣿⣷⣿⣿⣿⣷⣽⣹⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⡟⣟⣿⣿⠺⣟⣻⣿⣿⣿⡏⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⢿⡝⠻⠵⠿⠿⢿⣿⣿⢳⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣯⣧⠈⣛⣛⣿⣿⡿⣡⣞⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⡧⠄⠙⠛⠛⢁⣴⣿⣿⣷⣿⢿⣿⣿⣿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⣿⣿⡿⠟⠉⠄⠄⢠⠄⣀⣠⣾⣿⣿⡿⠟⠁⠄⠈⠛⢿⣿⣿⣿⣿⣿\n⣿⣿⣿⣿⡟⠉⠄⠄⢀⠠⠐⠒⠐⠾⠿⢟⠋⠁⠄⢀⣀⠠⠐⠄⠂⠈⠻⢿⣿⣿\n⣿⣿⣿⠋⠁⠄⢀⡈⠄⠄⠄⠄⠄⠄⠄⠄⠁⠒⠉⠄⢠⣶⠄⠄⠄⠄⠄⠈⠫⢿\n⣿⣿⡟⠄⢔⠆⡀⠄⠈⢀⠄⠄⠄⠄⠄⠄⠄⢄⡀⠄⠈⡐⢠⠒⠄⠄⠄⠄⢀⣂\n⣿⣿⠁⡀⠄⠄⢇⠄⠄⢈⠆⠄⠄⢀⠔⠉⠁⠉⠉⠣⣖⠉⡂⡔⠂⠄⢀⠔⠁⠄\n⣿⡿⠄⠄⠄⠄⢰⠹⣗⣺⠤⠄⠰⡎⠄⠄⠄⠄⠄⠄⠘⢯⡶⢟⡠⠰⠄⠄⠄⠄\n",
+            services.bot,
+        )
+
     # check if the message is a np.
     # if so, post the 100%, 99%, etc.
     # pp for the map.
@@ -451,7 +497,7 @@ async def send_public_message(p: Player, sr: Reader) -> None:
         p.last_np = await Beatmap._get_beatmap_from_sql("", np.groups(0), 0)
         asyncio.create_task(_handle_command(chan, "!pp ", p))
 
-    # this is for whenever the user failed to 
+    # this is for whenever the user failed to
     # do a command with following arguments
     #
     # might remove this feature, as i don't see
@@ -525,8 +571,7 @@ async def spectating_frames(p: Player, sr: Reader) -> None:
     frame = sr.read_raw()
 
     # packing manually seems to be faster, so let's use that.
-    data = struct.pack(
-        "<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame)) + frame
+    data = struct.pack("<HxI", BanchoPackets.CHO_SPECTATE_FRAMES, len(frame)) + frame
 
     for t in p.spectators:
         # to prevent double frames
@@ -641,7 +686,9 @@ async def mp_change_slot(p: Player, sr: Reader) -> None:
     slot = m.slots[slot_id]
 
     if slot.status == SlotStatus.OCCUPIED:
-        services.logger.error(f"{p.username} tried to change to an occupied slot ({m!r})")
+        services.logger.error(
+            f"{p.username} tried to change to an occupied slot ({m!r})"
+        )
         return
 
     if not (old_slot := m.find_user(p)):
@@ -739,7 +786,8 @@ async def mp_start(p: Player, sr: Reader) -> None:
 
     if p.id != m.host:
         services.logger.warn(
-            f"{p.username} tried to start the match, while not being the host.")
+            f"{p.username} tried to start the match, while not being the host."
+        )
         return
 
     for slot in m.slots:
@@ -769,7 +817,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
             # should not happen
             if not (slot := m.find_user(p)):
                 return
-            
+
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
 
             if bmap.mode != m.mode:
@@ -793,13 +841,16 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
 
             s.score = round(pp)
         else:
-            services.logger.critical(f"MATCH {m.match_id}: Failed to update pp, because the .osu file doesn't exist.")
+            services.logger.critical(
+                f"MATCH {m.match_id}: Failed to update pp, because the .osu file doesn't exist."
+            )
 
     slot_id = m.find_user_slot(p)
 
     if services.debug:
-        services.logger.debug(f"{p.username} has slot id {
-                  slot_id} and has incoming score update.")
+        services.logger.debug(
+            f"{p.username} has slot id {slot_id} and has incoming score update."
+        )
 
     m.enqueue(writer.match_score_update(s, slot_id, raw))
 
@@ -810,7 +861,9 @@ async def mp_complete(p: Player, sr: Reader) -> None:
     if not (match := p.match) or not match.in_progress:
         return
 
-    players_played = [slot.player for slot in match.slots if slot.status == SlotStatus.PLAYING]
+    players_played = [
+        slot.player for slot in match.slots if slot.status == SlotStatus.PLAYING
+    ]
 
     for slot in match.slots:
         if slot.player in players_played:
@@ -950,7 +1003,7 @@ async def skip_request(p: Player, sr: Reader) -> None:
 async def join_channel(p: Player, sr: Reader) -> None:
     _chan = sr.read_str()
     channel = services.channels.get(_chan)
-    
+
     if not channel:
         p.shout(f"{_chan} couldn't be found.")
         return
@@ -1017,8 +1070,10 @@ async def part_channel(p: Player, sr: Reader) -> None:
         return
 
     if not (chan := services.channels.get(_chan)):
-        services.logger.warn(f"{p.username} tried to part from {
-                 _chan}, but channel doesn't exist.")
+        services.logger.warn(
+            f"{p.username} tried to part from {
+                 _chan}, but channel doesn't exist."
+        )
         return
 
     chan.disconnect(p)

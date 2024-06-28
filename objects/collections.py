@@ -45,31 +45,31 @@ class Tokens:
             if p := await self.from_sql_by_name(value):
                 return p
 
-    async def from_sql_by_name(self, value: str | int) -> Player | None:
-        data = await services.sql.fetch(
+    async def from_sql_by_name(self, value: str) -> Player | None:
+        data = await services.database.fetch_one(
             "SELECT username, id, privileges, passhash, country FROM users "
-            "WHERE (username = %s OR safe_username = %s)",
-            (value, value),
+            "WHERE (username = :value OR safe_username = :value)",
+            {"value": value},
         )
 
         if not data:
             return
 
-        p = Player(**data)
+        p = Player(**dict(data))
 
         return p
 
-    async def from_sql_by_id(self, value: str | int) -> Player | None:
-        data = await services.sql.fetch(
-            "SELECT username, id, privileges, passhash, country FROM users "
-            "WHERE id = %s",
-            (value),
+    async def from_sql_by_id(self, value: int) -> Player | None:
+        data = await services.database.fetch_one(
+            "SELECT username, id, privileges, passhash,  "
+            "country FROM users WHERE id = :user_id",
+            {"user_id": value},
         )
 
         if not data:
             return
 
-        p = Player(**data)
+        p = Player(**dict(data))
 
         return p
 

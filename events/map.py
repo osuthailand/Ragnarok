@@ -62,8 +62,9 @@ async def get_last_id(req: Request, p: Player) -> Response:
     # check if penis map exist in database
     # also check if the set_id is below base_id_increment
     # (that would mean it's not from rina)
-    beatmap = await services.sql.fetch(
-        "SELECT server, creator_id FROM beatmaps WHERE set_id = %s LIMIT 1", (p.id)
+    beatmap = await services.database.fetch_one(
+        "SELECT server, creator_id FROM beatmaps " "WHERE set_id = :set_id LIMIT 1",
+        {"set_id": set_id},
     )
 
     if beatmap:
@@ -86,19 +87,18 @@ async def get_last_id(req: Request, p: Player) -> Response:
         # if there are no set ids that is over the base set id increment
         # it's the first ever custom submited map.
         if not (
-            latest_submitted_set_id := await services.sql.fetch(
-                "SELECT set_id FROM beatmaps WHERE set_id >= %s ORDER BY set_id DESC LIMIT 1",
-                (BASE_ID_INCREMENT),
+            latest_submitted_set_id := await services.database.fetch_one(
+                "SELECT set_id FROM beatmaps WHERE set_id >= :increment ORDER BY set_id DESC LIMIT 1",
+                {"increment": BASE_ID_INCREMENT},
             )
         ):
             set_id = BASE_ID_INCREMENT
         else:
             set_id = latest_submitted_set_id["set_id"] + 1
 
-        latest_submitted_map_id = await services.sql.fetch(
-            "SELECT map_id FROM beatmaps WHERE map_id >= %s ORDER BY map_id DESC LIMIT 1",
-            (BASE_ID_INCREMENT),
-            _dict=False,
+        latest_submitted_map_id = await services.database.fetch_one(
+            "SELECT map_id FROM beatmaps WHERE map_id >= :increment ORDER BY map_id DESC LIMIT 1",
+            {"increment": BASE_ID_INCREMENT},
         )
 
         if not latest_submitted_map_id:
@@ -152,7 +152,7 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
     data = await form["osz2"].read()
     set_id = form["s"]
     patch = form["t"] == "2"
-    
+
     with open(f".data/osz2/{"PATCHED_" if patch else ""}{set_id}.osz2", "wb+") as osz2:
         osz2.write(data)
 
@@ -205,11 +205,13 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
         bmap.map_md5 = hashlib.md5(beatmap.raw_data).digest().hex()
 
         # TODO: proper beatmap update
-        if old_map := await services.sql.fetch(
-            "SELECT map_md5 FROM beatmaps WHERE map_id = %s", (bmap.map_id)
+        if old_map := await services.database.fetch_one(
+            "SELECT map_md5 FROM beatmaps WHERE map_id = :map_id",
+            {"map_id": bmap.map_id},
         ):
-            await services.sql.execute(
-                "DELETE FROM beatmaps WHERE map_md5 = %s", old_map["map_md5"]
+            await services.database.execute(
+                "DELETE FROM beatmaps WHERE map_md5 = :map_md5",
+                {"map_md5": old_map["map_md5"]},
             )
 
         await bmap.add_to_db()

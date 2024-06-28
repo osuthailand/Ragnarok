@@ -14,13 +14,8 @@ class Approved(IntEnum):
 
     @property
     def has_leaderboard(self) -> bool:
-        return self.value in (
-            self.RANKED,
-            self.APPROVED,
-            self.QUALIFIED,
-            self.LOVED
-        )
-    
+        return self.value in (self.RANKED, self.APPROVED, self.QUALIFIED, self.LOVED)
+
     @property
     def awards_pp(self) -> bool:
         return self.value in (self.RANKED, self.APPROVED)
@@ -34,5 +29,5 @@ class Approved(IntEnum):
             self.RANKED: 2,
             self.APPROVED: 3,
             self.QUALIFIED: 4,
-            self.LOVED: 5
+            self.LOVED: 5,
         }[self]

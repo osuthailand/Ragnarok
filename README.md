@@ -19,9 +19,9 @@ Creating a virtualenv for this project...
 $ pipenv shell
 ```
 
-After that you can install the requirements.
+After that you can install the needed packages.
 ```
-$ pip install -r requirements.txt
+$ pipenv install
 ```
 
 Once that's finished, you can go ahead and make a copy of the .env.example, by doing:

@@ -4,9 +4,6 @@
 .env
 /.data
 
-Pipfile
-Pipfile.lock
-
 .vscode
 .idea
 .mypy_cache

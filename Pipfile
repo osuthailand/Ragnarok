@@ -1,0 +1,28 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+databases = {extras = ["aiomysql"], version = "*"}
+aiohttp = "*"
+aiofiles = "*"
+numpy = "*"
+py3rijndael = "*"
+redis = "*"
+rina-pp-pyb = "*"
+starlette = "*"
+uvicorn = "*"
+uvloop = "*"
+python-multipart = "*"
+python-dotenv = "*"
+orjson = "*"
+cffi = "*"
+colorama = "*"
+timeago = "*"
+bcrypt = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.12"

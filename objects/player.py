@@ -343,8 +343,7 @@ class Player:
                 ach := services.get_achievement_by_id(achievement["achievement_id"])
             ):
                 services.logger.critical(
-                    f"user_achievements: Failed to fetch achievements (id: {
-                        achievement['achievement_id']})"
+                    f"user_achievements: Failed to fetch achievements (id: {achievement['achievement_id']})"
                 )
                 return
 

@@ -277,7 +277,7 @@ class Score:
                     s.pb.status = SubmitStatus.PASSED
 
                     await services.sql.execute(
-                        "UPDATE scores SET status = 2 WHERE user_id = %s AND gamemode = %s "
+                        "UPDATE scores SET status = 2, awards_pp = 0 WHERE user_id = %s AND gamemode = %s "
                         "AND map_md5 = %s AND mode = %s AND status = 3",
                         (s.player.id, s.gamemode, s.map.map_md5, s.mode.value),
                     )

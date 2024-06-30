@@ -493,7 +493,7 @@ async def send_public_message(p: Player, sr: Reader) -> None:
     # if so, post the 100%, 99%, etc.
     # pp for the map.
     if np := services.regex["np"].search(msg):
-        np_map = await Beatmap._get_beatmap_from_sql(beatmap_id=int(np.group(0)))
+        np_map = await Beatmap._get_beatmap_from_sql(beatmap_id=int(np.group(1)))
 
         if not np_map:
             return
@@ -616,7 +616,7 @@ async def send_private_message(p: Player, sr: Reader) -> None:
         p.send(msg, reciever)
     else:
         if np := services.regex["np"].search(msg):
-            np_map = await Beatmap.get_beatmap(beatmap_id=int(np.group(0)))
+            np_map = await Beatmap.get_beatmap(beatmap_id=int(np.group(1)))
 
             if not np_map:
                 return

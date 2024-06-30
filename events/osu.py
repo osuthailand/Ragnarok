@@ -474,7 +474,7 @@ async def score_submission(req: Request) -> Response:
 
             # announce that the previous first place holder
             # lost their rank 1 on this map in their recent activities
-            if cur_fp and cur_fp["user_id"] != s.player.id:
+            if cur_fp != s.player.id:
                 await services.database.execute(
                     "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
                     "VALUES (:user_id, :activity, :map_md5, :mode, :gamemode)",

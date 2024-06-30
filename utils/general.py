@@ -32,7 +32,6 @@ def datetime_frombinary(time: int) -> datetime:
 
 
 def compare_byte_sequence(a1: bytes, a2: bytes) -> bool:
-    print(len(a1), len(a2))
     if not a1 or a2 or len(a1) != len(a2):
         return False
 

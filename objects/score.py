@@ -7,7 +7,7 @@ from typing import Optional
 from base64 import b64decode
 from objects import services
 from dataclasses import dataclass
-from rina_pp_pyb import Performance, Beatmap as BMap
+from rina_pp_pyb import GameMode, Performance, Beatmap as BMap
 
 from constants.mods import Mods
 from objects.beatmap import Beatmap
@@ -16,6 +16,7 @@ from constants.playmode import Mode
 from py3rijndael.rijndael import RijndaelCbc
 from py3rijndael.paddings import ZeroPadding
 from objects.player import Player
+from databases.interfaces import Record
 
 
 @dataclass
@@ -102,7 +103,7 @@ class Score:
         )
 
     @classmethod
-    async def set_data_from_sql(cls, data: dict[str, float | int | str]) -> "Score":
+    async def set_data_from_sql(cls, data: Record) -> "Score":
         s = cls()
 
         s.id = data["id"]
@@ -212,7 +213,7 @@ class Score:
                 bmap = BMap(path=f".data/beatmaps/{s.map.file}")
 
                 if s.mode != bmap.mode:
-                    bmap.convert(s.mode)
+                    bmap.convert(GameMode(s.mode.value))
 
                 perf = Performance(
                     n300=s.count_300,
@@ -247,7 +248,7 @@ class Score:
                     "mode": s.mode.value,
                 },
             ):
-                s.pb = await Score.set_data_from_sql(dict(prev_best))
+                s.pb = await Score.set_data_from_sql(prev_best)
 
                 # identical to `calculate_position(self)`
                 position = await services.database.fetch_val(

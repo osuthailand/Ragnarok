@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import IntEnum, unique
+from typing import Union
 import zipfile
 import struct
 import hashlib
@@ -60,7 +61,7 @@ class FileInfo:
     name: str
     offset: int
     size: int
-    hash: list[bytes]
+    hash: tuple[bytes]
     created: datetime
     modified: datetime
 
@@ -100,7 +101,7 @@ class XXTeaDecryptReader:
     def __exit__(self, exc_type, exc_value, traceback):
         pass
 
-    def read_bytes(self, size: int):
+    def read_bytes(self, size: int) -> tuple[bytes]:
         dec = xxtea_decrypt(self.data[:size], self.key)
         self.offset += size
         return struct.unpack(f"<{"B"*size}", dec)
@@ -204,7 +205,7 @@ class OSZ2:
         return files
 
     @classmethod
-    def parse(cls, raw: bytes, file_type: int = 1) -> "OSZ2":
+    def parse(cls, raw: bytes, file_type: int = 1) -> Union["OSZ2", None]:
         match file_type:
             case 1:
                 return cls().parse_full_submit(raw)
@@ -228,7 +229,7 @@ class OSZ2:
 
         return x
 
-    def parse_patch(self, raw: bytes) -> "OSZ2":
+    def parse_patch(self, raw: bytes) -> Union["OSZ2", None]:
         data = raw
         reader = Reader(data)
 
@@ -322,7 +323,7 @@ class OSZ2:
 
         services.logger.info("OK!")
 
-    def parse_full_submit(self, raw: bytes) -> "OSZ2":
+    def parse_full_submit(self, raw: bytes) -> Union["OSZ2", None]:
         data = raw
         reader = Reader(data)
 

@@ -55,7 +55,8 @@ class Mods(IntFlag):
 
     DISABLED = CINEMA | TARGET | AUTOPLAY | AUTOPILOT
 
-    def __dict__(self) -> dict["Mods", str]:
+    @property
+    def as_dict(self) -> dict["Mods", str]:
         return {
             self.NONE: "NM",
             self.NOFAIL: "NF",
@@ -92,7 +93,7 @@ class Mods(IntFlag):
 
     @property
     def short_name(self) -> str:
-        return "".join(name for mod, name in self.__dict__().items() if self & mod)
+        return "".join(name for mod, name in self.as_dict.items() if self & mod)
 
     @classmethod
     def from_str(cls, s: str) -> "Mods":
@@ -101,7 +102,7 @@ class Mods(IntFlag):
         str_mods = [(s[i : i + 2]) for i in range(0, len(s), 2)]
 
         for mod in str_mods:
-            for key, value in mods.__dict__().items():
+            for key, value in mods.as_dict.items():
                 if value == mod.upper():
                     mods |= key
                     break

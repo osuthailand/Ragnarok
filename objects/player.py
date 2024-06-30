@@ -8,7 +8,7 @@ import aiohttp
 from copy import copy
 from packets import writer
 from objects import services
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 from constants.mods import Mods
 from objects.match import Match
@@ -76,8 +76,8 @@ class Player:
         self.friends: set[int] = set()
         self.channels: list[Channel] = []
         self.spectators: list[Player] = []
-        self.spectating: Player = None
-        self.match: Match = None
+        self.spectating: Player | None = None
+        self.match: Match | None = None
 
         self.ranked_score: int = 0
         self.accuracy: float = 0.0
@@ -105,11 +105,11 @@ class Player:
             not self.privileges & Privileges.PENDING
         )
         self.using_rina: bool = self.client_version.endswith("rina")
-        self.is_staff: bool = self.privileges & Privileges.BAT
+        self.is_staff: bool = bool(self.privileges & Privileges.BAT)
         self.is_verified: bool = not self.privileges & Privileges.PENDING
 
-        self.last_np: "Beatmap" = None
-        self.last_score: "Score" = None
+        self.last_np: Union["Beatmap", None] = None
+        self.last_score: Union["Score", None] = None
 
     def __repr__(self) -> str:
         return (
@@ -251,18 +251,8 @@ class Player:
         if m.host == self.id:
             slot.host = True
 
-        if not self.match.chat:
-            mc = Channel(
-                **{
-                    "raw": f"#multi_{self.match.match_id}",
-                    "name": "#multiplayer",
-                    "description": self.match.match_name,
-                    "public": False,
-                    "ephemeral": True,
-                }
-            )
-            services.channels.add(mc)
-            self.match.chat = mc
+        if self.match.chat not in services.channels:
+            services.channels.add(chan=self.match.chat)
 
         self.match.chat.connect(self)
 
@@ -300,19 +290,19 @@ class Player:
         if m.host == self.id:
             services.logger.info("Host left, rotating host.")
             for slot in m.slots:
-                if not slot.host and slot.status & SlotStatus.OCCUPIED:
+                if not slot.host and slot.status.is_occupied:
                     m.transfer_host(slot)
 
                     break
 
         m.enqueue_state(immune={self.id}, lobby=True)
 
-    def send_message(self, message, reciever: "Player"):
-        reciever.enqueue(
+    def send(self, message: str, recipent: "Player"):
+        recipent.enqueue(
             writer.send_message(
                 sender=self.username,
                 message=message,
-                channel=reciever.username,
+                channel=recipent.username,
                 id=self.id,
             )
         )
@@ -480,7 +470,7 @@ class Player:
 
         await self.save_location()
 
-    async def set_location(self, get: bool = False):
+    async def set_location(self, get: bool = False) -> tuple[Any, ...] | None:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(
                 f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"

@@ -1,6 +1,5 @@
 from enum import IntEnum, unique
 import os
-import time
 import math
 import copy
 import bcrypt
@@ -26,7 +25,6 @@ from constants.playmode import Mode  # this is being used for achievements condi
 from urllib.parse import unquote
 from objects.beatmap import Beatmap
 from starlette.routing import Router
-from constants.beatmap import Approved
 from starlette.requests import Request
 from constants.player import Privileges
 from objects.score import Score, SubmitStatus
@@ -79,9 +77,9 @@ osu = Router()
 @osu.route("/users", methods=["POST"])
 async def registration(req: Request) -> Response:
     form = await req.form()
-    username = form["user[username]"]
-    email = form["user[user_email]"]
-    pwd = form["user[password]"]
+    username = str(form["user[username]"])
+    email = str(form["user[user_email]"])
+    pwd = str(form["user[password]"])
 
     error_response = defaultdict(list)
 
@@ -326,10 +324,10 @@ async def score_submission(req: Request) -> Response:
     submission_key = f"osu!-scoreburgr---------{form["osuver"]}"
 
     s = await Score.set_data_from_submission(
-        form.getlist("score")[0],
-        form["iv"],
+        form.getlist("score")[0],  # type: ignore
+        form["iv"],  # type: ignore
         submission_key,
-        int(form["x"]),
+        int(form["x"]),  # type: ignore
     )
 
     if not s or not s.player or not s.map or s.player.is_restricted:
@@ -351,7 +349,7 @@ async def score_submission(req: Request) -> Response:
         {"map_md5": s.map.map_md5, "mode": s.mode, "gamemode": s.gamemode},
     )
 
-    s.playtime = int(form["st" if passed else "ft"]) // 1000  # milliseconds
+    s.playtime = int(form["st" if passed else "ft"]) // 1000  # type: ignore
     s.id = await s.save_to_db()
     s.map.plays += 1
 
@@ -397,7 +395,7 @@ async def score_submission(req: Request) -> Response:
 
     # save replay
     with open(f".data/replays/{s.id}.osr", "wb+") as file:
-        file.write(await form["score"].read())
+        file.write(await form["score"].read())  # type: ignore
 
     # update map passes
     s.map.passes += 1
@@ -534,15 +532,14 @@ async def score_submission(req: Request) -> Response:
                 stats.achievements.append(user_achievement)
                 _achievements.append(ach)
         except:
-            # usual "failed" conditions, if because the Player.last_score is none
+            # usually "failed" conditions are due to `Player.last_score` is none
             continue
 
     achievements = "/".join(str(ach) for ach in _achievements)
     gamemode = "[Relax]" if s.gamemode == Gamemode.RELAX else ""
 
     services.logger.info(
-        f"{stats.username} submitted a score on {
-            s.map.full_title} ({s.mode.to_string()}: {s.pp}pp) {gamemode}"
+        f"{stats.username} submitted a score on {s.map.full_title} ({s.mode.to_string()}: {s.pp:.2f}pp) {gamemode}"
     )
 
     # cache the score as the latest score on current player session.
@@ -749,7 +746,7 @@ async def post_screenshot(req: Request, p: Player) -> Response:
     form = await req.form()
 
     async with aiofiles.open(f".data/ss/{id}.png", "wb+") as ss:
-        await ss.write(await form["ss"].read())
+        await ss.write(await form["ss"].read())  # type: ignore
 
     return Response(content=f"{id}.png".encode())
 
@@ -817,16 +814,16 @@ async def osu_direct(req: Request, p: Player) -> Response:
                 hasStoryboard = "1" if beatmapset["storyboard"] else ""
 
                 directList += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
-                directList += f"10|{lastUpd}|{sid}|{threadId}|{
-                        hasVideo}|{hasStoryboard}|0||"
+                directList += (
+                    f"10|{lastUpd}|{sid}|{threadId}|{hasVideo}|{hasStoryboard}|0||"
+                )
 
                 for i, beatmaps in enumerate(beatmapset["beatmaps"]):
                     diffName = beatmaps["version"]
                     starsRating = beatmaps["difficulty_rating"]
                     mode = beatmaps["mode_int"]
 
-                    directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{
-                        starsRating}@{mode}"
+                    directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{starsRating}@{mode}"
 
                     if i < len(beatmapset["beatmaps"]) - 1:
                         directList += ","
@@ -842,7 +839,7 @@ async def osu_search_set(req: Request, p: Player) -> Response:
     match req.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
         case {"s": sid}:  # Beatmap Set
-            bmap = await services.beatmaps.get_by_set_id(sid)
+            bmap = await services.beatmaps.get_by_set_id(sid)  # type: ignore
         case {"b": bid}:  # Beatmap ID
             bmap = await services.beatmaps.get_by_map_id(bid)  # type: ignore
         case {"c": hash}:  # Checksum

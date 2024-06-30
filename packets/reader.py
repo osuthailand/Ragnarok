@@ -162,12 +162,12 @@ class Reader:
     def read_float32(self) -> float:
         ret = struct.unpack("<f", self.data[:4])
         self.offset += 4
-        return ret
+        return ret[0]
 
     def read_float64(self) -> float:
         ret = struct.unpack("<d", self.data[:8])
         self.offset += 8
-        return ret
+        return ret[0]
 
     def read_str(self, dotNETString: bool = False) -> str:
         if not dotNETString:
@@ -236,7 +236,7 @@ class Reader:
             slot.team = SlotTeams(self.read_int8())
 
         for slot in m.slots:
-            if slot.status & SlotStatus.OCCUPIED:
+            if slot.status.is_occupied:
                 self.offset += 4
 
         m.host = self.read_int32()

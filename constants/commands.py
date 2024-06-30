@@ -1,15 +1,11 @@
-import math
 import copy
 import os
 import signal
 import sys
-import uuid
-import time
 import random
 import asyncio
 import settings
 
-from events import osu
 from objects.achievement import UserAchievement
 from objects.beatmap import Beatmap
 from objects.match import Match
@@ -20,7 +16,7 @@ from packets import writer
 from typing import Callable
 from objects import services
 from dataclasses import dataclass
-from rina_pp_pyb import Beatmap as BMap, Performance
+from rina_pp_pyb import Beatmap as BMap, GameMode, Performance
 
 from objects.bot import Bot
 from constants.mods import Mods
@@ -272,9 +268,9 @@ def pp_message_format(
 async def calc_pp_for_map(ctx: Context) -> str | None:
     """Show PP for the previous requested beatmap with requested info (Don't use spaces for multiple mods (eg: !pp +HDHR))"""
     executed_from_match = False
-    if "[MULTI]" in ctx.args and ctx.author.match:
+    if "[MULTI]" in ctx.args and (match := ctx.author.match):
         executed_from_match = True
-        _map = ctx.author.match.map
+        _map = match.map
     else:
         _map = ctx.author.last_np
 
@@ -294,7 +290,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
         mode = ctx.author.play_mode
 
     if mode != bmap.mode:
-        bmap.convert(mode)
+        bmap.convert(GameMode(mode))
 
     calc = Performance()
 
@@ -303,6 +299,8 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
 
     # maybe regex would be better to use for this case?
     if executed_from_match:
+        assert ctx.author.match is not None
+
         mods = ctx.author.match.mods
     else:
         for arg in ctx.args:
@@ -428,6 +426,7 @@ async def make_multi(ctx: Context) -> str | None:
 @rmp_command("name")
 @ensure_match(host=True)
 async def change_multi_name(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     if not ctx.args:
         return "No name has been specified."
 
@@ -443,6 +442,7 @@ async def change_multi_name(ctx: Context) -> str | None:
 @rmp_command("lock")
 @ensure_match(host=True)
 async def lock_match(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
     m.locked = True
 
@@ -453,6 +453,7 @@ async def lock_match(ctx: Context) -> str | None:
 @rmp_command("unlock")
 @ensure_match(host=True)
 async def unlock_match(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
     m.locked = True
 
@@ -464,12 +465,13 @@ async def unlock_match(ctx: Context) -> str | None:
 @ensure_match(host=True)
 async def start_match(ctx: Context) -> str | None:
     """Start the multiplayer when all players are ready or force start it."""
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if ctx.args:
         if ctx.args[0] == "force":
             for slot in m.slots:
-                if slot.status & SlotStatus.OCCUPIED:
+                if slot.player is not None and slot.status.is_occupied:
                     if slot.status != SlotStatus.NOMAP:
                         slot.status = SlotStatus.PLAYING
                         slot.player.enqueue(writer.match_start(m))
@@ -480,20 +482,18 @@ async def start_match(ctx: Context) -> str | None:
             return "Starting match... Good luck!"
 
     if not all(
-        slot.status == SlotStatus.READY
-        for slot in m.slots
-        if slot.status & SlotStatus.OCCUPIED
+        slot.status == SlotStatus.READY for slot in m.slots if slot.status.is_occupied
     ):
         ctx.reciever.send(
-            message="All players aren't ready, would you like to force start? (y/n)",
-            sender=services.bot,
+            "All players aren't ready, would you like to force start? (y/n)",
+            services.bot,
         )
         response = await ctx.await_response()
         if response == "n":
             return
 
     for slot in m.slots:
-        if slot.status & SlotStatus.OCCUPIED:
+        if slot.status.is_occupied:
             slot.status = SlotStatus.PLAYING
 
     m.in_progress = True
@@ -506,10 +506,11 @@ async def start_match(ctx: Context) -> str | None:
 @rmp_command("abort", aliases=["ab"])
 @ensure_match(host=True)
 async def abort_match(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     for s in m.slots:
-        if s.status == SlotStatus.PLAYING:
+        if s.status == SlotStatus.PLAYING and s.player is not None:
             s.player.enqueue(writer.write(BanchoPackets.CHO_MATCH_ABORT))
             s.status = SlotStatus.NOTREADY
 
@@ -526,6 +527,7 @@ async def abort_match(ctx: Context) -> str | None:
 @ensure_match(host=True)
 async def win_condition(ctx: Context) -> str | None:
     """Change win condition in a multiplayer match."""
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if not ctx.args:
@@ -552,6 +554,7 @@ async def win_condition(ctx: Context) -> str | None:
 @rmp_command("move")
 @ensure_match(host=True)
 async def move_slot(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if len(ctx.args) < 2:
@@ -559,15 +562,20 @@ async def move_slot(ctx: Context) -> str | None:
 
     slot_id = int(ctx.args[1]) - 1
 
-    player = services.players.get(ctx.args[0])
+    if not (player := services.players.get(ctx.args[0])):
+        return
 
     if not (target := m.find_user(player)):
         return "Slot is not occupied."
 
-    to = m.find_slot(slot_id)
-    assert to is not None
+    assert target.player is not None
 
-    if to.status & SlotStatus.OCCUPIED:
+    if not (to := m.find_slot(slot_id)):
+        return "out of range."
+
+    assert to.player is not None
+
+    if to.status.is_occupied:
         return "That slot is already occupied."
 
     to.copy_from(target)
@@ -581,6 +589,7 @@ async def move_slot(ctx: Context) -> str | None:
 @rmp_command("size")
 @ensure_match(host=True)
 async def change_size(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if not ctx.args:
@@ -592,9 +601,10 @@ async def change_size(ctx: Context) -> str | None:
         return "You can't choose a size bigger than 16."
 
     for slot_id in range(0, size):
-        slot = m.find_slot(slot_id)
+        if not (slot := m.find_slot(slot_id)):
+            return
 
-        if not slot.status & SlotStatus.OCCUPIED:
+        if not slot.status.is_occupied:
             slot.status = SlotStatus.LOCKED
 
     return f"Changed size to {ctx.args[0]}"
@@ -603,6 +613,7 @@ async def change_size(ctx: Context) -> str | None:
 @rmp_command("get")
 @ensure_match(host=False)
 async def get_beatmap(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
     mirrors = {
         "chimu": settings.MIRROR_CHIMU,
@@ -635,11 +646,13 @@ async def get_beatmap(ctx: Context) -> str | None:
 @rmp_command("invite")
 @ensure_match(host=False)
 async def invite_people(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if not ctx.args:
-        ctx.reciever.send(message="Who do you want to invite?", sender=services.bot)
-        response = await ctx.await_response()
+        ctx.reciever.send("Who do you want to invite?", services.bot)
+        if not (response := await ctx.await_response()):
+            return "Command timed out."
 
         if not (target := services.players.get(response)):
             return "The user is not online."
@@ -650,10 +663,10 @@ async def invite_people(ctx: Context) -> str | None:
     if target is ctx.author:
         return "You can't invite yourself."
 
-    ctx.author.send_message(
-        f"Come join my multiplayer match: [osump://{m.match_id}/{
-            m.match_pass.replace(' ', '_')} {m.match_name}]",
-        reciever=target,
+    ctx.author.send(
+        "Come join my multiplayer match: "
+        f"[osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
+        target,
     )
 
     return f"Invited {target.username}"
@@ -662,12 +675,14 @@ async def invite_people(ctx: Context) -> str | None:
 @rmp_command("host")
 @ensure_match(host=True)
 async def change_host(ctx: Context) -> str | None:
+    assert ctx.author.match is not None
     m = ctx.author.match
 
     if not ctx.args:
-        ctx.reciever.send(message="Who do you want to invite?", sender=services.bot)
+        ctx.reciever.send("Who do you want to invite?", services.bot)
 
-        response = await ctx.await_response()
+        if not (response := await ctx.await_response()):
+            return "Command timed out."
 
         if not (target := services.players.get(response)):
             return "The user either is not online or doesn't exist."
@@ -739,9 +754,6 @@ async def kick_user(ctx: Context) -> str | None:
 @ensure_channel
 async def restrict_user(ctx: Context) -> str | None:
     """Restrict users from the server."""
-    if ctx.reciever.name != "#staff":
-        return "You can't do that here."
-
     if len(ctx.args) < 1:
         return "Usage: !restrict <username>"
 
@@ -770,9 +782,6 @@ async def restrict_user(ctx: Context) -> str | None:
 @ensure_channel
 async def unrestrict_user(ctx: Context) -> str | None:
     """Unrestrict users from the server."""
-    if ctx.reciever.name != "#staff":
-        return "You can't do that here."
-
     if len(ctx.args) < 1:
         return "Usage: !unrestrict <username>"
 
@@ -803,7 +812,7 @@ async def unrestrict_user(ctx: Context) -> str | None:
 @ensure_player
 async def bot_commands(ctx: Context) -> str | None:
     """Handle the bot ingame."""
-    if not ctx.reciever.bot:
+    if type(ctx.reciever) != Bot:
         return
 
     if not ctx.args:
@@ -896,11 +905,11 @@ async def system(ctx: Context) -> str | None:
     match ctx.args[0].lower():
         case "restart":
             # TODO: add timer
-            ctx.reciever.send(message="Restarting server...", sender=services.bot)
+            ctx.reciever.send("Restarting server...", services.bot)
             os.execl(sys.executable, sys.executable, *sys.argv)
 
         case "shutdown":
-            ctx.reciever.send(message="Shutting down server...", sender=services.bot)
+            ctx.reciever.send("Shutting down server...", services.bot)
             os.kill(os.getpid(), signal.SIGTERM)
 
         case "reload":

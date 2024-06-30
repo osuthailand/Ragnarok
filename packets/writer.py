@@ -1,11 +1,12 @@
 from constants.player import Ranks, Privileges
 from constants.packets import BanchoPackets
-from constants.match import SlotStatus
 from typing import Any, TYPE_CHECKING
 from enum import unique, IntEnum
 from objects import services
 import struct
 import math
+
+from objects.match import Slot
 
 
 if TYPE_CHECKING:
@@ -63,15 +64,15 @@ def write_uleb128(value: int) -> bytearray:
     return data
 
 
-def write_byte(value: int) -> bytearray:
-    return bytearray(struct.pack("<b", value))
+def write_byte(value: int) -> bytes:
+    return struct.pack("<b", value)
 
 
-def write_ubyte(value: int) -> bytearray:
+def write_ubyte(value: int) -> bytes:
     return struct.pack("<B", value)
 
 
-def write_int32(value: int) -> bytearray:
+def write_int32(value: int) -> bytes:
     return struct.pack("<i", value)
 
 
@@ -84,20 +85,20 @@ def write_int32_list(values: tuple[int]) -> bytearray:
     return data
 
 
-def write_multislots(slots) -> bytearray:
+def write_multislots(slots: list[Slot]) -> bytearray:
     ret = bytearray()
 
     ret.extend([s.status for s in slots])
     ret.extend([s.team for s in slots])
 
     for slot in slots:
-        if slot.status & SlotStatus.OCCUPIED:
+        if slot.player is not None and slot.status.is_occupied:
             ret += slot.player.id.to_bytes(4, "little")
 
     return ret
 
 
-def write_multislotsmods(slots) -> bytearray:
+def write_multislotsmods(slots: list[Slot]) -> bytearray:
     ret = bytearray()
 
     for slot in slots:
@@ -128,30 +129,30 @@ def write_msg(sender: str, msg: str, chan: str, id: int) -> bytearray:
     return ret
 
 
-def write(pID: int, *args: tuple[Any, ...]) -> bytes:
+def write(pID: int, *args: tuple[Any, Types]) -> bytes:
     data = bytearray(struct.pack("<Hx", pID))
 
-    for args, d_type in args:
+    for arg, d_type in args:
         if d_type == Types.string:
-            data += write_str(args)
+            data += write_str(arg)
         elif d_type == Types.raw:
-            data += args
+            data += arg
         elif d_type == Types.int32:
-            data += write_int32(args)
+            data += write_int32(arg)
         elif d_type == Types.int32_list:
-            data += write_int32_list(args)
+            data += write_int32_list(arg)
         elif d_type == Types.multislots:
-            data += write_multislots(args)
+            data += write_multislots(arg)
         elif d_type == Types.multislotsmods:
-            data += write_multislotsmods(args)
+            data += write_multislotsmods(arg)
         elif d_type == Types.byte:
-            data += write_byte(args)
+            data += write_byte(arg)
         elif d_type == Types.ubyte:
-            data += write_ubyte(args)
+            data += write_ubyte(arg)
         elif d_type == Types.message:
-            data += write_msg(*args)
+            data += write_msg(*arg)
         else:
-            data += struct.pack(spec[d_type], args)
+            data += struct.pack(spec[d_type], arg)
 
     data[3:3] += struct.pack("<I", len(data) - 3)
     return bytes(data)
@@ -355,7 +356,7 @@ def friends_list(ids: set[int]) -> bytes:
     return write(BanchoPackets.CHO_FRIENDS_LIST, (ids, Types.int32_list))
 
 
-def get_match_struct(m: "Match", send_pass: bool = False) -> bytes:
+def get_match_struct(m: "Match", send_pass: bool = False) -> list[tuple[Any, Types]]:
     struct = [
         (m.match_id, Types.int16),
         (m.in_progress, Types.int8),
@@ -371,6 +372,8 @@ def get_match_struct(m: "Match", send_pass: bool = False) -> bytes:
             struct.append(("trollface", Types.string))
     else:
         struct.append(("", Types.string))
+
+    assert m.map is not None
 
     struct.extend(
         (
@@ -440,7 +443,7 @@ def match_score_update(s: "ScoreFrame", slot_id: int, raw_data: bytes) -> bytes:
 
     ret += len(raw_data).to_bytes(4, "little")
 
-    ret += s.time.to_bytes(4, "little", signed="True")
+    ret += s.time.to_bytes(4, "little", signed=True)
     ret += struct.pack("<b", slot_id)
 
     ret += struct.pack(

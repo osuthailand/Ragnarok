@@ -13,7 +13,7 @@ from packets import writer
 from typing import Callable
 from objects import services
 from constants import commands as cmd
-from rina_pp_pyb import Performance, Beatmap as BMap
+from rina_pp_pyb import GameMode, Performance, Beatmap as BMap
 
 from constants.match import *
 from constants.mods import Mods
@@ -314,7 +314,7 @@ async def login(req: Request) -> Response:
         "ip": ip,
     }
 
-    p = Player(**user_info, **kwargs)
+    p = Player(**dict(user_info), **kwargs)
     p.last_update = time.time()
 
     services.players.add(p)
@@ -329,11 +329,11 @@ async def login(req: Request) -> Response:
     )
 
     if not p.is_verified:
-        services.bot.send_message(
+        services.bot.send(
             "Since we're still in beta, you'll need to verify your account with a beta key given by one of the founders. "
             "You'll have 30 minutes to verify the account, or the account will be deleted. "
             "To verify your account, please enter !verify <your beta key>",
-            reciever=p,
+            p,
         )
 
     if not (user_info["lon"] or user_info["lat"]) or user_info["country"] == "XX":
@@ -356,7 +356,7 @@ async def login(req: Request) -> Response:
             "status_text": p.status_text,
             "beatmap_id": p.beatmap_id,
         },
-    )
+    )  # type: ignore
 
     data += writer.user_id(p.id)
     data += writer.user_privileges(p.privileges)
@@ -429,7 +429,7 @@ async def change_action(p: Player, sr: Reader) -> None:
             "status_text": p.status_text,
             "beatmap_id": p.beatmap_id,
         },
-    )
+    )  # type: ignore
 
     if not p.is_restricted:
         services.players.enqueue(writer.update_stats(p))
@@ -493,8 +493,12 @@ async def send_public_message(p: Player, sr: Reader) -> None:
     # if so, post the 100%, 99%, etc.
     # pp for the map.
     if np := services.regex["np"].search(msg):
-        services.logger.info(np.groups())
-        p.last_np = await Beatmap._get_beatmap_from_sql("", np.groups(0), 0)
+        np_map = await Beatmap._get_beatmap_from_sql(beatmap_id=int(np.group(0)))
+
+        if not np_map:
+            return
+
+        p.last_np = np_map
         asyncio.create_task(_handle_command(chan, "!pp ", p))
 
     # this is for whenever the user failed to
@@ -506,8 +510,7 @@ async def send_public_message(p: Player, sr: Reader) -> None:
         services.await_response[p.token] = msg
 
     # commands should be run on another thread
-    # so slower commands (pp recalc) don't stop
-    # the server.
+    # so slower commands don't stop the server.
     if msg[0] == services.prefix:
         asyncio.create_task(_handle_command(chan, msg, p))
 
@@ -584,7 +587,9 @@ async def spectating_frames(p: Player, sr: Reader) -> None:
 async def unable_to_spec(p: Player, sr: Reader) -> None:
     ret = writer.spectator_cant_spectate(p.id)
 
-    host = p.spectating
+    if not (host := p.spectating):
+        return
+
     host.enqueue(ret)
 
     for t in host.spectators:
@@ -608,19 +613,24 @@ async def send_private_message(p: Player, sr: Reader) -> None:
         return
 
     if not reciever.bot:
-        p.send_message(msg, reciever=reciever)
+        p.send(msg, reciever)
     else:
         if np := services.regex["np"].search(msg):
-            p.last_np = await Beatmap.get_beatmap(beatmap_id=np.groups(1)[0])
+            np_map = await Beatmap.get_beatmap(beatmap_id=int(np.group(0)))
+
+            if not np_map:
+                return
+
+            p.last_np = np_map
 
         if msg[0] == services.prefix:
             if resp := await cmd.handle_commands(
                 message=msg, sender=p, reciever=services.bot
             ):
-                services.bot.send_message(resp, reciever=p)
+                services.bot.send(resp, p)
                 return
 
-        services.bot.send_message("beep boop", reciever=p)
+        services.bot.send("beep boop", p)
 
 
 # id: 29
@@ -685,7 +695,7 @@ async def mp_change_slot(p: Player, sr: Reader) -> None:
 
     slot = m.slots[slot_id]
 
-    if slot.status == SlotStatus.OCCUPIED:
+    if slot.status.is_occupied:
         services.logger.error(
             f"{p.username} tried to change to an occupied slot ({m!r})"
         )
@@ -748,7 +758,7 @@ async def mp_change_settings(p: Player, sr: Reader) -> None:
     if m.host != p.id:
         return
 
-    if new_match.map is not None:
+    if new_match.map is not None and m.map is not None:
         if new_match.map.map_md5 != m.map.map_md5:
             m.map = new_match.map
             m.mode = Mode(new_match.mode)
@@ -791,8 +801,8 @@ async def mp_start(p: Player, sr: Reader) -> None:
         return
 
     for slot in m.slots:
-        if slot.status & SlotStatus.OCCUPIED:
-            if slot.status != SlotStatus.NOMAP:
+        if slot.status.is_occupied:
+            if slot.player is not None and slot.status != SlotStatus.NOMAP:
                 slot.status = SlotStatus.PLAYING
                 slot.player.enqueue(writer.match_start(m))
 
@@ -812,7 +822,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
     raw = raw_sr.read_raw()
     s = sr.read_scoreframe()
 
-    if m.pp_win_condition:
+    if m.pp_win_condition and m.map is not None:
         if os.path.isfile(f".data/beatmaps/{m.map.map_id}.osu"):
             # should not happen
             if not (slot := m.find_user(p)):
@@ -821,7 +831,7 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
             bmap = BMap(path=f".data/beatmaps/{m.map.map_id}.osu")
 
             if bmap.mode != m.mode:
-                bmap.convert(m.mode)
+                bmap.convert(GameMode(m.mode.value))
 
             calc = Performance(
                 n300=s.count_300,
@@ -845,12 +855,8 @@ async def mp_score_update(p: Player, sr: Reader) -> None:
                 f"MATCH {m.match_id}: Failed to update pp, because the .osu file doesn't exist."
             )
 
-    slot_id = m.find_user_slot(p)
-
-    if services.debug:
-        services.logger.debug(
-            f"{p.username} has slot id {slot_id} and has incoming score update."
-        )
+    if (slot_id := m.find_user_slot(p)) is None:
+        return
 
     m.enqueue(writer.match_score_update(s, slot_id, raw))
 
@@ -862,7 +868,9 @@ async def mp_complete(p: Player, sr: Reader) -> None:
         return
 
     players_played = [
-        slot.player for slot in match.slots if slot.status == SlotStatus.PLAYING
+        slot.player
+        for slot in match.slots
+        if slot.status == SlotStatus.PLAYING and slot.player is not None
     ]
 
     for slot in match.slots:
@@ -872,7 +880,7 @@ async def mp_complete(p: Player, sr: Reader) -> None:
     match.in_progress = False
 
     for slot in match.slots:
-        if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
+        if slot.status.is_occupied and slot.status != SlotStatus.NOMAP:
             slot.status = SlotStatus.NOTREADY
         slot.skipped = False
         slot.loaded = False
@@ -901,7 +909,8 @@ async def mp_change_mods(p: Player, sr: Reader) -> None:
                 if slot.status == SlotStatus.READY:
                     slot.status = SlotStatus.NOTREADY
 
-        slot = match.find_user(p)
+        if not (slot := match.find_user(p)):
+            return
 
         slot.mods = Mods(mods & ~Mods.MULTIPLAYER)
     else:
@@ -911,7 +920,7 @@ async def mp_change_mods(p: Player, sr: Reader) -> None:
         match.mods = Mods(mods)
 
         for slot in match.slots:
-            if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
+            if slot.status.is_occupied and slot.status != SlotStatus.NOMAP:
                 slot.status = SlotStatus.NOTREADY
     match.enqueue_state()
 
@@ -922,7 +931,10 @@ async def mp_load_complete(p: Player, sr: Reader) -> None:
     if not (match := p.match) or not match.in_progress:
         return
 
-    match.find_user(p).loaded = True
+    if not (slot := match.find_user(p)):
+        return
+
+    slot.loaded = True
 
     if all(s.loaded for s in match.slots if s.status == SlotStatus.PLAYING):
         match.enqueue(writer.match_all_ready())
@@ -934,7 +946,10 @@ async def mp_no_beatmap(p: Player, sr: Reader) -> None:
     if not (match := p.match):
         return
 
-    match.find_user(p).status = SlotStatus.NOMAP
+    if not (slot := match.find_user(p)):
+        return
+
+    slot.status = SlotStatus.NOMAP
 
     match.enqueue_state()
 
@@ -945,7 +960,8 @@ async def mp_unready(p: Player, sr: Reader) -> None:
     if not (match := p.match):
         return
 
-    slot = match.find_user(p)
+    if not (slot := match.find_user(p)):
+        return
 
     if slot.status == SlotStatus.NOTREADY:
         return
@@ -972,7 +988,10 @@ async def has_beatmap(p: Player, sr: Reader) -> None:
     if not (match := p.match):
         return
 
-    match.find_user(p).status = SlotStatus.NOTREADY
+    if not (slot := match.find_user(p)):
+        return
+
+    slot.status = SlotStatus.NOTREADY
 
     match.enqueue_state()
 
@@ -983,7 +1002,8 @@ async def skip_request(p: Player, sr: Reader) -> None:
     if not (match := p.match) or not match.in_progress:
         return
 
-    slot = match.find_user(p)
+    if not (slot := match.find_user(p)):
+        return
 
     if slot.skipped:
         return
@@ -1022,6 +1042,8 @@ async def mp_transfer_host(p: Player, sr: Reader) -> None:
     if not (slot := match.find_slot(slot_id)):
         return
 
+    assert slot.player is not None
+
     match.host = slot.player.id
     slot.player.enqueue(writer.match_transfer_host())
 
@@ -1046,7 +1068,8 @@ async def mp_change_team(p: Player, sr: Reader) -> None:
     if not (match := p.match) or match.in_progress:
         return
 
-    slot = match.find_user(p)
+    if not (slot := match.find_user(p)):
+        return
 
     if slot.team == SlotTeams.BLUE:
         slot.team = SlotTeams.RED
@@ -1055,7 +1078,7 @@ async def mp_change_team(p: Player, sr: Reader) -> None:
 
     # Should this really be for every occupied slot? or just the user changing team?
     for slot in match.slots:
-        if slot.status & SlotStatus.OCCUPIED and slot.status != SlotStatus.NOMAP:
+        if slot.status.is_occupied and slot.status != SlotStatus.NOMAP:
             slot.status = SlotStatus.NOTREADY
 
     match.enqueue_state()
@@ -1071,8 +1094,7 @@ async def part_channel(p: Player, sr: Reader) -> None:
 
     if not (chan := services.channels.get(_chan)):
         services.logger.warn(
-            f"{p.username} tried to part from {
-                 _chan}, but channel doesn't exist."
+            f"{p.username} tried to part from {_chan}, but channel doesn't exist."
         )
         return
 
@@ -1110,10 +1132,10 @@ async def mp_invite(p: Player, sr: Reader) -> None:
         p.shout("You can't invite someone who's offline.")
         return
 
-    p.send_message(
-        f"Come join my multiplayer match: [osump://{m.match_id}/{
-            m.match_pass.replace(' ', '_')} {m.match_name}]",
-        reciever=target,
+    p.send(
+        "Come join my multiplayer match: "
+        f"[osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
+        target,
     )
 
 
@@ -1131,7 +1153,7 @@ async def change_pass(p: Player, sr: Reader) -> None:
     m.match_pass = new_data.match_pass
 
     for slot in m.slots:
-        if slot.status & SlotStatus.OCCUPIED:
+        if slot.player is not None and slot.status.is_occupied:
             slot.player.enqueue(writer.match_change_password(new_data.match_pass))
 
     m.enqueue_state(lobby=True)

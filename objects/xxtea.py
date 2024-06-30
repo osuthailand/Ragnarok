@@ -36,7 +36,7 @@ def xtea_decrypt(data: bytes, key: bytes):
     key_casted = ffi.cast("uint32_t *", key_cbuf)
 
     # call the code
-    lib.XTea_Decrypt(key_casted, data_casted, data_casted, data_len)
+    lib.XTea_Decrypt(key_casted, data_casted, data_casted, data_len)  # type: ignore
 
     # copy
     return ffi.buffer(data_cbuf, data_len)[:]
@@ -54,7 +54,7 @@ def xxtea_decrypt(data: bytes, key: bytes):
     key_casted = ffi.cast("uint32_t *", key_cbuf)
 
     # call the code
-    lib.XXTea_Decrypt(key_casted, data_casted, data_casted, data_len)
+    lib.XXTea_Decrypt(key_casted, data_casted, data_casted, data_len)  # type: ignore
 
     # copy
     return ffi.buffer(data_cbuf, data_len)[:]

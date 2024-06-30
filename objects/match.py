@@ -5,15 +5,15 @@ from constants.playmode import Mode
 from constants.mods import Mods
 from packets import writer
 from objects import services
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from objects.player import Player
 
 
-class Players:
+class Slot:
     def __init__(self):
-        self.player: "Player" = None  # no superman :pensive:
+        self.player: Union["Player", None] = None
         self.mods: Mods = Mods.NONE
         self.host: bool = False
         self.status: SlotStatus = SlotStatus.OPEN
@@ -21,7 +21,7 @@ class Players:
         self.loaded: bool = False
         self.skipped: bool = False
 
-    def reset(self):
+    def reset(self) -> None:
         self.player = None
         self.mods = Mods.NONE
         self.host = False
@@ -30,7 +30,7 @@ class Players:
         self.loaded = False
         self.skipped = False
 
-    def copy_from(self, old: "Players"):
+    def copy_from(self, old: "Slot"):
         self.player = old.player
         self.mods = old.mods
         self.host = old.host
@@ -49,9 +49,9 @@ class Match:
         self.host: int = 0
         self.in_progress: bool = False
 
-        self.map: Beatmap = None
+        self.map: Beatmap | None = None
 
-        self.slots: list[Players] = [Players() for _ in range(0, 16)]
+        self.slots: list[Slot] = [Slot() for _ in range(16)]
 
         self.mode: Mode = Mode.OSU
         self.mods: Mods = Mods.NONE
@@ -67,7 +67,15 @@ class Match:
 
         self.locked: bool = False
 
-        self.chat: Channel = None
+        self.chat: Channel = Channel(
+            **{
+                "raw": f"#multi_{self.match_id}",
+                "name": "#multiplayer",
+                "description": self.match_name,
+                "public": False,
+                "ephemeral": True,
+            }
+        )
 
     def __repr__(self) -> str:
         return f"MATCH-{self.match_id}"
@@ -79,22 +87,22 @@ class Match:
 
         return -1
 
-    def find_host(self) -> Players | None:
+    def find_host(self) -> Slot | None:
         for slot in self.slots:
-            if slot.player.id == self.host:
+            if slot.player is not None and slot.player.id == self.host:
                 return slot
 
-    def find_user(self, p: "Player") -> Players | None:
+    def find_user(self, p: "Player") -> Slot | None:
         for slot in self.slots:
             if slot.player == p:
                 return slot
 
     def find_user_slot(self, p: "Player") -> int | None:
         for id, slot in enumerate(self.slots):
-            if slot.player == p:
+            if slot.player is not None and slot.player.token == p.token:
                 return id
 
-    def find_slot(self, slot_id: int) -> Players | None:
+    def find_slot(self, slot_id: int) -> Slot | None:
         if slot_id > 16:
             return
 
@@ -102,7 +110,10 @@ class Match:
             if id == slot_id:
                 return slot
 
-    def transfer_host(self, slot: Players) -> None:
+    def transfer_host(self, slot: Slot) -> None:
+        if slot.player is None:
+            return
+
         self.host = slot.player.id
 
         slot.player.enqueue(writer.match_transfer_host())

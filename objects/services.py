@@ -66,7 +66,7 @@ regex: dict[str, Pattern[str]] = {
     "np": re.compile(
         rf"\x01ACTION is (?:listening to|editing|playing|watching) \[https://osu.{domain}/beatmapsets/[0-9].*#/(\d*)"
     ),
-    ".osu": re.compile(r"(.*) - (.*) \((.*)\) \[(.*)\].osu"),
+    ".osu": re.compile(r"(.*) - (.*) \((.*)\) \[(.*)\]\.osu"),
 }
 
 # {token: "message"}

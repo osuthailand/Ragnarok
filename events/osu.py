@@ -461,14 +461,13 @@ async def score_submission(req: Request) -> Response:
         # if the player got first place
         # on the map announce it
         if s.position == 1 and not stats.is_restricted:
-            chan = services.channels.get("#announce")
-            assert chan is not None
+            if not (chan := services.channels.get("#announce")):
+                return Response(content=b"error: unknown")
 
             gamemode = "[Relax]" if s.gamemode == Gamemode.RELAX else ""
 
             chan.send(
-                f"{s.player.embed} achieved #{s.position} on {
-                    s.map.embed} ({s.mode.to_string()}) {gamemode}",
+                f"{s.player.embed} achieved #{s.position} on {s.map.embed} ({s.mode.to_string()}) {gamemode}",
                 sender=services.bot,
             )
 
@@ -492,7 +491,7 @@ async def score_submission(req: Request) -> Response:
                 "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
                 "VALUES (:user_id, :activity, :map_md5, :mode, :gamemode)",
                 {
-                    "user_id": cur_fp,
+                    "user_id": s.player.id,
                     "activity": "achieved rank #1 on",
                     "map_md5": s.map.map_md5,
                     "mode": s.mode,

@@ -126,8 +126,8 @@ class Match:
                 p.enqueue(writer.match_update(self))
 
         if lobby:
-            chan = services.channels.get("#lobby")
-            assert chan is not None
+            if not (chan := services.channels.get("#lobby")):
+                return
 
             chan.enqueue(writer.match_update(self))
 
@@ -136,7 +136,7 @@ class Match:
             p.enqueue(data)
 
         if lobby:
-            chan = services.channels.get("#lobby")
-            assert chan is not None
+            if not (chan := services.channels.get("#lobby")):
+                return
 
             chan.enqueue(data)

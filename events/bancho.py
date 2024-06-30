@@ -1042,7 +1042,8 @@ async def mp_transfer_host(p: Player, sr: Reader) -> None:
     if not (slot := match.find_slot(slot_id)):
         return
 
-    assert slot.player is not None
+    if slot.player is None:
+        return
 
     match.host = slot.player.id
     slot.player.enqueue(writer.match_transfer_host())

@@ -512,8 +512,8 @@ class Player:
 
     async def get_stats(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
-    ) -> dict[str, Any]:
-        _ret = await services.database.fetch_one(
+    ) -> dict[str, Any] | None:
+        _stats = await services.database.fetch_one(
             f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
             f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
             f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
@@ -521,13 +521,15 @@ class Player:
             {"user_id": self.id},
         )
 
-        assert _ret is not None
-        ret = dict(_ret)
+        if not _stats:
+            return
+        
+        stats = dict(_stats)
 
-        ret["rank"] = await self.get_rank(gamemode, mode)
-        ret["country_rank"] = await self.get_country_rank(gamemode, mode)
+        stats["rank"] = await self.get_rank(gamemode, mode)
+        stats["country_rank"] = await self.get_country_rank(gamemode, mode)
 
-        return ret
+        return stats
 
     async def get_rank(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
@@ -580,17 +582,20 @@ class Player:
         return await self.get_rank(gamemode, mode)
 
     async def update_stats_cache(self) -> bool:
-        ret = await self.get_stats(self.gamemode, self.play_mode)
+        stats = await self.get_stats(self.gamemode, self.play_mode)
 
-        self.ranked_score = ret["ranked_score"]
-        self.accuracy = ret["accuracy"]
-        self.playcount = ret["playcount"]
-        self.total_score = ret["total_score"]
-        self.level = ret["level"]
-        self.rank = ret["rank"]
-        self.pp = math.ceil(ret["pp"])
-        self.total_hits = ret["total_hits"]
-        self.max_combo = ret["max_combo"]
+        if not stats:
+            return False
+
+        self.ranked_score = stats["ranked_score"]
+        self.accuracy = stats["accuracy"]
+        self.playcount = stats["playcount"]
+        self.total_score = stats["total_score"]
+        self.level = stats["level"]
+        self.rank = stats["rank"]
+        self.pp = math.ceil(stats["pp"])
+        self.total_hits = stats["total_hits"]
+        self.max_combo = stats["max_combo"]
 
         return True
 

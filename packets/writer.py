@@ -356,7 +356,9 @@ def friends_list(ids: set[int]) -> bytes:
     return write(BanchoPackets.CHO_FRIENDS_LIST, (ids, Types.int32_list))
 
 
-def get_match_struct(m: "Match", send_pass: bool = False) -> list[tuple[Any, Types]]:
+def get_match_struct(
+    m: "Match", send_pass: bool = False
+) -> list[tuple[Any, Types]] | None:
     struct = [
         (m.match_id, Types.int16),
         (m.in_progress, Types.int8),
@@ -373,7 +375,8 @@ def get_match_struct(m: "Match", send_pass: bool = False) -> list[tuple[Any, Typ
     else:
         struct.append(("", Types.string))
 
-    assert m.map is not None
+    if not m.map:
+        return
 
     struct.extend(
         (
@@ -399,6 +402,10 @@ def get_match_struct(m: "Match", send_pass: bool = False) -> list[tuple[Any, Typ
 
 def match(m: "Match") -> bytes:
     struct = get_match_struct(m)
+
+    if not struct:
+        raise Exception("match struct returned none")
+
     return write(BanchoPackets.CHO_NEW_MATCH, *struct)
 
 
@@ -427,6 +434,10 @@ def match_invite(m: "Match", p: "Player", reciever) -> bytes:
 
 def match_join(m: "Match") -> bytes:
     struct = get_match_struct(m, send_pass=True)
+
+    if not struct:
+        raise Exception("match struct returned none")
+
     return write(BanchoPackets.CHO_MATCH_JOIN_SUCCESS, *struct)
 
 
@@ -475,6 +486,10 @@ def match_skip() -> bytes:
 
 def match_start(m: "Match") -> bytes:
     struct = get_match_struct(m, send_pass=True)
+
+    if not struct:
+        raise Exception("match struct returned none")
+
     return write(BanchoPackets.CHO_MATCH_START, *struct)
 
 
@@ -484,6 +499,10 @@ def match_transfer_host() -> bytes:
 
 def match_update(m: "Match") -> bytes:
     struct = get_match_struct(m, send_pass=True)
+
+    if not struct:
+        raise Exception("match struct returned none")
+
     return write(BanchoPackets.CHO_UPDATE_MATCH, *struct)
 
 

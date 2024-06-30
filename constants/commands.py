@@ -298,9 +298,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
     mods = Mods.NONE
 
     # maybe regex would be better to use for this case?
-    if executed_from_match:
-        assert ctx.author.match is not None
-
+    if executed_from_match and ctx.author.match:
         mods = ctx.author.match.mods
     else:
         for arg in ctx.args:
@@ -426,11 +424,12 @@ async def make_multi(ctx: Context) -> str | None:
 @rmp_command("name")
 @ensure_match(host=True)
 async def change_multi_name(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
     if not ctx.args:
         return "No name has been specified."
 
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
+    
     current_name = m.match_name
     new_name = " ".join(ctx.args)
     m.match_name = new_name
@@ -442,8 +441,9 @@ async def change_multi_name(ctx: Context) -> str | None:
 @rmp_command("lock")
 @ensure_match(host=True)
 async def lock_match(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
+    
     m.locked = True
 
     m.enqueue_state()
@@ -453,8 +453,9 @@ async def lock_match(ctx: Context) -> str | None:
 @rmp_command("unlock")
 @ensure_match(host=True)
 async def unlock_match(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
+    
     m.locked = True
 
     m.enqueue_state()
@@ -465,8 +466,8 @@ async def unlock_match(ctx: Context) -> str | None:
 @ensure_match(host=True)
 async def start_match(ctx: Context) -> str | None:
     """Start the multiplayer when all players are ready or force start it."""
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     if ctx.args:
         if ctx.args[0] == "force":
@@ -506,8 +507,8 @@ async def start_match(ctx: Context) -> str | None:
 @rmp_command("abort", aliases=["ab"])
 @ensure_match(host=True)
 async def abort_match(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     for s in m.slots:
         if s.status == SlotStatus.PLAYING and s.player is not None:
@@ -527,8 +528,8 @@ async def abort_match(ctx: Context) -> str | None:
 @ensure_match(host=True)
 async def win_condition(ctx: Context) -> str | None:
     """Change win condition in a multiplayer match."""
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     if not ctx.args:
         return f"Wrong usage. !mp {ctx.cmd} <score/acc/combo/sv2/pp>"
@@ -554,8 +555,8 @@ async def win_condition(ctx: Context) -> str | None:
 @rmp_command("move")
 @ensure_match(host=True)
 async def move_slot(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     if len(ctx.args) < 2:
         return "Wrong usage: !mp move <player> <to_slot>"
@@ -568,12 +569,11 @@ async def move_slot(ctx: Context) -> str | None:
     if not (target := m.find_user(player)):
         return "Slot is not occupied."
 
-    assert target.player is not None
-
     if not (to := m.find_slot(slot_id)):
         return "out of range."
-
-    assert to.player is not None
+    
+    if not target.player or not to.player:
+        return
 
     if to.status.is_occupied:
         return "That slot is already occupied."
@@ -589,8 +589,8 @@ async def move_slot(ctx: Context) -> str | None:
 @rmp_command("size")
 @ensure_match(host=True)
 async def change_size(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     if not ctx.args:
         return "Wrong usage: !mp size <amount of available slots>"
@@ -613,8 +613,9 @@ async def change_size(ctx: Context) -> str | None:
 @rmp_command("get")
 @ensure_match(host=False)
 async def get_beatmap(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
+    
     mirrors = {
         "chimu": settings.MIRROR_CHIMU,
         "nerinyan": settings.MIRROR_NERINYAN,
@@ -646,9 +647,9 @@ async def get_beatmap(ctx: Context) -> str | None:
 @rmp_command("invite")
 @ensure_match(host=False)
 async def invite_people(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
-
+    if not (m := ctx.author.match):
+        return
+    
     if not ctx.args:
         ctx.reciever.send("Who do you want to invite?", services.bot)
         if not (response := await ctx.await_response()):
@@ -675,8 +676,8 @@ async def invite_people(ctx: Context) -> str | None:
 @rmp_command("host")
 @ensure_match(host=True)
 async def change_host(ctx: Context) -> str | None:
-    assert ctx.author.match is not None
-    m = ctx.author.match
+    if not (m := ctx.author.match):
+        return
 
     if not ctx.args:
         ctx.reciever.send("Who do you want to invite?", services.bot)
@@ -956,7 +957,9 @@ async def handle_commands(
         except Exception as e:
             response = f"unhandled error: {e} (contact Simon about this)"
 
-            assert (ach := services.get_achievement_by_id(190)) is not None
+            if not (ach := services.get_achievement_by_id(190)):
+                return
+
             user_achievement = UserAchievement(
                 **ach.__dict__, gamemode=Gamemode.UNKNOWN, mode=Mode.NONE
             )

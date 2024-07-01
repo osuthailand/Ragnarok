@@ -429,7 +429,7 @@ async def change_multi_name(ctx: Context) -> str | None:
 
     if not (m := ctx.author.match):
         return
-    
+
     current_name = m.match_name
     new_name = " ".join(ctx.args)
     m.match_name = new_name
@@ -443,7 +443,7 @@ async def change_multi_name(ctx: Context) -> str | None:
 async def lock_match(ctx: Context) -> str | None:
     if not (m := ctx.author.match):
         return
-    
+
     m.locked = True
 
     m.enqueue_state()
@@ -455,7 +455,7 @@ async def lock_match(ctx: Context) -> str | None:
 async def unlock_match(ctx: Context) -> str | None:
     if not (m := ctx.author.match):
         return
-    
+
     m.locked = True
 
     m.enqueue_state()
@@ -571,7 +571,7 @@ async def move_slot(ctx: Context) -> str | None:
 
     if not (to := m.find_slot(slot_id)):
         return "out of range."
-    
+
     if not target.player or not to.player:
         return
 
@@ -615,7 +615,7 @@ async def change_size(ctx: Context) -> str | None:
 async def get_beatmap(ctx: Context) -> str | None:
     if not (m := ctx.author.match):
         return
-    
+
     mirrors = {
         "chimu": settings.MIRROR_CHIMU,
         "nerinyan": settings.MIRROR_NERINYAN,
@@ -649,7 +649,7 @@ async def get_beatmap(ctx: Context) -> str | None:
 async def invite_people(ctx: Context) -> str | None:
     if not (m := ctx.author.match):
         return
-    
+
     if not ctx.args:
         ctx.reciever.send("Who do you want to invite?", services.bot)
         if not (response := await ctx.await_response()):
@@ -871,12 +871,10 @@ async def approve_map(ctx: Context) -> str | None:
     else:
         title = bmap.full_title
 
-    resp = f"Successfully changed {title}'s status, from {
-        Approved(bmap.approved).name} to {ranked_status.name}"
+    resp = f"Successfully changed {title}'s status, from {Approved(bmap.approved).name} to {ranked_status.name}"
 
     await ctx.author.log(
-        f"changed {title}'s status from {Approved(bmap.approved).name} to {
-            ranked_status.name}"
+        f"changed {title}'s status from {Approved(bmap.approved).name} to {ranked_status.name}"
     )
 
     bmap.approved = ranked_status

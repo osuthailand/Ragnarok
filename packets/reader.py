@@ -169,8 +169,8 @@ class Reader:
         self.offset += 8
         return ret[0]
 
-    def read_str(self, dotNETString: bool = False) -> str:
-        if not dotNETString:
+    def read_str(self, dot_net_str: bool = False) -> str:
+        if not dot_net_str:
             is_string = self.data[0] == 0x0B
             self.offset += 1
 

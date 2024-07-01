@@ -783,20 +783,26 @@ async def osu_direct(req: Request, p: Player) -> Response:
     if (mode := args["m"]) == "-1":
         mode = "all"
 
-    url = f"https://api.nerinyan.moe/search?q={query}&m={mode}&ps=100&s={ranking}{
-        '&sort=updated_desc' if ranking in ('all', 'pending', 'graveyard') else ''}&p={args['p']}"
-    bmCount = 0
-    directList = ""
+    url = f"https://api.nerinyan.moe/search"
+    url += f"?p={query}"
+    url += f"&m={query}"
+    url += f"&ps=100"
+    url += f"&s={ranking}"
+    url += "&sort=updated_desc" if ranking in ("all", "pending", "graveyard") else ""
+    url += f"&p={args["p"]}"
+
+    map_count = 0
+    direct_list = ""
 
     async with aiohttp.ClientSession() as sess:
         async with sess.get(url) as resp:
             data = await resp.json()
 
             if len(data) == 100:
-                bmCount = 1
+                map_count = 1
 
             for beatmapset in data:
-                bmCount += 1
+                map_count += 1
 
                 sid = beatmapset["id"]
                 artist = beatmapset["artist"]
@@ -804,32 +810,30 @@ async def osu_direct(req: Request, p: Player) -> Response:
                 creator = beatmapset["creator"]
                 ranked = beatmapset["ranked"]
 
-                lastUpd = beatmapset["last_updated"]
+                last_updated = beatmapset["last_updated"]
 
-                threadId = beatmapset["legacy_thread_url"][
+                thread_id = beatmapset["legacy_thread_url"][
                     43:
                 ]  # remove osu link and get only id
-                hasVideo = "1" if beatmapset["video"] else ""
-                hasStoryboard = "1" if beatmapset["storyboard"] else ""
+                has_video = "1" if beatmapset["video"] else ""
+                has_storyboard = "1" if beatmapset["storyboard"] else ""
 
-                directList += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
-                directList += (
-                    f"10|{lastUpd}|{sid}|{threadId}|{hasVideo}|{hasStoryboard}|0||"
-                )
+                direct_list += f"{sid}.osz|{artist}|{title}|{creator}|{ranked}|"
+                direct_list += f"10|{last_updated}|{sid}|{thread_id}|{has_video}|{has_storyboard}|0||"
 
                 for i, beatmaps in enumerate(beatmapset["beatmaps"]):
-                    diffName = beatmaps["version"]
-                    starsRating = beatmaps["difficulty_rating"]
+                    difficulty_name = beatmaps["version"]
+                    star_rating = beatmaps["difficulty_rating"]
                     mode = beatmaps["mode_int"]
 
-                    directList += f"{diffName.replace(',', '').replace('|', 'ǀ')} ★{starsRating}@{mode}"
+                    direct_list += f"{difficulty_name.replace(',', '').replace('|', 'ǀ')} ★{star_rating}@{mode}"
 
                     if i < len(beatmapset["beatmaps"]) - 1:
-                        directList += ","
+                        direct_list += ","
                     else:
-                        directList += "\n"
+                        direct_list += "\n"
 
-    return Response(content=str(bmCount).encode() + b"\n" + directList.encode())
+    return Response(content=str(map_count).encode() + b"\n" + direct_list.encode())
 
 
 @osu.route("/web/osu-search-set.php")
@@ -866,8 +870,7 @@ async def download_osz(req: Request) -> Response:
     # TODO: check for availablity, if not use another mirror.
 
     return RedirectResponse(
-        url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{
-            '?noVideo=true' if req.url.path[-1] == 'n' else ''}",
+        url=f"https://api.nerinyan.moe/d/{req.path_params['map_id']}{'?noVideo=true' if req.url.path[-1] == 'n' else ''}",
         status_code=301,
     )
 

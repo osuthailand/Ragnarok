@@ -160,8 +160,8 @@ class BytesIOWrapper(io.BytesIO):
         return new_pos
 
     def tell(self) -> int:
-        curPos = super().tell()
-        return curPos
+        cur_pos = super().tell()
+        return cur_pos
 
     def write_uleb128(self, num: int):
         if num == 0:
@@ -358,7 +358,7 @@ class OSZ2:
             # type = reader.read_int16()
             type_bytes = reader.read_bytes(2)  # i16
             type = int.from_bytes(type_bytes, byteorder="little")
-            value = reader.read_str(dotNETString=True)
+            value = reader.read_str(dot_net_str=True)
 
             match MetadataType(type):
                 case MetadataType.Creator:
@@ -410,7 +410,7 @@ class OSZ2:
 
         osu_file_and_map_id = []
         for i in range(num_files):
-            file_name = reader.read_str(dotNETString=True)
+            file_name = reader.read_str(dot_net_str=True)
             map_id = reader.read_int32()
 
             osu_file_and_map_id.append((file_name, map_id))

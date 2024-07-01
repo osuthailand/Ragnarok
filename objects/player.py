@@ -523,7 +523,7 @@ class Player:
 
         if not _stats:
             return
-        
+
         stats = dict(_stats)
 
         stats["rank"] = await self.get_rank(gamemode, mode)

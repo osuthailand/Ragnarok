@@ -152,6 +152,15 @@ class Player:
         """``shout()`` alerts the player."""
         self.enqueue(writer.notification(text))
 
+    async def update_latest_activity(self) -> None:
+        """`update_latest_activity()` updates the players activity time."""
+        self.last_update = time.time()
+
+        await services.database.execute(
+            "UPDATE users SET latest_activity_time = :time WHERE id = :id",
+            {"time": self.last_update, "id": self.id},
+        )
+
     async def logout(self) -> None:
         """``logout()`` logs the player out."""
         if self.channels:

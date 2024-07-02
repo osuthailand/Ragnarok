@@ -45,6 +45,8 @@ async def get_last_id(req: Request, p: Player) -> Response:
     if p.id not in (1000, 1106):
         return Response(content=b"6\nNo permission to upload (yet)")
 
+    await p.update_latest_activity()
+
     set_id = int(req.query_params["s"])
     services.logger.debug(set_id)
     map_ids = req.query_params["b"].split(",")

@@ -118,7 +118,7 @@ async def handle_bancho(req: Request) -> Response:
                 f"Packet(id={p.packet.value}, name={p.packet.name}) has been requested by {player.username} - {end:.2f}ms"
             )
 
-    player.last_update = time.time()
+    await player.update_latest_activity()
 
     return Response(content=player.dequeue())
 

@@ -184,6 +184,8 @@ class LeaderboardType(IntEnum):
 @osu.route("/web/osu-osz2-getscores.php")
 @check_auth("us", "ha")
 async def get_scores(req: Request, p: Player) -> Response:
+    await p.update_latest_activity()
+    
     hash = req.query_params["c"]
 
     if not (b := await services.beatmaps.get(hash)):
@@ -316,11 +318,7 @@ async def score_submission(req: Request) -> Response:
 
     if not form:
         return Response(content=b"error: missinginfo")
-
-    # TODO: make this work properly
-    # if (ver := form["osuver"])[:4] != "2023":
-    #     return Response(content=b"error: oldver")
-
+    
     submission_key = f"osu!-scoreburgr---------{form["osuver"]}"
 
     s = await Score.set_data_from_submission(
@@ -330,8 +328,11 @@ async def score_submission(req: Request) -> Response:
         int(form["x"]),  # type: ignore
     )
 
+
     if not s or not s.player or not s.map or s.player.is_restricted:
         return Response(content=b"error: beatmap")
+
+    await s.player.update_latest_activity()
 
     if not s.player.privileges & Privileges.VERIFIED:
         return Response(content=b"error: verify")
@@ -638,6 +639,8 @@ async def score_submission(req: Request) -> Response:
 @osu.route("/web/osu-getreplay.php")
 @check_auth("u", "h")
 async def get_replay(req: Request, p: Player) -> Response:
+    await p.update_latest_activity()
+
     score_id = req.query_params["c"]
 
     if not os.path.isfile(path := f".data/replays/{score_id}.osr"):
@@ -741,6 +744,8 @@ async def get_beatmap_comments(req: Request, p: Player) -> Response:
 @osu.route("/web/osu-screenshot.php", methods=["POST"])
 @check_auth("u", "p", method="POST")
 async def post_screenshot(req: Request, p: Player) -> Response:
+    await p.update_latest_activity()
+
     id = general.random_string(8)
     form = await req.form()
 
@@ -761,6 +766,8 @@ async def get_screenshot(req: Request) -> FileResponse | Response:
 @osu.route("/web/osu-search.php")
 @check_auth("u", "h")
 async def osu_direct(req: Request, p: Player) -> Response:
+    await p.update_latest_activity()
+
     args = req.query_params
 
     match args["r"]:
@@ -839,6 +846,8 @@ async def osu_direct(req: Request, p: Player) -> Response:
 @osu.route("/web/osu-search-set.php")
 @check_auth("u", "h")
 async def osu_search_set(req: Request, p: Player) -> Response:
+    await p.update_latest_activity()
+
     match req.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
         case {"s": sid}:  # Beatmap Set

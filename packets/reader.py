@@ -60,7 +60,7 @@ class Reader:
         self.offset = 0
         self.packet, self.plen = None, 0
 
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[Packet]:
         return self
 
     def __next__(self) -> Packet:

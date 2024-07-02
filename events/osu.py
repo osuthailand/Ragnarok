@@ -185,7 +185,7 @@ class LeaderboardType(IntEnum):
 @check_auth("us", "ha")
 async def get_scores(req: Request, p: Player) -> Response:
     await p.update_latest_activity()
-    
+
     hash = req.query_params["c"]
 
     if not (b := await services.beatmaps.get(hash)):
@@ -318,7 +318,7 @@ async def score_submission(req: Request) -> Response:
 
     if not form:
         return Response(content=b"error: missinginfo")
-    
+
     submission_key = f"osu!-scoreburgr---------{form["osuver"]}"
 
     s = await Score.set_data_from_submission(
@@ -327,7 +327,6 @@ async def score_submission(req: Request) -> Response:
         submission_key,
         int(form["x"]),  # type: ignore
     )
-
 
     if not s or not s.player or not s.map or s.player.is_restricted:
         return Response(content=b"error: beatmap")

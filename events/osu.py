@@ -277,7 +277,7 @@ async def get_scores(req: Request, p: Player) -> Response:
                     username=p.username_with_tag,
                     position=pb_position + 1,
                 )
-            )  # type: ignore
+            )
 
     top_scores = await services.database.fetch_all(query, params)
 

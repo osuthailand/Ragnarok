@@ -269,7 +269,7 @@ async def get_scores(req: Request, p: Player) -> Response:
             },
         )
 
-        if pb_position:
+        if pb_position is not None:
             ret.append(
                 SCORES_FORMAT.format(
                     **dict(personal_best),

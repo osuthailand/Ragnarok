@@ -156,7 +156,7 @@ class Player:
         if self.privileges & Privileges.PENDING:
             await services.database.execute(
                 "UPDATE users SET privileges = privileges - :pending WHERE id = :user_id",
-                {"pending": Privileges.PENDING, "user_id": self.id}
+                {"pending": Privileges.PENDING, "user_id": self.id},
             )
             self.privileges -= Privileges.PENDING
             self.privileges |= Privileges.VERIFIED

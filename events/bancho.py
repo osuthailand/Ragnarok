@@ -70,7 +70,10 @@ async def handle_bancho(request: Request) -> Response:
             }
         )
 
-    if not "user-agent" in request.headers.keys() or request.headers["user-agent"] != "osu!":
+    if (
+        not "user-agent" in request.headers.keys()
+        or request.headers["user-agent"] != "osu!"
+    ):
         return Response(content=b"no")
 
     if not "osu-token" in request.headers:
@@ -222,7 +225,9 @@ async def login(req: Request) -> Response:
     # [1:] removes the little b infront of the version
     client_version = client_info[0][1:]
 
-    if client_version not in services.ALLOWED_BUILDS and not client_version.endswith("rina"):
+    if client_version not in services.ALLOWED_BUILDS and not client_version.endswith(
+        "rina"
+    ):
         # since allowed osu builds is cached from startup
         # we should check if there has been any new builds
         # since startup.
@@ -238,10 +243,10 @@ async def login(req: Request) -> Response:
     # check if the user is banned.
     if user_info["privileges"] & Privileges.BANNED:
         return failed_login(
-            LoginResponse.LOCK_CLIENT, # should we really lock their client? lol
+            LoginResponse.LOCK_CLIENT,  # should we really lock their client? lol
             msg=f"{user_info['username']} tried to login, but were unable to do so, since they're banned.",
         )
-    
+
     security_info = client_info[3].split(":")
 
     # invalid security hash (old ver probably using that)
@@ -909,7 +914,7 @@ async def mp_complete(player: Player, sr: Reader) -> None:
     for slot in match.slots:
         if slot.status.is_occupied and slot.status != SlotStatus.NOMAP:
             slot.status = SlotStatus.NOTREADY
-            
+
         slot.skipped = False
         slot.loaded = False
 
@@ -1013,7 +1018,6 @@ async def mp_unready(player: Player, sr: Reader) -> None:
         )
         return
 
-
     if not (slot := match.find_user(player)):
         return
 
@@ -1097,7 +1101,9 @@ async def join_channel(player: Player, sr: Reader) -> None:
 
     if not channel:
         player.shout(f"{channel_name} couldn't be found.")
-        services.logger.warn(f"{player.username} tried to join {channel_name}, but it doesn't exist.")
+        services.logger.warn(
+            f"{player.username} tried to join {channel_name}, but it doesn't exist."
+        )
         return
 
     channel.connect(player)
@@ -1111,7 +1117,6 @@ async def mp_transfer_host(player: Player, sr: Reader) -> None:
             f"{player.username} requested MATCH_NOT_READY packet, but they're not in a match."
         )
         return
-
 
     slot_id = sr.read_int32()
 

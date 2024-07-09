@@ -42,9 +42,9 @@ class Slot:
 
 class Match:
     def __init__(self):
-        self.match_id: int = 0
-        self.match_name: str = ""
-        self.match_pass: str = ""
+        self.id: int = 0
+        self.name: str = ""
+        self.password: str = ""
 
         self.host: int = 0
         self.in_progress: bool = False
@@ -69,16 +69,20 @@ class Match:
 
         self.chat: Channel = Channel(
             **{
-                "raw": f"#multi_{self.match_id}",
+                "raw": f"#multi_{self.id}",
                 "name": "#multiplayer",
-                "description": self.match_name,
-                "public": False,
-                "ephemeral": True,
+                "description": self.name,
+                "is_public": False,
+                "is_temporary": True,
             }
         )
 
     def __repr__(self) -> str:
-        return f"MATCH-{self.match_id}"
+        return f"MATCH-{self.id}"
+
+    @property
+    def embed(self) -> str:
+        return f"[osump://{self.id}/{self.password.replace(' ', '_')} {self.name}]"
 
     def get_free_slot(self) -> int:
         for id, slot in enumerate(self.slots):
@@ -106,9 +110,7 @@ class Match:
         if slot_id > 16:
             return
 
-        for id, slot in enumerate(self.slots):
-            if id == slot_id:
-                return slot
+        return self.slots[slot_id]
 
     def transfer_host(self, slot: Slot) -> None:
         if slot.player is None:

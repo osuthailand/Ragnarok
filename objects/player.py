@@ -17,7 +17,7 @@ from constants.levels import levels
 from constants.playmode import Gamemode, Mode
 from constants.match import SlotStatus
 from objects.achievement import UserAchievement
-from constants.player import PresenceFilter, bStatus, Privileges, country_codes
+from constants.player import PresenceFilter, ActionStatus, Privileges, country_codes
 
 if TYPE_CHECKING:
     from objects.beatmap import Beatmap
@@ -65,7 +65,7 @@ class Player:
 
         self.presence_filter: PresenceFilter = PresenceFilter.NIL
 
-        self.status: bStatus = bStatus.IDLE
+        self.status: ActionStatus = ActionStatus.IDLE
         self.status_text: str = ""
         self.beatmap_md5: str = ""
         self.current_mods: Mods = Mods.NONE
@@ -106,7 +106,6 @@ class Player:
         )
         self.using_rina: bool = self.client_version.endswith("rina")
         self.is_staff: bool = bool(self.privileges & Privileges.BAT)
-        self.is_verified: bool = not self.privileges & Privileges.PENDING
 
         self.last_np: Union["Beatmap", None] = None
         self.last_score: Union["Score", None] = None
@@ -152,6 +151,16 @@ class Player:
         """``shout()`` alerts the player."""
         self.enqueue(writer.notification(text))
 
+    async def verify(self) -> None:
+        """`verify()` verifies the player and ensures the player doesn't have the `Privileges.PENDING` flag."""
+        if self.privileges & Privileges.PENDING:
+            await services.database.execute(
+                "UPDATE users SET privileges = privileges - :pending WHERE id = :user_id",
+                {"pending": Privileges.PENDING, "user_id": self.id}
+            )
+            self.privileges -= Privileges.PENDING
+            self.privileges |= Privileges.VERIFIED
+
     async def update_latest_activity(self) -> None:
         """`update_latest_activity()` updates the players activity time."""
         self.last_update = time.time()
@@ -193,8 +202,8 @@ class Player:
                     "name": spec_name,
                     "display_name": "#spectator",
                     "description": f"spectator chat for {self.username}",
-                    "ephemeral": True,
-                    "public": False,
+                    "is_temporary": True,
+                    "is_public": False,
                 }
             )
 
@@ -238,26 +247,28 @@ class Player:
 
         self.enqueue(writer.spectator_left(p.id))
 
-    def join_match(self, m: Match, pwd: str = "") -> None:
+    def join_match(self, match: Match, password: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
-        if self.match or pwd != m.match_pass or not m in services.matches:
+        if self.match or password != match.password or match not in services.matches:
             self.enqueue(writer.match_fail())
             return  # user is already in a match
 
-        if (free_slot := m.get_free_slot()) == -1:
+        if (free_slot := match.get_free_slot()) == -1:
             self.enqueue(writer.match_fail())
-            services.logger.warn(f"{self.username} tried to join a full match ({m!r})")
+            services.logger.warn(
+                f"{self.username} tried to join a full match ({match!r})"
+            )
             return
 
-        self.match = m
+        self.match = match
 
-        slot = m.slots[free_slot]
+        slot = match.slots[free_slot]
 
         slot.player = self
         slot.mods = Mods.NONE
         slot.status = SlotStatus.NOTREADY
 
-        if m.host == self.id:
+        if match.host == self.id:
             slot.host = True
 
         if self.match.chat not in services.channels:
@@ -269,7 +280,7 @@ class Player:
 
         self.enqueue(writer.match_join(self.match))
 
-        services.logger.info(f"{self.username} joined {m}")
+        services.logger.info(f"{self.username} joined {match}")
         self.match.enqueue_state(lobby=True)
 
     def leave_match(self) -> None:
@@ -292,7 +303,7 @@ class Player:
         # delete the multi lobby
         if not m.connected:
             services.logger.info(f"{m} is empty! Removing...")
-            m.enqueue(writer.match_dispose(m.match_id), lobby=True)
+            m.enqueue(writer.match_dispose(m.id), lobby=True)
             services.matches.remove(m)
             return
 

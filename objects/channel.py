@@ -16,13 +16,13 @@ class Channel:
 
         self.description: str = kwargs.get("description", "An osu! channel.")
 
-        self.public: bool = kwargs.get("public", True)
-        self.read_only: bool = kwargs.get("read_only", False)
-        self.auto_join: bool = kwargs.get("auto_join", False)
+        self.is_public: bool = kwargs.get("public", True)
+        self.is_read_only: bool = kwargs.get("read_only", False)
+        self.is_auto_join: bool = kwargs.get("auto_join", False)
 
         self.is_staff: bool = kwargs.get("staff", False)
-        self.ephemeral: bool = kwargs.get(
-            "ephemeral", False
+        self.is_temporary: bool = kwargs.get(
+            "is_temporary", False
         )  # object will get removed upon no connection
 
         self.connected: list["Player"] = []
@@ -41,7 +41,7 @@ class Channel:
                 player.enqueue(data)
 
     def update_info(self) -> None:
-        if self.ephemeral:
+        if self.is_temporary:
             for player in self.connected:
                 player.enqueue(writer.channel_info(self))
         else:
@@ -82,7 +82,7 @@ class Channel:
 
         player.enqueue(writer.channel_kick(self.display_name))
 
-        if self.ephemeral and not self.connected:
+        if self.is_temporary and not self.connected:
             services.channels.remove(self)
 
         self.update_info()
@@ -91,7 +91,7 @@ class Channel:
 
     def send(self, message: str, sender: "Player") -> None:
         if not sender.bot:
-            if not (self in sender.channels or self.read_only):
+            if not (self in sender.channels or self.is_read_only):
                 return
 
         ret = writer.send_message(

@@ -1,5 +1,5 @@
 import sys
-from constants.player import bStatus
+from constants.player import ActionStatus
 from packets import writer
 from objects import services
 
@@ -22,7 +22,7 @@ class Bot(Player):
 
         bot = cls(bot["username"], bot["id"], bot["privileges"], bot["passhash"])
 
-        bot.status = bStatus.WATCHING
+        bot.status = ActionStatus.WATCHING
         bot.status_text = "over scores"
 
         bot.bot = True

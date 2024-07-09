@@ -1,6 +1,6 @@
 from enum import IntEnum
 from typing import Callable, Iterator
-from constants.packets import BanchoPackets
+from constants.packets import ClientPackets
 from objects.score import ScoreFrame
 from constants.playmode import Mode
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ IGNORED_PACKETS = [4, 79]
 
 @dataclass
 class Packet:
-    packet: BanchoPackets
+    packet: ClientPackets
 
     callback: Callable
     restricted: bool
@@ -70,7 +70,7 @@ class Reader:
             if self.packet not in services.packets:
                 if services.debug and self.packet not in IGNORED_PACKETS:
                     services.logger.warn(
-                        f"Packet <{BanchoPackets(self.packet)} | {BanchoPackets(self.packet).name}> has been requested although it's an unregistered packet."
+                        f"Packet <{ClientPackets(self.packet)} | {ClientPackets(self.packet).name}> has been requested although it's an unregistered packet."
                     )
 
                 if self.plen != 0:
@@ -80,11 +80,11 @@ class Reader:
         else:
             raise StopIteration
 
-        self.packet = BanchoPackets(self.packet)
+        self.packet = ClientPackets(self.packet)
 
         return services.packets[self.packet.value]
 
-    def read_headers(self) -> tuple[BanchoPackets, int]:
+    def read_headers(self) -> tuple[ClientPackets, int]:
         if len(self.data) < 7:
             raise StopIteration
 
@@ -207,7 +207,7 @@ class Reader:
     async def read_match(self) -> Match:
         m = Match()
 
-        m.match_id = len(services.matches)
+        m.id = len(services.matches)
 
         self.offset += 2
 
@@ -217,8 +217,8 @@ class Reader:
 
         m.mods = Mods(self.read_int32())
 
-        m.match_name = self.read_str()
-        m.match_pass = self.read_str()
+        m.name = self.read_str()
+        m.password = self.read_str()
 
         self.read_str()  # map title
         map_id = self.read_int32()  # map id

@@ -23,7 +23,7 @@ from constants.mods import Mods
 from constants.playmode import Gamemode, Mode
 from constants.beatmap import Approved
 from constants.player import Privileges
-from constants.packets import BanchoPackets
+from constants.packets import ServerPackets
 from constants.match import SlotStatus, ScoringType
 
 from objects.channel import Channel
@@ -40,26 +40,6 @@ class Context:
 
     cmd: str
     args: list[str]
-
-    # there is probably a better solution to this
-    # but this is just what i quickly came up with
-    async def await_response(self) -> str | None:
-        services.await_response[self.author.token] = ""
-
-        # they will have 60 seconds to respond.
-        for i in range(0, 60):
-            if services.await_response[self.author.token]:
-                msg = services.await_response[self.author.token]
-                services.await_response.pop(self.author.token)
-
-                if msg[0] == "!":
-                    pass
-
-                return msg
-
-            await asyncio.sleep(1)
-        else:
-            return ""
 
 
 @dataclass
@@ -292,6 +272,7 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
     if mode != bmap.mode:
         bmap.convert(GameMode(mode))
 
+    # calc is slang for calculator chat
     calc = Performance()
 
     pp_builder = PPBuilder()
@@ -412,8 +393,8 @@ async def make_multi(ctx: Context) -> str | None:
         name = " ".join(ctx.args)
 
     m = Match()
-    m.match_id = len(services.matches)
-    m.match_name = name
+    m.id = len(services.matches)
+    m.name = name
     m.host = ctx.author.id
 
     services.matches.add(m)
@@ -430,9 +411,9 @@ async def change_multi_name(ctx: Context) -> str | None:
     if not (m := ctx.author.match):
         return
 
-    current_name = m.match_name
+    current_name = m.name
     new_name = " ".join(ctx.args)
-    m.match_name = new_name
+    m.name = new_name
 
     m.enqueue_state()
     return f"Changed match name from {current_name} to {new_name}"
@@ -485,13 +466,7 @@ async def start_match(ctx: Context) -> str | None:
     if not all(
         slot.status == SlotStatus.READY for slot in m.slots if slot.status.is_occupied
     ):
-        ctx.reciever.send(
-            "All players aren't ready, would you like to force start? (y/n)",
-            services.bot,
-        )
-        response = await ctx.await_response()
-        if response == "n":
-            return
+        return 'All players aren\'t ready, do "!mp start force" to force ready all players and start the map.'
 
     for slot in m.slots:
         if slot.status.is_occupied:
@@ -512,7 +487,7 @@ async def abort_match(ctx: Context) -> str | None:
 
     for s in m.slots:
         if s.status == SlotStatus.PLAYING and s.player is not None:
-            s.player.enqueue(writer.write(BanchoPackets.CHO_MATCH_ABORT))
+            s.player.enqueue(writer.write(ServerPackets.MATCH_ABORT))
             s.status = SlotStatus.NOTREADY
 
             s.skipped = False
@@ -651,22 +626,17 @@ async def invite_people(ctx: Context) -> str | None:
         return
 
     if not ctx.args:
-        ctx.reciever.send("Who do you want to invite?", services.bot)
-        if not (response := await ctx.await_response()):
-            return "Command timed out."
+        return "Wrong usage: !mp invite <username>"
 
-        if not (target := services.players.get(response)):
-            return "The user is not online."
-    else:
-        if not (target := services.players.get(ctx.args[0])):
-            return "The user is not online."
+    if not (target := services.players.get(ctx.args[0])):
+        return "The user is not online."
 
     if target is ctx.author:
         return "You can't invite yourself."
 
     ctx.author.send(
         "Come join my multiplayer match: "
-        f"[osump://{m.match_id}/{m.match_pass.replace(' ', '_')} {m.match_name}]",
+        f"[osump://{m.id}/{m.password.replace(' ', '_')} {m.name}]",
         target,
     )
 
@@ -680,16 +650,10 @@ async def change_host(ctx: Context) -> str | None:
         return
 
     if not ctx.args:
-        ctx.reciever.send("Who do you want to invite?", services.bot)
+        return "Wrong usage: !mp invite <username>"
 
-        if not (response := await ctx.await_response()):
-            return "Command timed out."
-
-        if not (target := services.players.get(response)):
-            return "The user either is not online or doesn't exist."
-    else:
-        if not (target := services.players.get(ctx.args[0])):
-            return "The user either is not online or doesn't exist."
+    if not (target := services.players.get(ctx.args[0])):
+        return "The user either is not online or doesn't exist."
 
     target_slot = m.find_user(target)
 
@@ -924,7 +888,7 @@ async def system(ctx: Context) -> str | None:
             return "Argument is invalid."
 
 
-@register_command("forceerror", hidden=True, required_perms=Privileges.DEV)
+@register_command("forceerror", hidden=True, required_perms=Privileges.DEVELOPER)
 async def force_error(ctx: Context) -> str | None:
     raise Exception("forced error...")
 

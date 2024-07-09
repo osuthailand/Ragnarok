@@ -69,9 +69,6 @@ regex: dict[str, Pattern[str]] = {
     ".osu": re.compile(r"(.*) - (.*) \((.*)\) \[(.*)\]\.osu"),
 }
 
-# {token: "message"}
-await_response: dict[str, str] = {}
-
 ALLOWED_BUILDS: list[str] = []
 
 logger = logging.getLogger(__name__)

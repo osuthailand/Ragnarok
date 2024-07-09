@@ -113,7 +113,7 @@ class Matches:
 
     def get(self, match_id: int) -> Match:  # type: ignore
         for match in self.matches:
-            if match_id == match.match_id:
+            if match_id == match.id:
                 return match
 
     def add(self, m: Match):

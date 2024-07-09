@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import aiohttp
-from constants.player import bStatus
+from constants.player import ActionStatus
 from objects import services
 from objects.achievement import Achievement
 from objects.channel import Channel
@@ -40,7 +40,7 @@ async def removed_expired_tokens() -> None:
         if (
             time.time() - player.last_update >= TOKEN_EXPIRATION
             and not player.bot
-            and player.status != bStatus.AFK
+            and player.status != ActionStatus.AFK
         ):
             await player.logout()
             services.logger.info(

@@ -1,5 +1,5 @@
 from constants.player import Ranks, Privileges
-from constants.packets import BanchoPackets
+from constants.packets import ServerPackets
 from typing import Any, TYPE_CHECKING
 from enum import unique, IntEnum
 from objects import services
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from objects.player import Player
     from objects.score import ScoreFrame
 
-spec = ("<b", "<B", "<h", "<H", "<i", "<I", "<f", "<q", "<Q", "<d")
+specifiers = ("<b", "<B", "<h", "<H", "<i", "<I", "<f", "<q", "<Q", "<d")
 
 
 @unique
@@ -152,7 +152,7 @@ def write(pID: int, *args: tuple[Any, Types]) -> bytes:
         elif d_type == Types.message:
             data += write_msg(*arg)
         else:
-            data += struct.pack(spec[d_type], arg)
+            data += struct.pack(specifiers[d_type], arg)
 
     data[3:3] += struct.pack("<I", len(data) - 3)
     return bytes(data)
@@ -171,31 +171,31 @@ def user_id(user_id: int) -> bytes:
     -8: Requires Verification
     > -1: Valid ID
     """
-    return write(BanchoPackets.CHO_USER_ID, (user_id, Types.int32))
+    return write(ServerPackets.USER_ID, (user_id, Types.int32))
 
 
 def spectator_joined(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_SPECTATOR_JOINED, (user_id, Types.int32))
+    return write(ServerPackets.SPECTATOR_JOINED, (user_id, Types.int32))
 
 
 def spectator_left(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_SPECTATOR_LEFT, (user_id, Types.int32))
+    return write(ServerPackets.SPECTATOR_LEFT, (user_id, Types.int32))
 
 
 def fellow_spectator_joined(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_FELLOW_SPECTATOR_JOINED, (user_id, Types.int32))
+    return write(ServerPackets.FELLOW_SPECTATOR_JOINED, (user_id, Types.int32))
 
 
 def fellow_spectator_left(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_FELLOW_SPECTATOR_LEFT, (user_id, Types.int32))
+    return write(ServerPackets.FELLOW_SPECTATOR_LEFT, (user_id, Types.int32))
 
 
 def spectator_cant_spectate(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_SPECTATOR_CANT_SPECTATE, (user_id, Types.int32))
+    return write(ServerPackets.SPECTATOR_CANT_SPECTATE, (user_id, Types.int32))
 
 
 def notification(msg: str) -> bytes:
-    return write(BanchoPackets.CHO_NOTIFICATION, (msg, Types.string))
+    return write(ServerPackets.NOTIFICATION, (msg, Types.string))
 
 
 def user_privileges(privileges: int) -> bytes:
@@ -214,18 +214,18 @@ def user_privileges(privileges: int) -> bytes:
     if privileges & Privileges.ADMIN:
         rank |= Ranks.FRIEND
 
-    if privileges & Privileges.DEV:
+    if privileges & Privileges.DEVELOPER:
         rank |= Ranks.PEPPY
 
-    return write(BanchoPackets.CHO_PRIVILEGES, (rank, Types.int32))
+    return write(ServerPackets.PRIVILEGES, (rank, Types.int32))
 
 
 def protocol_version(version: int) -> bytes:
-    return write(BanchoPackets.CHO_PROTOCOL_VERSION, (version, Types.int32))
+    return write(ServerPackets.PROTOCOL_VERSION, (version, Types.int32))
 
 
 def update_friends(friends_id: tuple[int]):
-    return write(BanchoPackets.CHO_FRIENDS_LIST, (friends_id, Types.int32_list))
+    return write(ServerPackets.FRIENDS_LIST, (friends_id, Types.int32_list))
 
 
 def update_stats(p: "Player") -> bytes:
@@ -235,7 +235,7 @@ def update_stats(p: "Player") -> bytes:
     pp_overflow = p.pp > 32767
 
     return write(
-        BanchoPackets.CHO_USER_STATS,
+        ServerPackets.USER_STATS,
         (p.id, Types.int32),
         (p.status.value, Types.uint8),
         (p.status_text, Types.string),
@@ -256,7 +256,7 @@ def bot_presence() -> bytes:
     p = services.bot
 
     return write(
-        BanchoPackets.CHO_USER_PRESENCE,
+        ServerPackets.USER_PRESENCE,
         (p.id, Types.int32),
         (p.username, Types.string),
         (p.timezone, Types.byte),
@@ -292,11 +292,11 @@ def user_presence(p: "Player", spoof: bool = False) -> bytes:
     if p.privileges & Privileges.ADMIN:
         rank |= Ranks.FRIEND
 
-    if p.privileges & Privileges.DEV:
+    if p.privileges & Privileges.DEVELOPER:
         rank |= Ranks.PEPPY
 
     return write(
-        BanchoPackets.CHO_USER_PRESENCE,
+        ServerPackets.USER_PRESENCE,
         (p.id, Types.int32),
         (p.username, Types.string),
         (p.timezone, Types.byte),
@@ -309,20 +309,20 @@ def user_presence(p: "Player", spoof: bool = False) -> bytes:
 
 
 def channel_join(name: str) -> bytes:
-    return write(BanchoPackets.CHO_CHANNEL_JOIN_SUCCESS, (name, Types.string))
+    return write(ServerPackets.CHANNEL_JOIN_SUCCESS, (name, Types.string))
 
 
 def channel_kick(name: str) -> bytes:
-    return write(BanchoPackets.CHO_CHANNEL_KICK, (name, Types.string))
+    return write(ServerPackets.CHANNEL_KICK, (name, Types.string))
 
 
 def channel_auto_join(name: str) -> bytes:
-    return write(BanchoPackets.CHO_CHANNEL_AUTO_JOIN, (name, Types.string))
+    return write(ServerPackets.CHANNEL_AUTO_JOIN, (name, Types.string))
 
 
 def channel_info(chan: "Channel") -> bytes:
     return write(
-        BanchoPackets.CHO_CHANNEL_INFO,
+        ServerPackets.CHANNEL_INFO,
         (chan.display_name, Types.string),
         (chan.description, Types.string),
         (len(chan.connected), Types.int32),
@@ -330,46 +330,46 @@ def channel_info(chan: "Channel") -> bytes:
 
 
 def channel_info_end() -> bytes:
-    return write(BanchoPackets.CHO_CHANNEL_INFO_END)
+    return write(ServerPackets.CHANNEL_INFO_END)
 
 
 def server_restart() -> bytes:
-    return write(BanchoPackets.CHO_RESTART, (0, Types.int32))
+    return write(ServerPackets.RESTART, (0, Types.int32))
 
 
 def send_message(sender: str, message: str, channel: str, id: int) -> bytes:
     return write(
-        BanchoPackets.CHO_SEND_MESSAGE,
+        ServerPackets.SEND_MESSAGE,
         ((sender, message, channel, id), Types.message),
     )
 
 
 def logout(id: int) -> bytes:
     return write(
-        BanchoPackets.CHO_USER_LOGOUT,
+        ServerPackets.USER_LOGOUT,
         (id, Types.int32),
         (0, Types.uint8),
     )
 
 
 def friends_list(ids: set[int]) -> bytes:
-    return write(BanchoPackets.CHO_FRIENDS_LIST, (ids, Types.int32_list))
+    return write(ServerPackets.FRIENDS_LIST, (ids, Types.int32_list))
 
 
 def get_match_struct(
     m: "Match", send_pass: bool = False
 ) -> list[tuple[Any, Types]] | None:
     struct = [
-        (m.match_id, Types.int16),
+        (m.id, Types.int16),
         (m.in_progress, Types.int8),
         (0, Types.byte),
         (m.mods, Types.uint32),
-        (m.match_name, Types.string),
+        (m.name, Types.string),
     ]
 
-    if m.match_pass:
+    if m.password:
         if send_pass:
-            struct.append((m.match_pass, Types.string))
+            struct.append((m.password, Types.string))
         else:
             struct.append(("trollface", Types.string))
     else:
@@ -406,29 +406,29 @@ def match(m: "Match") -> bytes:
     if not struct:
         raise Exception("match struct returned none")
 
-    return write(BanchoPackets.CHO_NEW_MATCH, *struct)
+    return write(ServerPackets.NEW_MATCH, *struct)
 
 
 def match_all_ready() -> bytes:
-    return write(BanchoPackets.CHO_MATCH_ALL_PLAYERS_LOADED)
+    return write(ServerPackets.MATCH_ALL_PLAYERS_LOADED)
 
 
 def match_complete():
-    return write(BanchoPackets.CHO_MATCH_COMPLETE)
+    return write(ServerPackets.MATCH_COMPLETE)
 
 
 def match_dispose(mid: int) -> bytes:
-    return write(BanchoPackets.CHO_DISPOSE_MATCH, (mid, Types.int32))
+    return write(ServerPackets.DISPOSE_MATCH, (mid, Types.int32))
 
 
 def match_fail() -> bytes:
-    return write(BanchoPackets.CHO_MATCH_JOIN_FAIL)
+    return write(ServerPackets.MATCH_JOIN_FAIL)
 
 
 def match_invite(m: "Match", p: "Player", reciever) -> bytes:
     return write(
-        BanchoPackets.CHO_MATCH_INVITE,
-        ((p.username, f"#multi_{m.match_id}", reciever, p.id), Types.message),
+        ServerPackets.MATCH_INVITE,
+        ((p.username, f"#multi_{m.id}", reciever, p.id), Types.message),
     )
 
 
@@ -438,15 +438,15 @@ def match_join(m: "Match") -> bytes:
     if not struct:
         raise Exception("match struct returned none")
 
-    return write(BanchoPackets.CHO_MATCH_JOIN_SUCCESS, *struct)
+    return write(ServerPackets.MATCH_JOIN_SUCCESS, *struct)
 
 
 def match_change_password(pwd: str) -> bytes:
-    return write(BanchoPackets.CHO_MATCH_CHANGE_PASSWORD, (pwd, Types.string))
+    return write(ServerPackets.MATCH_CHANGE_PASSWORD, (pwd, Types.string))
 
 
 def match_player_failed(pid: int) -> bytes:
-    return write(BanchoPackets.CHO_MATCH_PLAYER_FAILED, (pid, Types.int32))
+    return write(ServerPackets.MATCH_PLAYER_FAILED, (pid, Types.int32))
 
 
 def match_score_update(s: "ScoreFrame", slot_id: int, raw_data: bytes) -> bytes:
@@ -477,11 +477,11 @@ def match_score_update(s: "ScoreFrame", slot_id: int, raw_data: bytes) -> bytes:
 
 
 def match_player_skipped(user_id: int) -> bytes:
-    return write(BanchoPackets.CHO_MATCH_PLAYER_SKIPPED, (user_id, Types.int32))
+    return write(ServerPackets.MATCH_PLAYER_SKIPPED, (user_id, Types.int32))
 
 
 def match_skip() -> bytes:
-    return write(BanchoPackets.CHO_MATCH_SKIP)
+    return write(ServerPackets.MATCH_SKIP)
 
 
 def match_start(m: "Match") -> bytes:
@@ -490,11 +490,11 @@ def match_start(m: "Match") -> bytes:
     if not struct:
         raise Exception("match struct returned none")
 
-    return write(BanchoPackets.CHO_MATCH_START, *struct)
+    return write(ServerPackets.MATCH_START, *struct)
 
 
 def match_transfer_host() -> bytes:
-    return write(BanchoPackets.CHO_MATCH_TRANSFER_HOST)
+    return write(ServerPackets.MATCH_TRANSFER_HOST)
 
 
 def match_update(m: "Match") -> bytes:
@@ -503,8 +503,8 @@ def match_update(m: "Match") -> bytes:
     if not struct:
         raise Exception("match struct returned none")
 
-    return write(BanchoPackets.CHO_UPDATE_MATCH, *struct)
+    return write(ServerPackets.UPDATE_MATCH, *struct)
 
 
 def pong() -> bytes:
-    return write(BanchoPackets.CHO_PONG)
+    return write(ServerPackets.PONG)

@@ -31,13 +31,13 @@ class Privileges(IntEnum):
     BAT = 1 << 4
     MODERATOR = 1 << 5
     ADMIN = 1 << 6
-    DEV = 1 << 7
+    DEVELOPER = 1 << 7
 
     PENDING = 1 << 8
 
 
 @unique
-class bStatus(IntEnum):
+class ActionStatus(IntEnum):
     IDLE = 0
     AFK = 1
     PLAYING = 2

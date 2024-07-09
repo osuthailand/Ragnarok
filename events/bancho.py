@@ -211,10 +211,11 @@ async def login(req: Request) -> Response:
         services.bcrypt_cache[user_password] = password_md5
 
     if target := services.players.get(user_info["username"]):
-        # user is already online? sus
+        timeago_format = datetime.fromtimestamp(target.last_update)
         return failed_login(
             LoginResponse.INCORRECT_LOGIN,
-            msg=f"A user tried to sign in to {target!r} which is already online. ",
+            msg=f"A user tried to sign in to {target!r} which is already online. "
+            f"(last session update was {timeago.format(timeago_format)}))",
             extra=writer.notification(ALREADY_ONLINE),
         )
 

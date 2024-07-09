@@ -32,16 +32,12 @@ def register_task(delay: int) -> Callable:
     return decorator
 
 
-@register_task(delay=1)
+@register_task(delay=5)
 async def removed_expired_tokens() -> None:
     for player in services.players:
         # doesn't look like afk players get the afk thingy thing thing
         # ^^^ bro what?
-        if (
-            time.time() - player.last_update >= TOKEN_EXPIRATION
-            and not player.bot
-            and player.status != ActionStatus.AFK
-        ):
+        if time.time() - player.last_update >= TOKEN_EXPIRATION and not player.bot:
             await player.logout()
             services.logger.info(
                 f"{player.username} has been logged out, due to loss of connection."

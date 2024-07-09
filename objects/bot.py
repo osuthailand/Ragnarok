@@ -25,7 +25,7 @@ class Bot(Player):
         bot.status = ActionStatus.WATCHING
         bot.status_text = "over scores"
 
-        bot.bot = True
+        bot.is_bot = True
 
         services.bot = bot
         services.players.add(bot)

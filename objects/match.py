@@ -65,14 +65,14 @@ class Match:
 
         self.connected: list["Player"] = []
 
-        self.locked: bool = False
+        self.is_locked: bool = False
 
         self.chat: Channel = Channel(
             **{
                 "raw": f"#multi_{self.id}",
                 "name": "#multiplayer",
                 "description": self.name,
-                "is_public": False,
+                "public": False,
                 "is_temporary": True,
             }
         )
@@ -84,26 +84,19 @@ class Match:
     def embed(self) -> str:
         return f"[osump://{self.id}/{self.password.replace(' ', '_')} {self.name}]"
 
-    def get_free_slot(self) -> int:
+    def get_free_slot(self) -> int | None:
         for id, slot in enumerate(self.slots):
             if slot.status == SlotStatus.OPEN:
                 return id
 
-        return -1
-
-    def find_host(self) -> Slot | None:
+    def find_user(self, player: "Player") -> Slot | None:
         for slot in self.slots:
-            if slot.player is not None and slot.player.id == self.host:
+            if slot.player is not None and slot.player == player:
                 return slot
 
-    def find_user(self, p: "Player") -> Slot | None:
-        for slot in self.slots:
-            if slot.player == p:
-                return slot
-
-    def find_user_slot(self, p: "Player") -> int | None:
+    def find_user_slot(self, player: "Player") -> int | None:
         for id, slot in enumerate(self.slots):
-            if slot.player is not None and slot.player.token == p.token:
+            if slot.player is not None and slot.player == player:
                 return id
 
     def find_slot(self, slot_id: int) -> Slot | None:
@@ -122,23 +115,23 @@ class Match:
         self.enqueue(writer.notification(f"{slot.player.username} became host!"))
         self.enqueue_state()
 
-    def enqueue_state(self, immune: set[int] = set(), lobby: bool = False) -> None:
-        for p in self.connected:
-            if p.id not in immune:
-                p.enqueue(writer.match_update(self))
+    def enqueue_state(self, ignore: set[int] = set(), lobby: bool = False) -> None:
+        for player in self.connected:
+            if player.id not in ignore:
+                player.enqueue(writer.match_update(self))
 
         if lobby:
-            if not (chan := services.channels.get("#lobby")):
+            if not (channel := services.channels.get("#lobby")):
                 return
 
-            chan.enqueue(writer.match_update(self))
+            channel.enqueue(writer.match_update(self))
 
     def enqueue(self, data, lobby: bool = False) -> None:
-        for p in self.connected:
-            p.enqueue(data)
+        for player in self.connected:
+            player.enqueue(data)
 
         if lobby:
-            if not (chan := services.channels.get("#lobby")):
+            if not (channel := services.channels.get("#lobby")):
                 return
 
-            chan.enqueue(data)
+            channel.enqueue(data)

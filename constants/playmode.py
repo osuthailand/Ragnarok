@@ -1,4 +1,5 @@
 from enum import unique, IntEnum
+from typing import Iterable
 
 
 @unique
@@ -61,8 +62,11 @@ class Gamemode(IntEnum):
     VANILLA = 0
     RELAX = 1
 
+    def __iter__(self) -> Iterable:
+        return iter((self.VANILLA, self.RELAX))
+
     @property
-    def table(self):
+    def to_db(self):
         return (
             "stats"
             if self == self.VANILLA

@@ -13,7 +13,7 @@ from rina_pp_pyb import Performance, Beatmap as BMap
 
 @osu.route("/web/osu-osz2-bmsubmit-getid.php")
 @check_auth("u", "h", b"5\nAuthentication failure. Please check your login details.")
-async def get_last_id(req: Request, p: Player) -> Response:
+async def get_last_id(request: Request, player: Player) -> Response:
     # arguments:
     # s = BeatmapSetId (if available)
     # b = BeatmapIds (comma separated list)
@@ -37,23 +37,22 @@ async def get_last_id(req: Request, p: Player) -> Response:
     everything else - Unknown error occured
     """
 
-    if p.is_restricted:
+    if player.is_restricted:
         return Response(content=b"5\nYour account is currently restricted.")
 
     BASE_ID_INCREMENT = 100_000_000
 
-    if p.id not in (1000, 1106):
+    if player.id not in (1000, 1106):
         return Response(content=b"6\nNo permission to upload (yet)")
 
-    await p.update_latest_activity()
+    await player.update_latest_activity()
 
-    set_id = int(req.query_params["s"])
+    set_id = int(request.query_params["s"])
     services.logger.debug(set_id)
-    map_ids = req.query_params["b"].split(",")
-    old_osz2_hash = req.query_params["z"]
+    map_ids = request.query_params["b"].split(",")
+    old_osz2_hash = request.query_params["z"]
 
     new_submit = old_osz2_hash == ""
-    services.logger.debug(new_submit)
     osz2_available = False
 
     if set_id < BASE_ID_INCREMENT and set_id != -1:
@@ -64,19 +63,19 @@ async def get_last_id(req: Request, p: Player) -> Response:
     # check if penis map exist in database
     # also check if the set_id is below base_id_increment
     # (that would mean it's not from rina)
-    beatmap = await services.database.fetch_one(
+    map = await services.database.fetch_one(
         "SELECT server, creator_id FROM beatmaps " "WHERE set_id = :set_id LIMIT 1",
         {"set_id": set_id},
     )
 
-    if beatmap:
+    if map:
         # if this beatmap is already in the system/existed
-        if beatmap["server"] == "bancho":
+        if map["server"] == "bancho":
             return Response(
                 content=b"7\nYou're not allowed to update bancho maps. (error 2)"
             )
 
-        if beatmap["creator_id"] != p.id:
+        if map["creator_id"] != player.id:
             return Response(
                 content=b"1\nThe beatmap you're trying to submit isn't yours!"
             )
@@ -162,65 +161,65 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
         return Response(content=b"error while parsing osz2")
 
     set_id = form["s"]
-    beatmaps = osz2_data.extract_osu_files()
+    maps = osz2_data.extract_osu_files()
     metadata = osz2_data.metadata
 
-    for beatmap in beatmaps:
-        # TODO: .osu specifically made for this, instead of using external libraries
-        attributes = BMap(bytes=beatmap.raw_data)
+    for child_map in maps:
+        # TODO: .osu parser specifically made for this, instead of using external libraries
+        attributes = BMap(bytes=child_map.raw_data)
         difficulty = Performance().calculate(attributes).difficulty
 
-        bmap = await services.beatmaps.get_by_map_id(beatmap._map_id) or Beatmap()
+        map = await services.beatmaps.get_by_map_id(child_map._map_id) or Beatmap()
 
-        bmap.server = "rina"
-        bmap.title = metadata.title
-        bmap.artist = metadata.artist
+        map.server = "rina"
+        map.title = metadata.title
+        map.artist = metadata.artist
 
-        osu_file_regex = services.regex[".osu"].search(beatmap.name)
+        osu_file_regex = services.regex[".osu"].search(child_map.name)
 
         if not osu_file_regex:
             return Response(content=b"Unexpected error.")
 
-        bmap.artist = osu_file_regex.group(1)
-        bmap.artist_unicode = metadata.artist_unicode
+        map.artist = osu_file_regex.group(1)
+        map.artist_unicode = metadata.artist_unicode
 
-        bmap.title = osu_file_regex.group(2)
-        bmap.title_unicode = metadata.title_unicode
+        map.title = osu_file_regex.group(2)
+        map.title_unicode = metadata.title_unicode
 
-        bmap.version = osu_file_regex.group(4)
+        map.version = osu_file_regex.group(4)
 
-        bmap.creator = p.username
-        bmap.creator_id = p.id
+        map.creator = p.username
+        map.creator_id = p.id
 
-        bmap.set_id = metadata.set_id
-        bmap.map_id = beatmap._map_id
+        map.set_id = metadata.set_id
+        map.map_id = child_map._map_id
 
-        bmap.ar = attributes.ar
-        bmap.od = attributes.od
-        bmap.hp = attributes.hp
-        bmap.cs = attributes.cs
-        bmap.bpm = attributes.bpm
-        bmap.mode = attributes.mode.value
+        map.ar = attributes.ar
+        map.od = attributes.od
+        map.hp = attributes.hp
+        map.cs = attributes.cs
+        map.bpm = attributes.bpm
+        map.mode = attributes.mode.value
 
-        bmap.stars = difficulty.stars
-        bmap.max_combo = difficulty.max_combo
-        bmap.map_md5 = hashlib.md5(beatmap.raw_data).digest().hex()
+        map.stars = difficulty.stars
+        map.max_combo = difficulty.max_combo
+        map.map_md5 = hashlib.md5(child_map.raw_data).digest().hex()
 
         # TODO: proper beatmap update
         if old_map := await services.database.fetch_one(
             "SELECT map_md5 FROM beatmaps WHERE map_id = :map_id",
-            {"map_id": bmap.map_id},
+            {"map_id": map.map_id},
         ):
             await services.database.execute(
                 "DELETE FROM beatmaps WHERE map_md5 = :map_md5",
                 {"map_md5": old_map["map_md5"]},
             )
 
-        await bmap.add_to_db()
+        await map.add_to_db()
 
         # save .osu file in .data/beatmaps
-        with open(f".data/beatmaps/{bmap.map_id}.osu", "wb+") as beatmap_file:
-            beatmap_file.write(beatmap.raw_data)
+        with open(f".data/beatmaps/{map.map_id}.osu", "wb+") as osu_file:
+            osu_file.write(child_map.raw_data)
 
     # response with "0" if everything went right, okay
     return Response(content=b"0")

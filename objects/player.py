@@ -5,7 +5,6 @@ import uuid
 import aiohttp
 
 
-from copy import copy
 from packets import writer
 from objects import services
 from typing import TYPE_CHECKING, Any, Union
@@ -39,15 +38,14 @@ class Player:
         id: int,
         privileges: int,
         passhash: str,
-        lon: float = 0.0,
-        lat: float = 0.0,
+        longitude: float = 0.0,
+        latitude: float = 0.0,
         country: str = "XX",
         **kwargs,
     ) -> None:
         self.id: int = id
         self.username: str = username
         self.username_with_tag: str = ""
-        self.safe_name: str = self.safe_username(self.username)
         self.privileges: int = privileges
         self.passhash: str = passhash
 
@@ -55,22 +53,25 @@ class Player:
         self.country_code: int = country_codes[self.country]
 
         self.ip: str = kwargs.get("ip", "127.0.0.1")
-        self.longitude: float = lon
-        self.latitude: float = lat
+        self.longitude: float = longitude
+        self.latitude: float = latitude
         self.timezone: int = kwargs.get("time_offset", 0) + 24
         self.client_version: str = kwargs.get("version", "0")
+
         self.in_lobby: bool = False
 
-        self.token: str = kwargs.get("token", self.generate_token())
+        self.token: str = str(uuid.uuid4())
 
         self.presence_filter: PresenceFilter = PresenceFilter.NIL
 
         self.status: ActionStatus = ActionStatus.IDLE
         self.status_text: str = ""
-        self.beatmap_md5: str = ""
+        self.map_md5: str = ""
+        self.map_id: int = -1
         self.current_mods: Mods = Mods.NONE
+
         self.play_mode: Mode = Mode.OSU
-        self.beatmap_id: int = -1
+        self.gamemode: Gamemode = Gamemode.VANILLA
 
         self.achievements: list[UserAchievement] = []
         self.friends: set[int] = set()
@@ -86,26 +87,15 @@ class Player:
         self.level: float = 0.0
         self.rank: int = 0
         self.pp: int = 0
-
         self.total_hits: int = 0
         self.max_combo: int = 0
-
-        self.gamemode: Gamemode = Gamemode.VANILLA
-
-        self.block_unknown_pms: bool = kwargs.get("block_nonfriend", False)
 
         self.queue: bytearray = bytearray()
 
         self.login_time: float = time.time()
         self.last_update: float = 0.0
 
-        self.bot: bool = False
-
-        self.is_restricted: bool = not (self.privileges & Privileges.VERIFIED) and (
-            not self.privileges & Privileges.PENDING
-        )
-        self.using_rina: bool = self.client_version.endswith("rina")
-        self.is_staff: bool = bool(self.privileges & Privileges.BAT)
+        self.is_bot: bool = False
 
         self.last_np: Union["Beatmap", None] = None
         self.last_score: Union["Score", None] = None
@@ -120,6 +110,20 @@ class Player:
         )
 
     @property
+    def is_restricted(self) -> bool:
+        return not (self.privileges & Privileges.VERIFIED) and (
+            not self.privileges & Privileges.PENDING
+        )
+
+    @property
+    def is_staff(self) -> bool:
+        return bool(self.privileges & Privileges.BAT)
+
+    @property
+    def using_rina(self) -> bool:
+        return self.client_version.endswith("rina")
+
+    @property
     def embed(self) -> str:
         return f"[https://{services.domain}/users/{self.id} {self.username}]"
 
@@ -127,29 +131,29 @@ class Player:
     def url(self) -> str:
         return f"https://{services.domain}/users/{self.id}"
 
-    @staticmethod
-    def generate_token() -> str:
-        return str(uuid.uuid4())
+    @property
+    def safe_username(self) -> str:
+        return self.username.lower().replace(" ", "_")
 
-    def safe_username(self, name: str) -> str:
-        return name.lower().replace(" ", "_")
+    def __eq__(self, player: "Player") -> bool:
+        return player.token == self.token
 
-    def enqueue(self, packet: bytes) -> None:
-        """``enqueue()`` adds a packet to the queue."""
-        self.queue += packet
+    def enqueue(self, data: bytes) -> None:
+        """``enqueue()`` adds packet(s) to the queue."""
+        self.queue += data
 
     def dequeue(self) -> bytes:
-        """``dequeue()`` dequeues the current filled queue."""
+        """``dequeue()`` dequeues the current queue."""
         if self.queue:
-            ret = bytes(self.queue)
+            response = bytes(self.queue)
             self.queue.clear()
-            return ret
+            return response
 
         return b""
 
-    def shout(self, text: str) -> None:
+    def shout(self, msg: str) -> None:
         """``shout()`` alerts the player."""
-        self.enqueue(writer.notification(text))
+        self.enqueue(writer.notification(msg))
 
     async def verify(self) -> None:
         """`verify()` verifies the player and ensures the player doesn't have the `Privileges.PENDING` flag."""
@@ -185,67 +189,70 @@ class Player:
         services.players.remove(self)
 
         for player in services.players:
-            if player != self:
-                player.enqueue(writer.logout(self.id))
+            if player == self:
+                continue
+
+            player.enqueue(writer.logout(self.id))
 
         await services.redis.delete(f"ragnarok:session:{self.id}")
 
-    def add_spectator(self, p: "Player") -> None:
+    def add_spectator(self, player: "Player") -> None:
         """``add_spectator()`` makes player `p` spectate the player"""
-        spec_name = f"#spect_{self.id}"
-        spec_channel = services.channels.get(spec_name)
+        channel_name = f"#spect_{self.id}"
+        channel = services.channels.get(channel_name)
 
         # create if there's no channel
-        if not spec_channel:
-            spec_channel = Channel(
+        if not channel:
+            channel = Channel(
                 **{
-                    "name": spec_name,
+                    "name": channel_name,
                     "display_name": "#spectator",
                     "description": f"spectator chat for {self.username}",
                     "is_temporary": True,
-                    "is_public": False,
+                    "public": False,
                 }
             )
 
-            services.channels.add(spec_channel)
-            spec_channel.connect(self)
+            services.channels.add(channel)
+            channel.connect(self)
 
-        spec_channel.connect(p)
+        channel.connect(player)
 
-        player_joined = writer.fellow_spectator_joined(p.id)
+        player_joined = writer.fellow_spectator_joined(player.id)
 
         for spectator in self.spectators:
             spectator.enqueue(player_joined)
-            p.enqueue(writer.fellow_spectator_joined(spectator.id))
+            player.enqueue(writer.fellow_spectator_joined(spectator.id))
 
-        self.spectators.append(p)
-        p.spectating = self
+        self.spectators.append(player)
+        player.spectating = self
 
-        self.enqueue(writer.spectator_joined(p.id))
-        services.logger.info(f"{p.username} started spectating {self.username}")
+        self.enqueue(writer.spectator_joined(player.id))
+        services.logger.info(f"{player.username} started spectating {self.username}")
 
-    def remove_spectator(self, p: "Player") -> None:
+    def remove_spectator(self, player: "Player") -> None:
         """``remove_spectator()`` makes player `p` stop spectating the player"""
-        spec_channel = services.channels.get(f"#spect_{self.id}")
-        self.spectators.remove(p)
-        p.spectating = None
+        self.spectators.remove(player)
+        player.spectating = None
 
-        if not spec_channel:
+        channel = services.channels.get(f"#spect_{self.id}")
+
+        if not channel:
             services.logger.debug("WHAT!")
             return
 
-        spec_channel.disconnect(p)
+        channel.disconnect(player)
 
-        fellow_stopped_spectating = writer.fellow_spectator_left(p.id)
+        fellow_stopped_spectating = writer.fellow_spectator_left(player.id)
         if not self.spectators:
             # if there are no spectators, make host disconnect
             # from spectator channel and removing the channel.
-            spec_channel.disconnect(self)
+            channel.disconnect(self)
         else:
-            for s in self.spectators:
-                s.enqueue(fellow_stopped_spectating)
+            for spectator in self.spectators:
+                spectator.enqueue(fellow_stopped_spectating)
 
-        self.enqueue(writer.spectator_left(p.id))
+        self.enqueue(writer.spectator_left(player.id))
 
     def join_match(self, match: Match, password: str = "") -> None:
         """``join_match()`` makes the player join a multiplayer match."""
@@ -253,10 +260,10 @@ class Player:
             self.enqueue(writer.match_fail())
             return  # user is already in a match
 
-        if (free_slot := match.get_free_slot()) == -1:
+        if (free_slot := match.get_free_slot()) is None:
             self.enqueue(writer.match_fail())
             services.logger.warn(
-                f"{self.username} tried to join a full match ({match!r})"
+                f"{match!r}: {self.username} tried to join a full match"
             )
             return
 
@@ -272,7 +279,7 @@ class Player:
             slot.host = True
 
         if self.match.chat not in services.channels:
-            services.channels.add(chan=self.match.chat)
+            services.channels.add(channel=self.match.chat)
 
         self.match.chat.connect(self)
 
@@ -285,37 +292,37 @@ class Player:
 
     def leave_match(self) -> None:
         """``leave_match()`` leaves the multiplayer match, the user is in."""
-        if not self.match or not (slot := self.match.find_user(self)):
+        match = self.match
+
+        if not match or not (slot := match.find_user(self)):
             return
 
-        self.match.chat.disconnect(self)
-
-        m = copy(self.match)
-        self.match = None
-
+        match.chat.disconnect(self)
+        match.connected.remove(self)
         slot.reset()
-        m.connected.remove(self)
 
-        services.logger.info(f"{self.username} left {m}")
+        services.logger.info(f"{self.username} left {match}")
 
         # if that was the last person
         # to leave the multiplayer
         # delete the multi lobby
-        if not m.connected:
-            services.logger.info(f"{m} is empty! Removing...")
-            m.enqueue(writer.match_dispose(m.id), lobby=True)
-            services.matches.remove(m)
+        if not match.connected:
+            services.logger.info(f"{match} is empty! Removing...")
+            match.enqueue(writer.match_dispose(match.id), lobby=True)
+            services.matches.remove(match)
             return
 
-        if m.host == self.id:
+        if match.host == self.id:
             services.logger.info("Host left, rotating host.")
-            for slot in m.slots:
+            for slot in match.slots:
                 if not slot.host and slot.status.is_occupied:
-                    m.transfer_host(slot)
+                    match.transfer_host(slot)
 
                     break
 
-        m.enqueue_state(immune={self.id}, lobby=True)
+        self.match = None
+
+        match.enqueue_state(ignore={self.id}, lobby=True)
 
     def send(self, message: str, recipent: "Player"):
         recipent.enqueue(
@@ -371,40 +378,45 @@ class Player:
             {"user_id": self.id},
         )
 
-        for player in friends:
-            self.friends.add(player["id"])
+        for friend in friends:
+            self.friends.add(friend["id"])
 
-    async def handle_friend(self, user: int) -> None:
-        if not (t := services.players.get(user)):
-            return  # user isn't online; ignore
+    async def handle_friend(self, user_id: int) -> None:
+        if not (target := await services.players.get_offline(user_id)):
+            services.logger.critical(
+                f"{self.username} tried to change friendship status "
+                f"with {user_id}, but no user with that id exists."
+            )
+            return  # user doesn't exist
 
         # remove friend
         if await services.database.fetch_one(
             "SELECT 1 FROM friends WHERE user_id1 = :user_id1 AND user_id2 = :user_id2",
-            {"user_id": self.id, "user_id2": user},
+            {"user_id": self.id, "user_id2": user_id},
         ):
             await services.database.execute(
                 "DELETE FROM friends WHERE user_id1 = :user_id AND user_id2 = :user_id2",
-                {"user_id": self.id, "user_id2": user},
+                {"user_id": self.id, "user_id2": user_id},
             )
-            self.friends.remove(user)
+            self.friends.remove(user_id)
 
-            services.logger.info(f"{self.username} removed {t.username} as friends.")
+            services.logger.info(
+                f"{self.username} removed {target.username} as friends."
+            )
             return
 
         # add friend
         await services.database.execute(
             "INSERT INTO friends (user_id1, user_id2) " "VALUES (:user_id1, :user_id2)",
-            {"user_id": self.id, "user_id2": user},
+            {"user_id": self.id, "user_id2": user_id},
         )
-        self.friends.add(user)
+        self.friends.add(user_id)
 
-        services.logger.info(f"{self.username} added {t.username} as friends.")
+        services.logger.info(f"{self.username} added {target.username} as friends.")
 
     async def restrict(self) -> None:
         if self.is_restricted:
-            return  # just ignore if the user
-            # is already restricted.
+            return  # just ignore if the user is already restricted.
 
         self.privileges -= Privileges.VERIFIED
 
@@ -413,32 +425,31 @@ class Player:
         )
 
         # remove player from leaderboards
-        for mod in Gamemode:
+        for gamemode in Gamemode:
             for mode in Mode:
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod.value}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{gamemode.name.lower()}:{mode.value}", self.id
                 )
 
                 # country rank
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{mod.value}:{self.country}:{mode.value}",
+                    f"ragnarok:leaderboard:{gamemode.name.lower()}:{self.country}:{mode.value}",
                     self.id,
                 )
 
-        # notify user
-        self.shout("Your account has been put in restricted mode!")
+        services.bot.send("Your account has been put in restricted mode!", self)
 
         services.logger.info(f"{self.username} has been put in restricted mode!")
 
-    async def update_stats(self, s: "Score") -> None:
-        se = ("std", "taiko", "catch", "mania")[s.mode]
-        self.get_level()
+    async def update_stats(self, score: "Score") -> None:
+        mode = ("std", "taiko", "catch", "mania")[score.mode]
+        self.update_level()
 
         await services.database.execute(
-            f"UPDATE {s.gamemode.table} SET pp_{se} = :pp, playcount_{se} = :playcount, "
-            f"accuracy_{se} = :accuracy, total_score_{se} = :total_score, total_hits_{se} = :total_hits, "
-            f"ranked_score_{se} = :ranked_score, level_{se} = :level, playtime_{se} = playtime_{se} + :playtime, "
-            f"max_combo_{se} = IF(max_combo_{se} < :max_combo, :max_combo, max_combo_{se}) WHERE id = :user_id",
+            f"UPDATE {score.gamemode.to_db} SET pp_{mode} = :pp, playcount_{mode} = :playcount, "
+            f"accuracy_{mode} = :accuracy, total_score_{mode} = :total_score, total_hits_{mode} = :total_hits, "
+            f"ranked_score_{mode} = :ranked_score, level_{mode} = :level, playtime_{mode} = playtime_{mode} + :playtime, "
+            f"max_combo_{mode} = IF(max_combo_{mode} < :max_combo, :max_combo, max_combo_{mode}) WHERE id = :user_id",
             {
                 "pp": self.pp,
                 "playcount": self.playcount,
@@ -447,13 +458,13 @@ class Player:
                 "total_hits": self.total_hits,
                 "ranked_score": self.ranked_score,
                 "level": self.level,
-                "playtime": s.playtime,
-                "max_combo": s.max_combo,
+                "playtime": score.playtime,
+                "max_combo": score.max_combo,
                 "user_id": self.id,
             },
         )
 
-    def get_level(self):
+    def update_level(self):
         # TODO: relax score
         # required score for lvl 100.
         if self.total_score > 26_931_190_828.629:
@@ -474,19 +485,19 @@ class Player:
         if not location:
             return
 
-        lon, lat, cc, c = location
+        longitude, latitude, country, country_code = location
 
-        if lon != self.longitude:
-            self.longitude = lon
+        if longitude != self.longitude:
+            self.longitude = longitude
 
-        if lat != self.latitude:
-            self.latitude = lat
+        if latitude != self.latitude:
+            self.latitude = latitude
 
-        if c != self.country_code:
-            self.country_code = c
+        if country_code != self.country_code:
+            self.country_code = country_code
 
-        if cc != self.country:
-            self.country = cc
+        if country != self.country:
+            self.country = country
 
         await self.save_location()
 
@@ -494,29 +505,29 @@ class Player:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(
                 f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"
-            ) as resp:
-                if not (ret := await resp.json()):
+            ) as response:
+                if not (decoded := await response.json()):
                     return
 
-                if ret["status"] == "fail":
+                if decoded["status"] == "fail":
                     services.logger.critical(
-                        f"Unable to get {self.username}'s location. Response: {ret['message']}"
+                        f"Unable to get {self.username}'s location. Response: {decoded['message']}"
                     )
                     return
 
                 if not get:
-                    self.latitude = ret["lat"]
-                    self.longitude = ret["lon"]
-                    self.country = ret["countryCode"]
-                    self.country_code = country_codes[ret["countryCode"]]
+                    self.latitude = decoded["lat"]
+                    self.longitude = decoded["lon"]
+                    self.country = decoded["countryCode"]
+                    self.country_code = country_codes[decoded["countryCode"]]
 
                     return
 
                 return (
-                    ret["lat"],
-                    ret["lon"],
-                    ret["countryCode"],
-                    country_codes[ret["countryCode"]],
+                    decoded["lat"],
+                    decoded["lon"],
+                    decoded["countryCode"],
+                    country_codes[decoded["countryCode"]],
                 )
 
     async def save_location(self):
@@ -537,7 +548,7 @@ class Player:
             f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
             f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
             f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
-            f"FROM {gamemode.table} WHERE id = :user_id",
+            f"FROM {gamemode.to_db} WHERE id = :user_id",
             {"user_id": self.id},
         )
 
@@ -554,48 +565,33 @@ class Player:
     async def get_rank(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
     ) -> int:
-        mod = (
-            "vanilla"
-            if gamemode == Gamemode.VANILLA
-            else "relax"  # if gamemode == Gamemode.RELAX
-        )
-        _rank: int = await services.redis.zrevrank(
-            f"ragnarok:leaderboard:{mod}:{mode}",
+        rank: int = await services.redis.zrevrank(
+            f"ragnarok:leaderboard:{gamemode.name.lower()}:{mode}",
             str(self.id),
         )
-        return _rank + 1 if _rank is not None else 0
+        return rank + 1 if rank is not None else 0
 
     async def get_country_rank(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
     ) -> int:
-        mod = (
-            "vanilla"
-            if gamemode == Gamemode.VANILLA
-            else "relax"  # if gamemode == Gamemode.RELAX
-        )
-        _rank: int = await services.redis.zrevrank(
-            f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
+        rank: int = await services.redis.zrevrank(
+            f"ragnarok:leaderboard:{gamemode.name.lower()}:{self.country}:{mode}",
             str(self.id),
         )
-        return _rank + 1 if _rank is not None else 0
+        return rank + 1 if rank is not None else 0
 
     async def update_rank(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
     ) -> int:
         if not self.is_restricted:
-            mod = (
-                "vanilla"
-                if gamemode == Gamemode.VANILLA
-                else "relax"  # if gamemode == Gamemode.RELAX
-            )
             await services.redis.zadd(
-                f"ragnarok:leaderboard:{mod}:{mode}",
+                f"ragnarok:leaderboard:{gamemode.name.lower()}:{mode}",
                 {str(self.id): self.pp},
             )
 
             # country rank
             await services.redis.zadd(
-                f"ragnarok:leaderboard:{mod}:{self.country}:{mode}",
+                f"ragnarok:leaderboard:{gamemode.name.lower()}:{self.country}:{mode}",
                 {str(self.id): self.pp},
             )
 

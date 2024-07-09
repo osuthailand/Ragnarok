@@ -25,57 +25,57 @@ class Tokens:
         self.players.remove(p)
 
     def get(self, value: str | int) -> Player | None:
-        for p in self.players:
+        for player in self.players:
             if (
-                p.id == value
-                or p.username == value
-                or p.token == value
-                or p.safe_name == value
+                player.id == value
+                or player.username == value
+                or player.token == value
+                or player.safe_username == value
             ):
-                return p
+                return player
 
     async def get_offline(self, value: str | int) -> Player | None:
-        if p := self.get(value):
-            return p
+        if player := self.get(value):
+            return player
 
         if isinstance(value, int):
-            if p := await self.from_sql_by_id(value):
-                return p
+            if player := await self.from_sql_by_id(value):
+                return player
         else:
-            if p := await self.from_sql_by_name(value):
-                return p
+            if player := await self.from_sql_by_name(value):
+                return player
 
     async def from_sql_by_name(self, value: str) -> Player | None:
-        data = await services.database.fetch_one(
+        user = await services.database.fetch_one(
             "SELECT username, id, privileges, passhash, country FROM users "
             "WHERE (username = :value OR safe_username = :value)",
             {"value": value},
         )
 
-        if not data:
+        if not user:
             return
 
-        p = Player(**dict(data))
+        player = Player(**dict(user))
 
-        return p
+        return player
 
     async def from_sql_by_id(self, value: int) -> Player | None:
-        data = await services.database.fetch_one(
+        user = await services.database.fetch_one(
             "SELECT username, id, privileges, passhash,  "
             "country FROM users WHERE id = :user_id",
             {"user_id": value},
         )
 
-        if not data:
+        if not user:
             return
 
-        p = Player(**dict(data))
+        player = Player(**dict(user))
 
-        return p
+        return player
 
-    def enqueue(self, packet: bytes) -> None:
-        for p in self.players:
-            p.enqueue(packet)
+    def enqueue(self, data: bytes) -> None:
+        for player in self.players:
+            player.enqueue(data)
 
 
 class Channels:
@@ -85,16 +85,16 @@ class Channels:
     def __iter__(self):
         return iter(self.channels)
 
-    def add(self, chan: Channel) -> None:
-        self.channels.append(chan)
+    def add(self, channel: Channel) -> None:
+        self.channels.append(channel)
 
-    def remove(self, c: Channel) -> None:
-        self.channels.remove(c)
+    def remove(self, channel: Channel) -> None:
+        self.channels.remove(channel)
 
     def get(self, name: str) -> Channel | None:
-        for chan in self.channels:
-            if chan.name == name:
-                return chan
+        for channel in self.channels:
+            if channel.name == name:
+                return channel
 
 
 class Matches:
@@ -107,17 +107,17 @@ class Matches:
     def __len__(self):
         return len(self.matches)
 
-    def remove(self, m: Match):
-        if m in self.matches:
-            self.matches.remove(m)
+    def remove(self, match: Match):
+        if match in self.matches:
+            self.matches.remove(match)
 
     def get(self, match_id: int) -> Match:  # type: ignore
         for match in self.matches:
             if match_id == match.id:
                 return match
 
-    def add(self, m: Match):
-        self.matches.append(m)
+    def add(self, match: Match):
+        self.matches.append(match)
 
 
 class Beatmaps:
@@ -127,8 +127,8 @@ class Beatmaps:
     def __iter__(self):
         return iter(self.beatmaps)
 
-    def __getitem__(self, item: str) -> Beatmap:
-        return self.beatmaps[item]
+    def __getitem__(self, map_md5: str) -> Beatmap:
+        return self.beatmaps[map_md5]
 
     def remove(self, map_md5: str) -> None:
         if map_md5 in self.beatmaps:
@@ -138,35 +138,32 @@ class Beatmaps:
         if map_md5 in self.beatmaps:
             return self.beatmaps[map_md5]
 
-        if not (b := await Beatmap.get_beatmap(map_md5)):
-            services.logger.critical(f"Failed to get beatmaps with hash {map_md5}")
+        if not (map := await Beatmap.get(map_md5)):
+            services.logger.critical(
+                f"failed to get beatmaps with map_md5 {map_md5} (usually caused by the map not existing)"
+            )
             return
 
         # when getting from the api, it'll save into cache
-        self.beatmaps[map_md5] = b
-        return b
+        self.beatmaps[map_md5] = map
+        return map
 
     async def get_by_map_id(self, map_id: int) -> Beatmap | None:
-        if not (b := await Beatmap.get_beatmap(beatmap_id=map_id)):
-            services.logger.critical(f"Failed to get beatmaps with map_id {map_id}")
+        if not (map := await Beatmap.get(map_id=map_id)):
+            services.logger.critical(
+                f"failed to get beatmaps with map_id {map_id} (usually caused by the map not existing)"
+            )
             return
 
-        self.beatmaps[b.map_md5] = b
-        return b
+        self.beatmaps[map.map_md5] = map
+        return map
 
     async def get_by_set_id(self, set_id: int) -> Beatmap | None:
-        if not (b := await Beatmap.get_beatmap(set_id=set_id)):
-            services.logger.critical(f"Failed to get beatmaps with map_id {set_id}")
+        if not (map := await Beatmap.get(set_id=set_id)):
+            services.logger.critical(
+                f"failed to get beatmaps with map_id {set_id} (usually caused by the map not existing)"
+            )
             return
 
-        self.beatmaps[b.map_md5] = b
-        return b
-
-    def get_maps_from_set_id(self, set_id: int) -> list[str]:
-        h = []
-
-        for key, map in self.beatmaps.items():
-            if map.set_id == set_id:
-                h.append(key)
-
-        return h
+        self.beatmaps[map.map_md5] = map
+        return map

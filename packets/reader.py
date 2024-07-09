@@ -151,7 +151,7 @@ class Reader:
         self.offset += 8
         return ret
 
-    def read_i32_list(self) -> tuple[int]:
+    def read_int32_list(self) -> tuple[int]:
         length = self.read_int16()
 
         ret = struct.unpack(f"<{'I' * length}", self.data[: length * 4])
@@ -169,7 +169,7 @@ class Reader:
         self.offset += 8
         return ret[0]
 
-    def read_str(self, dot_net_str: bool = False) -> str:
+    def read_string(self, dot_net_str: bool = False) -> str:
         if not dot_net_str:
             is_string = self.data[0] == 0x0B
             self.offset += 1
@@ -194,97 +194,92 @@ class Reader:
         self.offset += result
         return ret
 
-    def _read_raw(self, length: int) -> memoryview:
-        ret = self.data[:length]
-        self.offset += length
-        return ret
-
     def read_raw(self) -> memoryview:
         ret = self.data[: self.plen]
         self.offset += self.plen
         return ret
 
     async def read_match(self) -> Match:
-        m = Match()
+        match = Match()
 
-        m.id = len(services.matches)
+        match.id = len(services.matches)
 
         self.offset += 2
 
-        m.in_progress = self.read_int8() == 1
+        match.in_progress = self.read_int8() == 1
 
         self.read_int8()  # ignore match type; 0 = normal osu!, 1 = osu! arcade
 
-        m.mods = Mods(self.read_int32())
+        match.mods = Mods(self.read_int32())
 
-        m.name = self.read_str()
-        m.password = self.read_str()
+        match.name = self.read_string()
+        match.password = self.read_string()
 
-        self.read_str()  # map title
-        map_id = self.read_int32()  # map id
-        map_md5 = self.read_str()
+        self.read_string()  # map title
+        map_id = self.read_int32()
+        map_md5 = self.read_string()
 
-        m.map = await services.beatmaps.get(map_md5)
+        match.map = await services.beatmaps.get(map_md5)
 
-        if not m.map:
-            m.map = await services.beatmaps.get_by_map_id(map_id)
+        if not match.map:
+            match.map = await services.beatmaps.get_by_map_id(map_id)
 
-        for slot in m.slots:
+        for slot in match.slots:
             slot.status = SlotStatus(self.read_int8())
 
-        for slot in m.slots:
+        for slot in match.slots:
             slot.team = SlotTeams(self.read_int8())
 
-        for slot in m.slots:
+        for slot in match.slots:
             if slot.status.is_occupied:
                 self.offset += 4
 
-        m.host = self.read_int32()
+        match.host = self.read_int32()
 
-        m.mode = Mode(self.read_int8())
-        m.scoring_type = ScoringType(self.read_int8())
-        m.team_type = TeamType(self.read_int8())
+        match.mode = Mode(self.read_int8())
+        match.scoring_type = ScoringType(self.read_int8())
+        match.team_type = TeamType(self.read_int8())
 
-        m.freemods = self.read_int8() == 1
+        match.freemods = self.read_int8() == 1
 
-        if m.freemods:
-            for slot in m.slots:
+        if match.freemods:
+            for slot in match.slots:
                 slot.mods = Mods(self.read_int32())
 
-        m.seed = self.read_int32()
+        match.seed = self.read_int32()
 
-        return m
+        return match
 
-    def read_scoreframe(self) -> ScoreFrame:
-        s = ScoreFrame()
+    def read_score_frame(self) -> ScoreFrame:
+        score_frame = ScoreFrame()
 
-        s.time = self.read_int32()
-        s.id = self.read_byte()
+        score_frame.time = self.read_int32()
+        score_frame.id = self.read_byte()
 
-        s.count_300 = self.read_uint16()
-        s.count_100 = self.read_uint16()
-        s.count_50 = self.read_uint16()
-        s.count_geki = self.read_uint16()
-        s.count_katu = self.read_uint16()
-        s.count_miss = self.read_uint16()
+        score_frame.count_300 = self.read_uint16()
+        score_frame.count_100 = self.read_uint16()
+        score_frame.count_50 = self.read_uint16()
+        score_frame.count_geki = self.read_uint16()
+        score_frame.count_katu = self.read_uint16()
+        score_frame.count_miss = self.read_uint16()
 
-        s.score = self.read_int32()
+        score_frame.score = self.read_int32()
 
-        s.max_combo = self.read_uint16()
-        s.combo = self.read_uint16()
+        score_frame.max_combo = self.read_uint16()
+        score_frame.combo = self.read_uint16()
 
-        s.perfect = self.read_int8() == 1
+        score_frame.perfect = self.read_int8() == 1
 
-        s.current_hp = self.read_byte()
-        s.tag_byte = self.read_byte()
+        score_frame.current_hp = self.read_byte()
+        score_frame.tag_byte = self.read_byte()
 
-        s.score_v2 = self.read_int8() == 1
+        score_frame.score_v2 = self.read_int8() == 1
 
-        if s.score_v2:
+        if score_frame.score_v2:
             self.read_float64()
             self.read_float64()
 
-        return s
+        return score_frame
 
     def read_spectate_frame(self) -> SpectateFrame:
         return SpectateFrame(
@@ -301,7 +296,7 @@ class Reader:
         count = self.read_uint16()
         frames = [self.read_spectate_frame() for _ in range(count)]
         action = SpectateAction(self.read_uint8())
-        score = self.read_scoreframe()
+        score = self.read_score_frame()
         sequence = self.read_uint16()
 
         return SpectateFrameFinished(frames, score, action, extra, sequence, raw)

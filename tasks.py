@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Callable
 
 import aiohttp
-from constants.player import ActionStatus
 from objects import services
 from objects.achievement import Achievement
 from objects.channel import Channel
@@ -37,7 +36,7 @@ async def removed_expired_tokens() -> None:
     for player in services.players:
         # doesn't look like afk players get the afk thingy thing thing
         # ^^^ bro what?
-        if time.time() - player.last_update >= TOKEN_EXPIRATION and not player.bot:
+        if time.time() - player.last_update >= TOKEN_EXPIRATION and not player.is_bot:
             await player.logout()
             services.logger.info(
                 f"{player.username} has been logged out, due to loss of connection."
@@ -69,9 +68,9 @@ async def cache_allowed_osu_builds() -> None:
 
     async with aiohttp.ClientSession() as session:
         async with session.get("https://osu.ppy.sh/api/v2/changelog") as response:
-            data = await response.json()
+            decoded = await response.json()
 
-            for stream in data["streams"]:
+            for stream in decoded["streams"]:
                 if stream["name"] not in ALLOWED_STREAMS:
                     continue
 
@@ -85,7 +84,7 @@ async def cache_allowed_osu_builds() -> None:
 
                 versions.append(stream["latest_build"]["version"] + suffix)
 
-            for build in data["builds"]:
+            for build in decoded["builds"]:
                 if build["update_stream"]["name"] not in ALLOWED_STREAMS:
                     continue
 
@@ -107,8 +106,8 @@ async def cache_channels() -> None:
         "SELECT name, description, public, staff, auto_join, read_only FROM channels"
     )
 
-    for _channel in channels:
-        channel = Channel(**dict(_channel))
+    for channel_db in channels:
+        channel = Channel(**dict(channel_db))
         services.channels.add(channel)
 
 

@@ -1,9 +1,9 @@
 import math
 import time
 
-from utils import score
+from utils.score import calculate_accuracy
 from enum import IntEnum
-from typing import Optional
+from typing import Optional, Union
 from base64 import b64decode
 from objects import services
 from dataclasses import dataclass
@@ -78,18 +78,17 @@ class Score:
         self.rank: str = "F"
 
         self.mode: Mode = Mode.OSU
-        self.mods: Mods = Mods.NONE
         self.status: SubmitStatus = SubmitStatus.FAILED
+
+        self.mods: Mods = Mods.NONE
+        self.gamemode: Gamemode = Gamemode.VANILLA
 
         self.playtime: int = 0
         self.submitted: int = math.ceil(time.time())
 
-        self.gamemode: Gamemode = Gamemode.VANILLA
-
         self.position: int = 0
 
-        # previous_best
-        self.pb: "Score" = None  # type: ignore
+        self.previous_best: Union["Score", None] = None
 
         self.awards_pp: bool = False
 
@@ -103,50 +102,49 @@ class Score:
         )
 
     @classmethod
-    async def set_data_from_sql(cls, data: Record) -> "Score":
-        s = cls()
+    async def from_sql(cls, data: Record) -> "Score":
+        score = cls()
 
-        s.id = data["id"]
+        score.id = data["id"]
 
-        s.score = data["score"]
-        s.pp = data["pp"]
+        score.score = data["score"]
+        score.pp = data["pp"]
 
-        s.count_300 = data["count_300"]
-        s.count_100 = data["count_100"]
-        s.count_50 = data["count_50"]
-        s.count_geki = data["count_geki"]
-        s.count_katu = data["count_katu"]
-        s.count_miss = data["count_miss"]
+        score.count_300 = data["count_300"]
+        score.count_100 = data["count_100"]
+        score.count_50 = data["count_50"]
+        score.count_geki = data["count_geki"]
+        score.count_katu = data["count_katu"]
+        score.count_miss = data["count_miss"]
 
-        s.total_hits = s.count_300 + s.count_100 + s.count_50
+        score.total_hits = score.count_300 + score.count_100 + score.count_50
 
-        s.max_combo = data["max_combo"]
-        s.accuracy = data["accuracy"]
+        score.max_combo = data["max_combo"]
+        score.accuracy = data["accuracy"]
 
-        s.perfect = data["perfect"]
+        score.perfect = data["perfect"]
 
-        s.rank = data["rank"]
-        s.mods = Mods(data["mods"])
+        score.rank = data["rank"]
+        score.mods = Mods(data["mods"])
 
-        s.playtime = data["playtime"]
+        score.playtime = data["playtime"]
 
-        s.status = SubmitStatus(data["status"])
-        s.mode = Mode(data["mode"])
+        score.status = SubmitStatus(data["status"])
+        score.mode = Mode(data["mode"])
 
-        s.submitted = data["submitted"]
+        score.submitted = data["submitted"]
 
-        s.gamemode = Gamemode(data["gamemode"])
+        score.gamemode = Gamemode(data["gamemode"])
 
-        return s
+        return score
 
     @classmethod
-    async def set_data_from_submission(
+    async def from_submission(
         cls,
         score_enc: bytes,
         iv: bytes,
         key: str,
-        exited: int,
-        # ) -> "Score" | None:
+        quit: int,
     ) -> Optional["Score"]:
         score_latin = b64decode(score_enc).decode("latin_1")
         iv_latin = b64decode(iv).decode("latin_1")
@@ -158,83 +156,86 @@ class Score:
             .split(":")
         )
 
-        s = cls()
+        score = cls()
 
         if not (player := services.players.get(data[1].rstrip())):
             return
 
-        s.player = player
+        score.player = player
 
-        if not (bmap := await services.beatmaps.get(data[0])):
+        if not (map := await services.beatmaps.get(data[0])):
             return
 
-        s.map = bmap
+        score.map = map
 
-        s.count_300 = int(data[3])
-        s.count_100 = int(data[4])
-        s.count_50 = int(data[5])
-        s.count_geki = int(data[6])
-        s.count_katu = int(data[7])
-        s.count_miss = int(data[8])
-        s.score = int(data[9])
-        s.max_combo = int(data[10])
+        score.count_300 = int(data[3])
+        score.count_100 = int(data[4])
+        score.count_50 = int(data[5])
+        score.count_geki = int(data[6])
+        score.count_katu = int(data[7])
+        score.count_miss = int(data[8])
+        score.score = int(data[9])
+        score.max_combo = int(data[10])
 
-        s.mode = Mode(int(data[15]))
+        score.mode = Mode(int(data[15]))
 
-        s.accuracy = score.calculate_accuracy(
-            s.mode,
-            s.count_300,
-            s.count_100,
-            s.count_50,
-            s.count_geki,
-            s.count_katu,
-            s.count_miss,
+        score.accuracy = calculate_accuracy(
+            score.mode,
+            score.count_300,
+            score.count_100,
+            score.count_50,
+            score.count_geki,
+            score.count_katu,
+            score.count_miss,
         )
 
-        s.total_hits = s.count_300 + s.count_100 + s.count_50
-
-        s.perfect = s.max_combo == s.map.max_combo
-
-        s.rank = data[12]
-
-        s.mods = Mods(int(data[13]))
-        passed = data[14] == "True"
-
-        if exited:
-            s.status = SubmitStatus.QUIT
+        score.total_hits = score.count_300 + score.count_100 + score.count_50
+        score.perfect = score.max_combo == score.map.max_combo
+        score.rank = data[12]
+        score.mods = Mods(int(data[13]))
 
         mods = int(data[13])
-        s.gamemode = Gamemode.RELAX if mods & Mods.RELAX else Gamemode.VANILLA
+        score.gamemode = Gamemode.RELAX if mods & Mods.RELAX else Gamemode.VANILLA
 
-        if passed:
-            await s.calculate_position()
+        passed = data[14] == "True"
 
-            if s.map.approved.has_leaderboard:
-                bmap = BMap(path=f".data/beatmaps/{s.map.file}")
+        await score.calculate_position()
 
-                if s.mode != bmap.mode:
-                    bmap.convert(GameMode(s.mode.value))
+        if score.map.approved.has_leaderboard:
+            map = BMap(path=f".data/beatmaps/{score.map.file}")
 
-                perf = Performance(
-                    n300=s.count_300,
-                    n100=s.count_100,
-                    n50=s.count_50,
-                    misses=s.count_miss,
-                    n_geki=s.count_geki,
-                    n_katu=s.count_katu,
-                    combo=s.max_combo,
-                    mods=s.mods,
-                ).calculate(bmap)
+            if score.mode != map.mode:
+                map.convert(GameMode(score.mode.value))
 
-                s.pp = perf.pp
+            perf = Performance(
+                n300=score.count_300,
+                n100=score.count_100,
+                n50=score.count_50,
+                misses=score.count_miss,
+                n_geki=score.count_geki,
+                n_katu=score.count_katu,
+                combo=score.max_combo,
+                mods=score.mods,
+            ).calculate(map)
 
-                if math.isnan(s.pp) or math.isinf(s.pp):
-                    s.pp = 0
+            score.pp = perf.pp
 
-                s.awards_pp = s.map.approved.awards_pp
+            if math.isnan(score.pp) or math.isinf(score.pp):
+                score.pp = 0
 
-            # find our previous best score on the map
-            if prev_best := await services.database.fetch_one(
+            score.awards_pp = score.map.approved.awards_pp
+
+        if quit:
+            score.status = SubmitStatus.QUIT
+            return score
+
+        if not passed:
+            score.status = SubmitStatus.FAILED
+            return score
+
+        # find our previous best score on the map
+        if not (
+            prev_best := await services.database.fetch_one(
                 "SELECT id, user_id, map_md5, score, pp, count_300, count_100, "
                 "count_50, count_geki, count_katu, count_miss, "
                 "max_combo, accuracy, perfect, rank, mods, status, "
@@ -242,66 +243,66 @@ class Score:
                 "WHERE user_id = :user_id AND gamemode = :gamemode "
                 "AND map_md5 = :map_md5 AND mode = :mode AND status = 3",
                 {
-                    "user_id": s.player.id,
-                    "gamemode": s.gamemode,
-                    "map_md5": s.map.map_md5,
-                    "mode": s.mode.value,
+                    "user_id": score.player.id,
+                    "gamemode": score.gamemode,
+                    "map_md5": score.map.map_md5,
+                    "mode": score.mode.value,
                 },
-            ):
-                s.pb = await Score.set_data_from_sql(prev_best)
+            )
+        ):
+            # if we find no old personal best
+            # we can just set the status to best
+            score.status = SubmitStatus.BEST
+            return score
 
-                # identical to `calculate_position(self)`
-                position = await services.database.fetch_val(
-                    "SELECT COUNT(*) FROM scores s "
-                    "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
-                    "INNER JOIN users u ON u.id = s.user_id "
-                    "WHERE s.score > :pb_score AND s.gamemode = :gamemode "
-                    "AND s.map_md5 = :map_md5 AND u.privileges & 4 "
-                    "AND s.status = 3 AND s.mode = :mode "
-                    "ORDER BY s.score DESC, s.submitted DESC",
-                    {
-                        "pb_score": s.pb.score,
-                        "gamemode": s.pb.gamemode.value,
-                        "map_md5": s.map.map_md5,
-                        "mode": s.pb.mode.value,
-                    },
-                )
-                s.pb.position = position + 1
+        score.previous_best = await Score.from_sql(prev_best)
 
-                # if we found a personal best score
-                # that has more score on the map,
-                # we set it to passed.
-                if (
-                    s.pb.pp < s.pp
-                    if s.gamemode != Gamemode.VANILLA
-                    else s.pb.score < s.score
-                ):
-                    s.status = SubmitStatus.BEST
-                    s.pb.status = SubmitStatus.PASSED
+        # identical to `calculate_position(self)`
+        position = await services.database.fetch_val(
+            "SELECT COUNT(*) FROM scores s "
+            "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
+            "INNER JOIN users u ON u.id = s.user_id "
+            "WHERE s.score > :pb_score AND s.gamemode = :gamemode "
+            "AND s.map_md5 = :map_md5 AND u.privileges & 4 "
+            "AND s.status = 3 AND s.mode = :mode "
+            "ORDER BY s.score DESC, s.submitted DESC",
+            {
+                "pb_score": score.previous_best.score,
+                "gamemode": score.previous_best.gamemode.value,
+                "map_md5": score.map.map_md5,
+                "mode": score.previous_best.mode.value,
+            },
+        )
+        score.previous_best.position = position + 1
 
-                    await services.database.execute(
-                        "UPDATE scores SET status = 2, awards_pp = 0 WHERE user_id = :user_id "
-                        "AND gamemode = :gamemode AND map_md5 = :map_md5 AND mode = :mode AND status = 3",
-                        {
-                            "user_id": s.player.id,
-                            "gamemode": s.gamemode,
-                            "map_md5": s.map.map_md5,
-                            "mode": s.mode.value,
-                        },
-                    )
-                else:
-                    s.status = SubmitStatus.PASSED
-            else:
-                # if we find no old personal best
-                # we can just set the status to best
-                s.status = SubmitStatus.BEST
+        # if we found a personal best score
+        # that has more score on the map,
+        # we set it to passed.
+        if (
+            score.previous_best.pp < score.pp
+            if score.gamemode != Gamemode.VANILLA
+            else score.previous_best.score < score.score
+        ):
+            score.status = SubmitStatus.BEST
+            score.previous_best.status = SubmitStatus.PASSED
+
+            await services.database.execute(
+                "UPDATE scores SET status = 2, awards_pp = 0 WHERE user_id = :user_id "
+                "AND gamemode = :gamemode AND map_md5 = :map_md5 AND mode = :mode AND status = 3",
+                {
+                    "user_id": score.player.id,
+                    "gamemode": score.gamemode,
+                    "map_md5": score.map.map_md5,
+                    "mode": score.mode.value,
+                },
+            )
         else:
-            s.status = SubmitStatus.FAILED
+            score.status = SubmitStatus.PASSED
 
-        return s
+        return score
 
     async def calculate_position(self) -> None:
-        ret = await services.database.fetch_val(
+        position = await services.database.fetch_val(
             "SELECT COUNT(*) FROM scores s "
             "INNER JOIN beatmaps b ON b.map_md5 = s.map_md5 "
             "INNER JOIN users u ON u.id = s.user_id "
@@ -317,7 +318,7 @@ class Score:
             },
         )
 
-        self.position = ret + 1
+        self.position = position + 1
 
     async def save_to_db(self) -> int:
         return await services.database.execute(

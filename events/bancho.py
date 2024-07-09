@@ -1,5 +1,5 @@
 from datetime import datetime
-from enum import IntEnum
+from enum import IntEnum, unique
 import os
 import time
 import copy
@@ -15,7 +15,7 @@ from objects import services
 from constants import commands as cmd
 from rina_pp_pyb import GameMode, Performance, Beatmap as BMap
 
-from constants.match import *
+from constants.match import SlotStatus, SlotTeams
 from constants.mods import Mods
 from objects.player import LoggingType, Player
 from objects.channel import Channel
@@ -350,7 +350,7 @@ async def login(req: Request) -> Response:
             ###
             "status": player.status.name,
             "status_text": player.status_text,
-            "beatmap_id": player.beatmap_id,
+            "beatmap_id": player.map_id,
         },
     )  # type: ignore
 
@@ -377,7 +377,7 @@ async def login(req: Request) -> Response:
 
         target.enqueue(writer.user_presence(player) + writer.update_stats(player))
 
-        if target.bot:
+        if target.is_bot:
             response += writer.bot_presence()
         else:
             response += writer.user_presence(target)
@@ -404,11 +404,11 @@ async def login(req: Request) -> Response:
 @register_event(ClientPackets.CHANGE_ACTION, restricted=True)
 async def change_action(player: Player, sr: Reader) -> None:
     player.status = ActionStatus(sr.read_byte())
-    status_text = sr.read_str()
-    player.beatmap_md5 = sr.read_str()
+    status_text = sr.read_string()
+    player.map_md5 = sr.read_string()
     player.current_mods = Mods(sr.read_uint32())
     player.play_mode = Mode(sr.read_byte())
-    player.beatmap_id = sr.read_int32()
+    player.map_id = sr.read_int32()
 
     player.gamemode = (
         Gamemode.RELAX if player.current_mods & Mods.RELAX else Gamemode.VANILLA
@@ -426,7 +426,7 @@ async def change_action(player: Player, sr: Reader) -> None:
             ###
             "status": player.status.name,
             "status_text": player.status_text,
-            "beatmap_id": player.beatmap_id,
+            "beatmap_id": player.map_id,
         },
     )  # type: ignore
 
@@ -444,10 +444,10 @@ async def _handle_command(channel: Channel, msg: str, player: Player):
 async def send_public_message(player: Player, sr: Reader) -> None:
     # sender; but unused since
     # we know who sent it lol
-    sr.read_str()
+    sr.read_string()
 
-    msg = sr.read_str()
-    channel_name = sr.read_str()
+    msg = sr.read_string()
+    channel_name = sr.read_string()
 
     sr.read_int32()  # sender id
 
@@ -485,9 +485,7 @@ async def send_public_message(player: Player, sr: Reader) -> None:
     # if so, post the 100%, 99%, etc.
     # pp for the map.
     if now_playing := services.regex["np"].search(msg):
-        beatmap = await Beatmap._get_beatmap_from_sql(
-            beatmap_id=int(now_playing.group(1))
-        )
+        beatmap = await Beatmap._get_beatmap_from_sql(map_id=int(now_playing.group(1)))
 
         if not beatmap:
             player.shout(
@@ -594,10 +592,10 @@ async def unable_to_spec(player: Player, sr: Reader) -> None:
 async def send_private_message(player: Player, sr: Reader) -> None:
     # sender - but unused, since we already know
     # who the sender is lol
-    sr.read_str()
+    sr.read_string()
 
-    msg = sr.read_str()
-    recipent_id = sr.read_str()
+    msg = sr.read_string()
+    recipent_id = sr.read_string()
 
     sr.read_int32()  # sender id
 
@@ -605,11 +603,11 @@ async def send_private_message(player: Player, sr: Reader) -> None:
         player.shout("The player you're trying to reach is currently offline.")
         return
 
-    if not recipent.bot:
+    if not recipent.is_bot:
         player.send(msg, recipent)
     else:
         if now_playing := services.regex["np"].search(msg):
-            beatmap = await Beatmap.get_beatmap(beatmap_id=int(now_playing.group(1)))
+            beatmap = await Beatmap.get(map_id=int(now_playing.group(1)))
 
             if not beatmap:
                 return
@@ -659,7 +657,7 @@ async def mp_join(player: Player, sr: Reader) -> None:
     match_id = sr.read_int32()
     match = services.matches.get(match_id)
 
-    match_password = sr.read_str()
+    match_password = sr.read_string()
 
     if player.match or not match:
         player.enqueue(writer.match_fail())
@@ -847,7 +845,7 @@ async def mp_score_update(player: Player, sr: Reader) -> None:
     raw_sr = copy.copy(sr)
 
     raw = raw_sr.read_raw()
-    score_frame = sr.read_scoreframe()
+    score_frame = sr.read_score_frame()
 
     if match.pp_win_condition and match.map is not None:
         if os.path.isfile(f".data/beatmaps/{match.map.map_id}.osu"):
@@ -1097,7 +1095,7 @@ async def skip_request(player: Player, sr: Reader) -> None:
 # id: 63
 @register_event(ClientPackets.CHANNEL_JOIN, restricted=True)
 async def join_channel(player: Player, sr: Reader) -> None:
-    channel_name = sr.read_str()
+    channel_name = sr.read_string()
     channel = services.channels.get(channel_name)
 
     if not channel:
@@ -1172,7 +1170,7 @@ async def mp_change_team(player: Player, sr: Reader) -> None:
 # id: 78
 @register_event(ClientPackets.CHANNEL_PART, restricted=True)
 async def part_channel(player: Player, sr: Reader) -> None:
-    channel_name = sr.read_str()
+    channel_name = sr.read_string()
 
     # if the channel_name doesn't start with "#",
     # it means, they're parting from DM, which is
@@ -1193,7 +1191,7 @@ async def part_channel(player: Player, sr: Reader) -> None:
 @register_event(ClientPackets.USER_STATS_REQUEST, restricted=True)
 async def request_stats(player: Player, sr: Reader) -> None:
     # people id's that current online rn
-    user_ids = sr.read_i32_list()
+    user_ids = sr.read_int32_list()
 
     if len(user_ids) > 32:
         return
@@ -1259,7 +1257,7 @@ async def change_pass(player: Player, sr: Reader) -> None:
 @register_event(ClientPackets.USER_PRESENCE_REQUEST, restricted=True)
 async def request_presence(player: Player, sr: Reader) -> None:
     # people id's that current online rn
-    user_ids = sr.read_i32_list()
+    user_ids = sr.read_int32_list()
 
     if len(user_ids) > 256:
         return
@@ -1271,7 +1269,7 @@ async def request_presence(player: Player, sr: Reader) -> None:
         if not (target := services.players.get(user_id)):
             continue
 
-        if target.bot:
+        if target.is_bot:
             player.enqueue(writer.bot_presence())
         else:
             player.enqueue(writer.user_presence(target))

@@ -46,13 +46,13 @@ class ScoringType(IntEnum):
     SCORE_V2 = 3
 
     @classmethod
-    def find_value(cls, name: str) -> "ScoringType":
-        c = cls(0)
+    def from_name(cls, name: str) -> "ScoringType":
+        scoring_type = cls(0)
 
         if name == "sv2":
-            return c.__class__.SCORE_V2
+            return scoring_type.__class__.SCORE_V2
 
-        if name.upper() in c.__class__.__dict__:
-            return c.__class__.__dict__[name.upper()]
+        if name.upper() in scoring_type.__class__.__dict__:
+            return scoring_type.__class__.__dict__[name.upper()]
 
-        return c
+        return scoring_type

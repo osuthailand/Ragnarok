@@ -22,7 +22,6 @@ from constants import commands
 
 from objects.bot import Bot
 from objects import services
-from redis import asyncio as aioredis
 
 import os
 import tasks

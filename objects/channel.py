@@ -32,7 +32,7 @@ class Channel:
         return self.display_name[0] != "#"
 
     @property
-    def is_multi(self) -> bool:
+    def is_multiplayer(self) -> bool:
         return self.display_name == "#multiplayer"
 
     def enqueue(self, data: bytes, ignore: tuple = ()) -> None:
@@ -90,7 +90,7 @@ class Channel:
         services.logger.info(f"{player.username} parted from {self.name}")
 
     def send(self, message: str, sender: "Player") -> None:
-        if not sender.bot:
+        if not sender.is_bot:
             if not (self in sender.channels or self.is_read_only):
                 return
 

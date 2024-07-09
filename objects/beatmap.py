@@ -76,7 +76,7 @@ class Beatmap:
     def embed(self) -> str:
         return f"[{self.url} {self.full_title}]"
 
-    def length_in_minutes_seconds(self, mods: Mods = Mods.NONE) -> str:
+    def play_duration(self, mods: Mods = Mods.NONE) -> str:
         length = copy.copy(self.hit_length)
 
         if mods & Mods.DOUBLETIME or mods & Mods.NIGHTCORE:
@@ -97,17 +97,17 @@ class Beatmap:
 
     @classmethod
     async def _get_beatmap_from_sql(
-        cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0
+        cls, map_md5: str = "", map_id: int = 0, set_id: int = 0
     ) -> Union["Beatmap", None]:
-        b = cls()
+        map = cls()
 
         params = (
             ("set_id", set_id)
             if set_id
-            else ("map_md5", hash) if hash else ("map_id", beatmap_id)
+            else ("map_md5", map_md5) if map_md5 else ("map_id", map_id)
         )
 
-        ret = await services.database.fetch_one(
+        map_db = await services.database.fetch_one(
             "SELECT server, set_id, map_id, map_md5, title, title_unicode, "
             "version, artist, artist_unicode, creator, creator_id, stars, "
             "od, ar, hp, cs, mode, bpm, approved, submit_date, approved_date, "
@@ -116,49 +116,49 @@ class Beatmap:
             {"param": params[1]},
         )
 
-        if not ret:
+        if not map_db:
             return
 
-        b.server = ret["server"]
-        b.set_id = ret["set_id"]
-        b.map_id = ret["map_id"]
-        b.map_md5 = ret["map_md5"]
+        map.server = map_db["server"]
+        map.set_id = map_db["set_id"]
+        map.map_id = map_db["map_id"]
+        map.map_md5 = map_db["map_md5"]
 
-        b.title = ret["title"]
-        b.title_unicode = ret["title_unicode"]  # added
-        b.version = ret["version"]
-        b.artist = ret["artist"]
-        b.artist_unicode = ret["artist_unicode"]  # added
-        b.creator = ret["creator"]
-        b.creator_id = ret["creator_id"]
+        map.title = map_db["title"]
+        map.title_unicode = map_db["title_unicode"]  # added
+        map.version = map_db["version"]
+        map.artist = map_db["artist"]
+        map.artist_unicode = map_db["artist_unicode"]  # added
+        map.creator = map_db["creator"]
+        map.creator_id = map_db["creator_id"]
 
-        b.stars = ret["stars"]
-        b.od = ret["od"]
-        b.ar = ret["ar"]
-        b.hp = ret["hp"]
-        b.cs = ret["cs"]
-        b.mode = ret["mode"]
-        b.bpm = ret["bpm"]
+        map.stars = map_db["stars"]
+        map.od = map_db["od"]
+        map.ar = map_db["ar"]
+        map.hp = map_db["hp"]
+        map.cs = map_db["cs"]
+        map.mode = map_db["mode"]
+        map.bpm = map_db["bpm"]
 
         if settings.RANK_ALL_MAPS:
-            b.approved = Approved.RANKED
+            map.approved = Approved.RANKED
         else:
-            b.approved = Approved(ret["approved"])
+            map.approved = Approved(map_db["approved"])
 
-        b.submit_date = ret["submit_date"]
-        b.approved_date = ret["approved_date"]
-        b.latest_update = ret["latest_update"]
+        map.submit_date = map_db["submit_date"]
+        map.approved_date = map_db["approved_date"]
+        map.latest_update = map_db["latest_update"]
 
-        b.hit_length = ret["length"]
-        b.drain = ret["drain"]
+        map.hit_length = map_db["length"]
+        map.drain = map_db["drain"]
 
-        b.plays = ret["plays"]
-        b.passes = ret["passes"]
-        b.favorites = ret["favorites"]
+        map.plays = map_db["plays"]
+        map.passes = map_db["passes"]
+        map.favorites = map_db["favorites"]
 
-        b.rating = ret["rating"]
+        map.rating = map_db["rating"]
 
-        return b
+        return map
 
     async def add_to_db(self) -> None:
         if await services.database.fetch_one(
@@ -186,11 +186,11 @@ class Beatmap:
 
         services.logger.info(f"Saved {self.full_title} ({self.map_md5}) into database")
 
-    async def map_md5_check(self, map_md5: str, map_id: int) -> bool:
-        md5_check = await self._get_beatmap_from_sql(beatmap_id=map_id)
+    async def check_for_updates(self, map_md5: str, map_id: int) -> bool:
+        map = await self._get_beatmap_from_sql(map_id=map_id)
 
-        if md5_check:
-            if md5_check.map_md5 != map_md5:
+        if map:
+            if map.map_md5 != map_md5:
                 # just delete that shit
                 await services.database.execute(
                     "DELETE FROM beatmaps WHERE map_id = :map_id", {"map_id": map_id}
@@ -213,59 +213,57 @@ class Beatmap:
 
     @classmethod
     async def _get_beatmap_from_osuapi(
-        cls, hash: str, beatmap_id: int, set_id: int
+        cls, map_md5: str, map_id: int, set_id: int
     ) -> Union["Beatmap", None]:
-        b = cls()
+        map = cls()
 
         async with aiohttp.ClientSession() as session:
             # get the beatmap with its hash
             params = (
-                ("s", set_id)
-                if set_id
-                else ("b", beatmap_id) if beatmap_id else ("h", hash)
+                ("s", set_id) if set_id else ("b", map_id) if map_id else ("h", map_md5)
             )
 
             async with session.get(
                 f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{params[0]}={params[1]}"
-            ) as resp:
-                if not resp or resp.status != 200:
+            ) as response:
+                if not response or response.status != 200:
                     return
 
-                if not (b_data := await resp.json()):
+                if not (decoded := await response.json()):
                     return
 
-                ret = b_data[0]
+                osu_map = decoded[0]
 
-        b.set_id = int(ret["beatmapset_id"])
-        b.map_id = int(ret["beatmap_id"])
+        map.set_id = int(osu_map["beatmapset_id"])
+        map.map_id = int(osu_map["beatmap_id"])
 
-        await b.map_md5_check(hash, b.map_id)
+        await map.check_for_updates(map_md5, map.map_id)
 
-        b.map_md5 = ret["file_md5"]
+        map.map_md5 = osu_map["file_md5"]
 
-        b.title = ret["title"]
-        b.title_unicode = ret["title_unicode"] or ret["title"]  # added
-        b.version = ret["version"]
-        b.artist = ret["artist"]
-        b.artist_unicode = ret["artist_unicode"] or ret["artist"]  # added
-        b.creator = ret["creator"]
-        b.creator_id = int(ret["creator_id"])
+        map.title = osu_map["title"]
+        map.title_unicode = osu_map["title_unicode"] or osu_map["title"]  # added
+        map.version = osu_map["version"]
+        map.artist = osu_map["artist"]
+        map.artist_unicode = osu_map["artist_unicode"] or osu_map["artist"]  # added
+        map.creator = osu_map["creator"]
+        map.creator_id = int(osu_map["creator_id"])
 
-        b.stars = float(ret["difficultyrating"])
-        b.od = float(ret["diff_overall"])
-        b.ar = float(ret["diff_approach"])
-        b.hp = float(ret["diff_drain"])
-        b.cs = float(ret["diff_size"])
-        b.mode = Mode(int(ret["mode"])).value
-        b.bpm = float(ret["bpm"])
-        b.max_combo = (
-            0 if ret["max_combo"] is None else int(ret["max_combo"])
+        map.stars = float(osu_map["difficultyrating"])
+        map.od = float(osu_map["diff_overall"])
+        map.ar = float(osu_map["diff_approach"])
+        map.hp = float(osu_map["diff_drain"])
+        map.cs = float(osu_map["diff_size"])
+        map.mode = Mode(int(osu_map["mode"])).value
+        map.bpm = float(osu_map["bpm"])
+        map.max_combo = (
+            0 if osu_map["max_combo"] is None else int(osu_map["max_combo"])
         )  # fix taiko and mania "null" combo
 
         if settings.RANK_ALL_MAPS:
-            b.approved = Approved.RANKED
+            map.approved = Approved.RANKED
         else:
-            approved_status = int(ret["approved"])
+            approved_status = int(osu_map["approved"])
 
             # conver approved status to ragnarok's desired
             ragnarok_approved = {4: 5, 3: 4, 2: 3, 1: 2}
@@ -273,40 +271,38 @@ class Beatmap:
             if approved_status in ragnarok_approved:
                 approved_status = ragnarok_approved[approved_status]
 
-            b.approved = Approved(approved_status)
+            map.approved = Approved(approved_status)
 
-        b.submit_date = ret["submit_date"]
+        map.submit_date = osu_map["submit_date"]
 
-        if ret["approved_date"]:
-            b.approved_date = ret["approved_date"]
+        if osu_map["approved_date"]:
+            map.approved_date = osu_map["approved_date"]
         else:
-            b.approved_date = "0"
+            map.approved_date = "0"
 
-        b.latest_update = ret["last_update"]
+        map.latest_update = osu_map["last_update"]
 
-        b.hit_length = float(ret["total_length"])
-        b.drain = int(ret["hit_length"])
+        map.hit_length = float(osu_map["total_length"])
+        map.drain = int(osu_map["hit_length"])
 
-        b.plays = 0
-        b.passes = 0
-        b.favorites = 0
+        map.plays = 0
+        map.passes = 0
+        map.favorites = 0
 
-        b.rating = float(ret["rating"])
+        map.rating = float(osu_map["rating"])
 
-        await b.add_to_db()
+        await map.add_to_db()
 
-        return b
+        return map
 
     @classmethod
-    async def get_beatmap(
-        cls, hash: str = "", beatmap_id: int = 0, set_id: int = 0
+    async def get(
+        cls, map_md5: str = "", map_id: int = 0, set_id: int = 0
     ) -> Union["Beatmap", None]:
-        self = cls()  # trollface
+        map = cls()
 
-        if not (ret := await self._get_beatmap_from_sql(hash, beatmap_id, set_id)):
-            if not (
-                ret := await self._get_beatmap_from_osuapi(hash, beatmap_id, set_id)
-            ):
+        if not (ret := await map._get_beatmap_from_sql(map_md5, map_id, set_id)):
+            if not (ret := await map._get_beatmap_from_osuapi(map_md5, map_id, set_id)):
                 return
 
         return ret

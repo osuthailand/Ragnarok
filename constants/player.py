@@ -51,7 +51,7 @@ class ActionStatus(IntEnum):
     PAUSED = 10
     LOBBY = 11
     MULTIPLAYING = 12
-    OSUDIRECT = 13
+    OSU_DIRECT = 13
 
 
 country_codes = {

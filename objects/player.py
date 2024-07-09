@@ -428,7 +428,8 @@ class Player:
         for gamemode in Gamemode:
             for mode in Mode:
                 await services.redis.zrem(
-                    f"ragnarok:leaderboard:{gamemode.name.lower()}:{mode.value}", self.id
+                    f"ragnarok:leaderboard:{gamemode.name.lower()}:{mode.value}",
+                    self.id,
                 )
 
                 # country rank

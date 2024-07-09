@@ -350,7 +350,7 @@ async def score_submission(request: Request) -> Response:
         " AND u.privileges & 4 ORDER BY s.pp DESC LIMIT 1",
         {"map_md5": score.map.map_md5, "mode": score.mode, "gamemode": score.gamemode},
     )
-    
+
     score.playtime = int(form["st" if passed else "ft"]) // 1000  # type: ignore
     score.id = await score.save_to_db()
 
@@ -358,7 +358,7 @@ async def score_submission(request: Request) -> Response:
 
     await services.database.execute(
         "UPDATE beatmaps SET plays = plays + 1 WHERE map_md5 = :map_md5",
-        {"map_md5": score.map.map_md5}
+        {"map_md5": score.map.map_md5},
     )
 
     # check if the beatmap playcount for player exists first
@@ -422,7 +422,6 @@ async def score_submission(request: Request) -> Response:
     if not form.getlist("score"):
         await score.player.restrict()
         return Response(content=b"error: invalid")
-
 
     # calculate new stats
     if not score.map.approved.has_leaderboard:

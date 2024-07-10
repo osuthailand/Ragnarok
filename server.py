@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import aiohttp
 import uvicorn
 import settings
 
@@ -43,6 +44,9 @@ async def startup() -> None:
     services.matches = Matches()
     services.beatmaps = Beatmaps()
 
+    services.loop = asyncio.get_running_loop()
+    services.http_client_session = aiohttp.ClientSession(loop=services.loop)
+
     services.logger.setLevel(logging.DEBUG if settings.SERVER_DEBUG else logging.INFO)
 
     for _path in REQUIRED_DIRECTORIES:
@@ -74,10 +78,20 @@ async def startup() -> None:
     services.logger.info("✓ Finished caching everything needed!")
 
     services.logger.info("... Starting background tasks")
-    asyncio.create_task(tasks.run_all_tasks())
+    services.loop.create_task(tasks.run_all_tasks())
     services.logger.info("✓ Successfully started all background tasks")
 
     services.logger.info("Finished up connecting to everything!")
+
+
+async def shutdown() -> None:
+    services.logger.info(
+        "... Disconnecting from redis, aiohttp's client session, and the database."
+    )
+    await services.database.disconnect()
+    await services.redis.aclose()
+    await services.http_client_session.close()
+    services.logger.info("✓ Successfully disconnected.")
 
 
 async def not_found(req: Request, exc: HTTPException) -> Response:
@@ -92,6 +106,7 @@ app = Starlette(
         Host(f"osu.{services.domain}", osu),
     ],
     on_startup=[startup],
+    on_shutdown=[shutdown],
     exception_handlers={404: not_found},  # type: ignore
 )
 

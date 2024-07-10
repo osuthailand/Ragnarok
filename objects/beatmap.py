@@ -1,6 +1,5 @@
 import copy
 import os
-import aiohttp
 import settings
 
 from typing import Union
@@ -56,6 +55,10 @@ class Beatmap:
         return f"{self.map_id}.osu"
 
     @property
+    def filename(self) -> str:
+        return f"{self.artist} - {self.title} ({self.creator}) [{self.version}].osu"
+
+    @property
     def pass_procent(self) -> float:
         return self.passes / self.plays * 100
 
@@ -96,7 +99,7 @@ class Beatmap:
         return f"{name}Before:{prev if prev else ''}|{name}After:{after}"
 
     @classmethod
-    async def _get_beatmap_from_sql(
+    async def get_from_db(
         cls, map_md5: str = "", map_id: int = 0, set_id: int = 0
     ) -> Union["Beatmap", None]:
         map = cls()
@@ -187,7 +190,7 @@ class Beatmap:
         services.logger.info(f"Saved {self.full_title} ({self.map_md5}) into database")
 
     async def check_for_updates(self, map_md5: str, map_id: int) -> bool:
-        map = await self._get_beatmap_from_sql(map_id=map_id)
+        map = await self.get_from_db(map_id=map_id)
 
         if map:
             if map.map_md5 != map_md5:
@@ -212,35 +215,11 @@ class Beatmap:
         return False
 
     @classmethod
-    async def _get_beatmap_from_osuapi(
-        cls, map_md5: str, map_id: int, set_id: int
-    ) -> Union["Beatmap", None]:
+    def from_osu_api(cls, osu_map: dict[str, str]) -> "Beatmap":
         map = cls()
-
-        async with aiohttp.ClientSession() as session:
-            # get the beatmap with its hash
-            params = (
-                ("s", set_id) if set_id else ("b", map_id) if map_id else ("h", map_md5)
-            )
-
-            async with session.get(
-                f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{params[0]}={params[1]}"
-            ) as response:
-                if not response or response.status != 200:
-                    return
-
-                if not (decoded := await response.json()):
-                    return
-
-                osu_map = decoded[0]
-
         map.set_id = int(osu_map["beatmapset_id"])
         map.map_id = int(osu_map["beatmap_id"])
-
-        await map.check_for_updates(map_md5, map.map_id)
-
         map.map_md5 = osu_map["file_md5"]
-
         map.title = osu_map["title"]
         map.title_unicode = osu_map["title_unicode"] or osu_map["title"]  # added
         map.version = osu_map["version"]
@@ -248,7 +227,6 @@ class Beatmap:
         map.artist_unicode = osu_map["artist_unicode"] or osu_map["artist"]  # added
         map.creator = osu_map["creator"]
         map.creator_id = int(osu_map["creator_id"])
-
         map.stars = float(osu_map["difficultyrating"])
         map.od = float(osu_map["diff_overall"])
         map.ar = float(osu_map["diff_approach"])
@@ -281,16 +259,46 @@ class Beatmap:
             map.approved_date = "0"
 
         map.latest_update = osu_map["last_update"]
-
         map.hit_length = float(osu_map["total_length"])
         map.drain = int(osu_map["hit_length"])
-
         map.plays = 0
         map.passes = 0
         map.favorites = 0
-
         map.rating = float(osu_map["rating"])
 
+        return map
+
+    @classmethod
+    async def get_from_osu_api(
+        cls, map_md5: str = "", map_id: int = 0, set_id: int = 0
+    ) -> Union["Beatmap", list["Beatmap"], None]:
+        params = (
+            ("s", set_id) if set_id else ("b", map_id) if map_id else ("h", map_md5)
+        )
+
+        response = await services.http_client_session.get(
+            f"https://osu.ppy.sh/api/get_beatmaps?k={services.osu_key}&{params[0]}={params[1]}"
+        )
+
+        if not response or response.status != 200:
+            return
+
+        if not (decoded := await response.json()):
+            return
+
+        maps = decoded
+
+        if set_id:
+            map_set = []
+
+            for map in maps:
+                osu_map = Beatmap.from_osu_api(map)
+                map_set.append(osu_map)
+
+            return map_set
+
+        map = Beatmap.from_osu_api(maps[0])
+        await map.check_for_updates(map.map_md5, map.map_id)
         await map.add_to_db()
 
         return map
@@ -298,11 +306,11 @@ class Beatmap:
     @classmethod
     async def get(
         cls, map_md5: str = "", map_id: int = 0, set_id: int = 0
-    ) -> Union["Beatmap", None]:
+    ) -> Union["Beatmap", list["Beatmap"], None]:
         map = cls()
 
-        if not (ret := await map._get_beatmap_from_sql(map_md5, map_id, set_id)):
-            if not (ret := await map._get_beatmap_from_osuapi(map_md5, map_id, set_id)):
+        if not (ret := await map.get_from_db(map_md5, map_id, set_id)):
+            if not (ret := await map.get_from_osu_api(map_md5, map_id, set_id)):
                 return
 
         return ret

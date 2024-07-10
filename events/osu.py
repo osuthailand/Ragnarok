@@ -3,9 +3,7 @@ import os
 import math
 import copy
 import bcrypt
-import aiohttp
 import hashlib
-import asyncio
 import aiofiles
 import numpy as np
 from constants.playmode import Gamemode
@@ -29,6 +27,7 @@ from starlette.requests import Request
 from constants.player import Privileges
 from objects.score import Score, SubmitStatus
 from starlette.responses import FileResponse, Response, RedirectResponse
+from starlette import status
 
 
 def check_auth(
@@ -145,19 +144,19 @@ async def save_beatmap_file(map_id: int) -> None | Response:
     if os.path.exists(f".data/beatmaps/{map_id}.osu"):
         return
 
-    async with aiohttp.ClientSession() as sess:
-        async with sess.get(
-            f"https://osu.ppy.sh/web/osu-getosufile.php?q={map_id}",
-            headers={"user-agent": "osu!"},
-        ) as resp:
-            if not await resp.text():
-                services.logger.critical(
-                    f"Couldn't fetch the .osu file of {map_id}. Maybe because api rate limit?"
-                )
-                return Response(content=b"")
+    response = await services.http_client_session.get(
+        f"https://osu.ppy.sh/web/osu-getosufile.php?q={map_id}",
+        headers={"user-agent": "osu!"},
+    )
+    
+    if not await response.text():
+        services.logger.critical(
+            f"Couldn't fetch the .osu file of {map_id}. Maybe because api rate limit?"
+        )
+        return Response(content=b"")
 
-            async with aiofiles.open(f".data/beatmaps/{map_id}.osu", "w+") as osu:
-                await osu.write(await resp.text())
+    async with aiofiles.open(f".data/beatmaps/{map_id}.osu", "w+") as osu:
+        await osu.write(await response.text())
 
 
 # @osu.route("/web/bancho_connect.php")
@@ -191,9 +190,36 @@ async def get_scores(request: Request, player: Player) -> Response:
     await player.update_latest_activity()
 
     map_md5 = request.query_params["c"]
+    filename = request.query_params["f"]
+    set_id = int(request.query_params["i"])
 
     if not (map := await services.beatmaps.get(map_md5)):
-        return Response(content=b"-1|true")
+        map_set = await Beatmap.get_from_osu_api(set_id=set_id)
+
+        if type(map_set) != list:
+            return Response(content=b"-1|false")
+
+        if not map_set:
+            services.logger.critical(
+                f"<md5={map_md5} set_id={set_id}> could not be found in osu!'s api."
+            )
+            return Response(content=b"-1|false")
+
+        map = None
+
+        for map_child in map_set:
+            if map_child.filename == filename:
+                map = map_child
+
+        if not map:
+            services.logger.critical(f"<md5={map_md5} set_id={set_id}> failed to find difficulty through filename. (difficulty most likely deleted or renamed)")
+            return Response(content=b"-1|false")
+
+        if map.map_md5 != map_md5:
+            services.logger.debug(f"<md5={map_md5} set_id={set_id}> is need of an update!")
+            return Response(content=b"1|false")
+
+        return Response(content=b"-1|false")
 
     # don't cache maps that doesn't have leaderboard
     if not map.approved.has_leaderboard:
@@ -293,9 +319,18 @@ async def get_scores(request: Request, player: Player) -> Response:
         ]
     )
 
-    asyncio.create_task(save_beatmap_file(map.map_id))
+    services.loop.create_task(save_beatmap_file(map.map_id))
 
     return Response(content="\n".join(response).encode())
+
+
+@osu.route("/web/maps/{filename:str}")
+async def get_map_file(request: Request) -> RedirectResponse:
+    filename = request.path_params["filename"]
+    return RedirectResponse(
+        f"https://osu.ppy.sh/web/maps/{filename}",
+        status_code=status.HTTP_301_MOVED_PERMANENTLY,
+    )
 
 
 @osu.route("/web/osu-submit-modular-selector.php", methods=["POST"])
@@ -484,7 +519,7 @@ async def score_submission(request: Request) -> Response:
 
             # announce that the previous first place holder
             # lost their rank 1 on this map in their recent activities
-            if first_place_holder != score.player.id:
+            if first_place_holder is not None and first_place_holder != score.player.id:
                 await services.database.execute(
                     "INSERT INTO recent_activities (user_id, activity, map_md5, mode, gamemode) "
                     "VALUES (:user_id, :activity, :map_md5, :mode, :gamemode)",
@@ -532,7 +567,7 @@ async def score_submission(request: Request) -> Response:
                     "INSERT INTO users_achievements (user_id, achievement_id, mode, gamemode) "
                     "VALUES (:user_id, :achievement_id, :mode, :gamemode)",
                     {
-                        "user_id": stats.id,
+                        "user_id": score.player.id,
                         "achievement_id": achievement.id,
                         "mode": score.mode.value,
                         "gamemode": score.gamemode.value,
@@ -819,44 +854,44 @@ async def osu_direct(request: Request, player: Player) -> Response:
     map_count = 0
     direct_list = ""
 
-    async with aiohttp.ClientSession() as sess:
-        async with sess.get(url) as resp:
-            data = await resp.json()
 
-            if len(data) == 100:
-                map_count = 1
+    response = await services.http_client_session.get(url)
+    data = await response.json()
 
-            for map in data:
-                map_count += 1
+    if len(data) == 100:
+        map_count = 1
 
-                set_id = map["id"]
-                artist = map["artist"]
-                title = map["title"]
-                creator = map["creator"]
-                ranked = map["ranked"]
+    for map in data:
+        map_count += 1
 
-                last_updated = map["last_updated"]
+        set_id = map["id"]
+        artist = map["artist"]
+        title = map["title"]
+        creator = map["creator"]
+        ranked = map["ranked"]
 
-                thread_id = map["legacy_thread_url"][
-                    43:
-                ]  # remove osu link and get only id
-                has_video = "1" if map["video"] else ""
-                has_storyboard = "1" if map["storyboard"] else ""
+        last_updated = map["last_updated"]
 
-                direct_list += f"{set_id}.osz|{artist}|{title}|{creator}|{ranked}|"
-                direct_list += f"10|{last_updated}|{set_id}|{thread_id}|{has_video}|{has_storyboard}|0||"
+        thread_id = map["legacy_thread_url"][
+            43:
+        ]  # remove osu link and get only id
+        has_video = "1" if map["video"] else ""
+        has_storyboard = "1" if map["storyboard"] else ""
 
-                for i, child_map in enumerate(map["beatmaps"]):
-                    difficulty_name = child_map["version"]
-                    star_rating = child_map["difficulty_rating"]
-                    mode = child_map["mode_int"]
+        direct_list += f"{set_id}.osz|{artist}|{title}|{creator}|{ranked}|"
+        direct_list += f"10|{last_updated}|{set_id}|{thread_id}|{has_video}|{has_storyboard}|0||"
 
-                    direct_list += f"{difficulty_name.replace(',', '').replace('|', 'ǀ')} ★{star_rating}@{mode}"
+        for i, child_map in enumerate(map["beatmaps"]):
+            difficulty_name = child_map["version"]
+            star_rating = child_map["difficulty_rating"]
+            mode = child_map["mode_int"]
 
-                    if i < len(map["beatmaps"]) - 1:
-                        direct_list += ","
-                    else:
-                        direct_list += "\n"
+            direct_list += f"{difficulty_name.replace(',', '').replace('|', 'ǀ')} ★{star_rating}@{mode}"
+
+            if i < len(map["beatmaps"]) - 1:
+                direct_list += ","
+            else:
+                direct_list += "\n"
 
     return Response(content=str(map_count).encode() + b"\n" + direct_list.encode())
 
@@ -869,7 +904,8 @@ async def osu_search_set(request: Request, player: Player) -> Response:
     match request.query_params:
         # There's also "p" (post) and "t" (topic) too, but who uses that in private server?
         case {"s": sid}:  # Beatmap Set
-            map = await services.beatmaps.get_by_set_id(sid)  # type: ignore
+            # todo
+            map = None
         case {"b": bid}:  # Beatmap ID
             map = await services.beatmaps.get_by_map_id(bid)  # type: ignore
         case {"c": hash}:  # Checksum

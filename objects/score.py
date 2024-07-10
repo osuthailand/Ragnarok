@@ -205,7 +205,16 @@ class Score:
             map = BMap(path=f".data/beatmaps/{score.map.file}")
 
             if score.mode != map.mode:
-                map.convert(GameMode(score.mode.value))
+                if score.mode == Mode.OSU:
+                    rosu_mode = GameMode.Osu
+                elif score.mode == Mode.TAIKO:
+                    rosu_mode = GameMode.Taiko
+                elif score.mode == Mode.CATCH:
+                    rosu_mode = GameMode.Catch
+                else:
+                    rosu_mode = GameMode.Mania
+
+                map.convert(rosu_mode)
 
             perf = Performance(
                 n300=score.count_300,

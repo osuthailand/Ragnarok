@@ -1,6 +1,9 @@
+import asyncio
 import logging
 import re
 import time
+
+import aiohttp
 import settings
 
 
@@ -24,6 +27,9 @@ debug = bool(settings.SERVER_DEBUG)
 domain = settings.SERVER_DOMAIN
 port = int(settings.SERVER_PORT)
 startup = time.time()
+
+loop: asyncio.AbstractEventLoop
+http_client_session: aiohttp.ClientSession
 
 packets: dict[int, "Packet"] = {}
 

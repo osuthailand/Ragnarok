@@ -139,9 +139,9 @@ class Beatmaps:
             return self.beatmaps[map_md5]
 
         if not (map := await Beatmap.get(map_md5)):
-            services.logger.critical(
-                f"failed to get beatmaps with map_md5 {map_md5} (usually caused by the map not existing)"
-            )
+            return
+
+        if type(map) != Beatmap:
             return
 
         # when getting from the api, it'll save into cache
@@ -155,15 +155,20 @@ class Beatmaps:
             )
             return
 
+        if type(map) != Beatmap:
+            return
+
         self.beatmaps[map.map_md5] = map
         return map
 
-    async def get_by_set_id(self, set_id: int) -> Beatmap | None:
-        if not (map := await Beatmap.get(set_id=set_id)):
+    async def get_by_set_id(self, set_id: int) -> list[Beatmap] | None:
+        if not (maps := await Beatmap.get(set_id=set_id)):
             services.logger.critical(
                 f"failed to get beatmaps with map_id {set_id} (usually caused by the map not existing)"
             )
             return
 
-        self.beatmaps[map.map_md5] = map
-        return map
+        if type(maps) != list:
+            return
+
+        return maps

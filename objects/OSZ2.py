@@ -410,10 +410,10 @@ class OSZ2:
 
         osu_file_and_map_id = []
         for i in range(num_files):
-            file_name = reader.read_string(dot_net_str=True)
+            filename = reader.read_string(dot_net_str=True)
             map_id = reader.read_int32()
 
-            osu_file_and_map_id.append((file_name, map_id))
+            osu_file_and_map_id.append((filename, map_id))
 
         # prepare key and save key for later uses
         seed = f"{self.metadata.creator}yhxyfjo5{self.metadata.set_id}"
@@ -458,7 +458,7 @@ class OSZ2:
             for i in range(file_info_count):
                 # file name
                 next_file_info_offset = 0
-                file_name = xxtea_reader.read_str()
+                filename = xxtea_reader.read_str()
                 file_hash = xxtea_reader.read_bytes(16)
                 file_created = datetime_frombinary(xxtea_reader.read_int64())
                 file_modified = datetime_frombinary(xxtea_reader.read_int64())
@@ -472,7 +472,7 @@ class OSZ2:
                 file_len = next_file_info_offset - current_fileinfo_offset
 
                 file_info = FileInfo(
-                    name=file_name,
+                    name=filename,
                     hash=file_hash,
                     created=file_created,
                     modified=file_modified,

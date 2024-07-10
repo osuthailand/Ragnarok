@@ -180,7 +180,7 @@ async def login(req: Request) -> Response:
         )
 
     if services.osu_settings.server_maintenance.value:
-        if not user_info["privileges"] & Privileges.DEVELOPER:
+        if not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN:
             return failed_login(
                 LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD,
                 extra=writer.notification("Server is currently under maintenance."),
@@ -336,7 +336,7 @@ async def login(req: Request) -> Response:
         await player.set_location()
         await player.save_location()
 
-    asyncio.create_task(player.check_loc())
+    services.loop.create_task(player.check_loc())
 
     # add user session data to redis
     await services.redis.hset(
@@ -416,7 +416,7 @@ async def change_action(player: Player, sr: Reader) -> None:
 
     player.status_text = f"{status_text.strip()} on {player.gamemode.name.lower()}"
 
-    asyncio.create_task(player.update_stats_cache())
+    services.loop.create_task(player.update_stats_cache())
 
     await services.redis.hset(
         f"ragnarok:session:{player.id}",
@@ -485,7 +485,7 @@ async def send_public_message(player: Player, sr: Reader) -> None:
     # if so, post the 100%, 99%, etc.
     # pp for the map.
     if now_playing := services.regex["np"].search(msg):
-        beatmap = await Beatmap._get_beatmap_from_sql(map_id=int(now_playing.group(1)))
+        beatmap = await Beatmap.get_from_db(map_id=int(now_playing.group(1)))
 
         if not beatmap:
             player.shout(
@@ -494,12 +494,12 @@ async def send_public_message(player: Player, sr: Reader) -> None:
             return
 
         player.last_np = beatmap
-        asyncio.create_task(_handle_command(channel, "!pp ", player))
+        services.loop.create_task(_handle_command(channel, "!pp ", player))
 
     # commands should be run on another thread
     # so slower commands don't stop the server.
     if msg[0] == services.prefix:
-        asyncio.create_task(_handle_command(channel, msg, player))
+        services.loop.create_task(_handle_command(channel, msg, player))
 
 
 # id: 2

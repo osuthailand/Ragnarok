@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Callable
 
-import aiohttp
 from objects import services
 from objects.achievement import Achievement
 from objects.channel import Channel
@@ -66,37 +65,38 @@ ALLOWED_STREAMS = ("stable40", "cuttingedge", "beta")
 async def cache_allowed_osu_builds() -> None:
     versions = []
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get("https://osu.ppy.sh/api/v2/changelog") as response:
-            decoded = await response.json()
+    response = await services.http_client_session.get(
+        "https://osu.ppy.sh/api/v2/changelog"
+    )
+    decoded = await response.json()
 
-            for stream in decoded["streams"]:
-                if stream["name"] not in ALLOWED_STREAMS:
-                    continue
+    for stream in decoded["streams"]:
+        if stream["name"] not in ALLOWED_STREAMS:
+            continue
 
-                match stream["name"]:
-                    case "beta40":
-                        suffix = "beta"
-                    case "cuttingedge":
-                        suffix = "cuttingedge"
-                    case _:
-                        suffix = ""
+        match stream["name"]:
+            case "beta40":
+                suffix = "beta"
+            case "cuttingedge":
+                suffix = "cuttingedge"
+            case _:
+                suffix = ""
 
-                versions.append(stream["latest_build"]["version"] + suffix)
+        versions.append(stream["latest_build"]["version"] + suffix)
 
-            for build in decoded["builds"]:
-                if build["update_stream"]["name"] not in ALLOWED_STREAMS:
-                    continue
+    for build in decoded["builds"]:
+        if build["update_stream"]["name"] not in ALLOWED_STREAMS:
+            continue
 
-                match build["update_stream"]["name"]:
-                    case "beta40":
-                        suffix = "beta"
-                    case "cuttingedge":
-                        suffix = "cuttingedge"
-                    case _:
-                        suffix = ""
+        match build["update_stream"]["name"]:
+            case "beta40":
+                suffix = "beta"
+            case "cuttingedge":
+                suffix = "cuttingedge"
+            case _:
+                suffix = ""
 
-                versions.append(build["version"] + suffix)
+        versions.append(build["version"] + suffix)
 
     services.ALLOWED_BUILDS = versions
 

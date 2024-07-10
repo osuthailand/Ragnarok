@@ -731,7 +731,7 @@ async def restrict_user(ctx: Context) -> str | None:
     if target.is_restricted:
         return "Player is already restricted? Did you mean to unrestrict them?"
 
-    asyncio.create_task(
+    services.loop.create_task(
         services.database.execute(
             "UPDATE users SET privileges = privileges - 4 WHERE id = :user_id",
             {"user_id": target.id},

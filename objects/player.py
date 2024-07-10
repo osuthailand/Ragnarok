@@ -2,7 +2,6 @@ from enum import IntEnum
 import math
 import time
 import uuid
-import aiohttp
 
 
 from packets import writer
@@ -503,33 +502,33 @@ class Player:
         await self.save_location()
 
     async def set_location(self, get: bool = False) -> tuple[Any, ...] | None:
-        async with aiohttp.ClientSession() as sess:
-            async with sess.get(
-                f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"
-            ) as response:
-                if not (decoded := await response.json()):
-                    return
+        response = await services.http_client_session.get(
+            f"http://ip-api.com/json/{self.ip}?fields=status,message,countryCode,region,lat,lon"
+        )
 
-                if decoded["status"] == "fail":
-                    services.logger.critical(
-                        f"Unable to get {self.username}'s location. Response: {decoded['message']}"
-                    )
-                    return
+        if not (decoded := await response.json()):
+            return
 
-                if not get:
-                    self.latitude = decoded["lat"]
-                    self.longitude = decoded["lon"]
-                    self.country = decoded["countryCode"]
-                    self.country_code = country_codes[decoded["countryCode"]]
+        if decoded["status"] == "fail":
+            services.logger.critical(
+                f"Unable to get {self.username}'s location. Response: {decoded['message']}"
+            )
+            return
 
-                    return
+        if not get:
+            self.latitude = decoded["lat"]
+            self.longitude = decoded["lon"]
+            self.country = decoded["countryCode"]
+            self.country_code = country_codes[decoded["countryCode"]]
 
-                return (
-                    decoded["lat"],
-                    decoded["lon"],
-                    decoded["countryCode"],
-                    country_codes[decoded["countryCode"]],
-                )
+            return
+
+        return (
+            decoded["lat"],
+            decoded["lon"],
+            decoded["countryCode"],
+            country_codes[decoded["countryCode"]],
+        )
 
     async def save_location(self):
         await services.database.execute(

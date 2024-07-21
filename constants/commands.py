@@ -3,7 +3,7 @@ import os
 import signal
 import sys
 import random
-import asyncio
+import traceback
 import settings
 
 from objects.achievement import UserAchievement
@@ -237,8 +237,15 @@ def pp_message_format(
     response.append("| " + map.play_duration(mods))
     response.append(f"★ {attributes.stars:.2f}")
     response.append(f"♫ {rosu_map.bpm:.0f}")
-    response.append(f"AR {attributes.ar:.1f}")
-    response.append(f"OD {attributes.od:.1f}")
+
+    if rosu_map.mode in (GameMode.Osu, GameMode.Catch):
+        response.append(f"AR {attributes.ar:.1f}")
+
+    if rosu_map.mode == GameMode.Osu:
+        response.append(f"OD {attributes.od:.1f}")
+
+    if rosu_map.mode in (GameMode.Taiko, GameMode.Mania):
+        response.append(f"300: ±{attributes.hit_window:.1f}ms")
 
     return " ".join(response)
 
@@ -864,8 +871,10 @@ async def handle_commands(
                 continue
         try:
             response = await command.trigger(ctx)
-        except Exception as e:
-            response = f"unhandled error: {e} (contact Simon about this)"
+        except Exception as exp:
+            services.logger.error(traceback.format_exc())
+
+            response = f"unhandled error: {exp} (contact Simon about this)"
 
             if not (ach := services.get_achievement_by_id(190)):
                 return

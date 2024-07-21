@@ -894,7 +894,7 @@ async def mp_complete(player: Player, sr: Reader) -> None:
     if not match or not match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_COMPLETE packet, "
-            "but they're not in a match or the match is already in progress."
+            "but they're not in a match or the match is not in progress."
         )
         return
 
@@ -931,7 +931,7 @@ async def mp_change_mods(player: Player, sr: Reader) -> None:
     mods = Mods(sr.read_int32())
     match = player.match
 
-    if not match or not match.in_progress:
+    if not match or match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_CHANGE_MODS packet, "
             "but they're not in a match or the match is already in progress."
@@ -974,7 +974,7 @@ async def mp_load_complete(player: Player, sr: Reader) -> None:
     if not match or not match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_LOAD_COMPLETE packet, "
-            "but they're not in a match or the match is already in progress."
+            "but they're not in a match or the match is not in progress."
         )
         return
 
@@ -1036,7 +1036,7 @@ async def match_failed(player: Player, sr: Reader) -> None:
     if not match or not match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_FAILED packet, "
-            "but they're not in a match or the match is already in progress."
+            "but they're not in a match or the match is not in progress."
         )
         return
 
@@ -1072,7 +1072,7 @@ async def skip_request(player: Player, sr: Reader) -> None:
     if not match or not match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_SKIP_REQUEST packet, "
-            "but they're not in a match or the match is already in progress."
+            "but they're not in a match or the match is not in progress."
         )
         return
 
@@ -1144,7 +1144,7 @@ async def handle_friend(player: Player, sr: Reader) -> None:
 async def mp_change_team(player: Player, sr: Reader) -> None:
     match = player.match
 
-    if not match or not match.in_progress:
+    if not match or match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_CHANGE_TEAM packet, "
             "but they're not in a match or the match is already in progress."
@@ -1232,7 +1232,7 @@ async def mp_invite(player: Player, sr: Reader) -> None:
 async def change_pass(player: Player, sr: Reader) -> None:
     match = player.match
 
-    if not match or not match.in_progress:
+    if not match or match.in_progress:
         services.logger.critical(
             f"{player.username} requested MATCH_CHANGE_PASSWORD packet, "
             "but they're not in a match or the match is already in progress."

@@ -276,7 +276,17 @@ async def calc_pp_for_map(ctx: Context) -> str | None:
         mode = ctx.author.play_mode
 
     if mode != rosu_map.mode:
-        rosu_map.convert(GameMode(mode))
+        # i hate this stupid fucking library
+        if mode == Mode.OSU:
+            rosu_mode = GameMode.Osu
+        elif mode == Mode.TAIKO:
+            rosu_mode = GameMode.Taiko
+        elif mode == Mode.CATCH:
+            rosu_mode = GameMode.Catch
+        else:
+            rosu_mode = GameMode.Mania
+
+        rosu_map.convert(rosu_mode)
 
     # calc is slang for calculator chat
     calc = Performance()

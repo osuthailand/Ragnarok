@@ -148,7 +148,7 @@ async def save_beatmap_file(map_id: int) -> None | Response:
         f"https://osu.ppy.sh/web/osu-getosufile.php?q={map_id}",
         headers={"user-agent": "osu!"},
     )
-    
+
     if not await response.text():
         services.logger.critical(
             f"Couldn't fetch the .osu file of {map_id}. Maybe because api rate limit?"
@@ -212,11 +212,15 @@ async def get_scores(request: Request, player: Player) -> Response:
                 map = map_child
 
         if not map:
-            services.logger.critical(f"<md5={map_md5} set_id={set_id}> failed to find difficulty through filename. (difficulty most likely deleted or renamed)")
+            services.logger.critical(
+                f"<md5={map_md5} set_id={set_id}> failed to find difficulty through filename. (difficulty most likely deleted or renamed)"
+            )
             return Response(content=b"-1|false")
 
         if map.map_md5 != map_md5:
-            services.logger.debug(f"<md5={map_md5} set_id={set_id}> is need of an update!")
+            services.logger.debug(
+                f"<md5={map_md5} set_id={set_id}> is need of an update!"
+            )
             return Response(content=b"1|false")
 
         return Response(content=b"-1|false")
@@ -854,7 +858,6 @@ async def osu_direct(request: Request, player: Player) -> Response:
     map_count = 0
     direct_list = ""
 
-
     response = await services.http_client_session.get(url)
     data = await response.json()
 
@@ -872,14 +875,14 @@ async def osu_direct(request: Request, player: Player) -> Response:
 
         last_updated = map["last_updated"]
 
-        thread_id = map["legacy_thread_url"][
-            43:
-        ]  # remove osu link and get only id
+        thread_id = map["legacy_thread_url"][43:]  # remove osu link and get only id
         has_video = "1" if map["video"] else ""
         has_storyboard = "1" if map["storyboard"] else ""
 
         direct_list += f"{set_id}.osz|{artist}|{title}|{creator}|{ranked}|"
-        direct_list += f"10|{last_updated}|{set_id}|{thread_id}|{has_video}|{has_storyboard}|0||"
+        direct_list += (
+            f"10|{last_updated}|{set_id}|{thread_id}|{has_video}|{has_storyboard}|0||"
+        )
 
         for i, child_map in enumerate(map["beatmaps"]):
             difficulty_name = child_map["version"]

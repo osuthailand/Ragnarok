@@ -180,7 +180,10 @@ async def login(req: Request) -> Response:
         )
 
     if services.osu_settings.server_maintenance.value:
-        if not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN:
+        if (
+            not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN
+            or user_info["id"] == 3275
+        ):
             return failed_login(
                 LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD,
                 extra=writer.notification("Server is currently under maintenance."),

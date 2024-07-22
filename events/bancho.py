@@ -64,6 +64,7 @@ async def handle_bancho(request: Request) -> Response:
             content={
                 "uptime": uptime,
                 "online_players": online_players,
+                "multiplayer_rooms": len(services.matches),
                 "registered_players": registered_players,
                 "total_scores": int(scores_amount),
                 "accumulated_pp": float(accumulated_pp),
@@ -179,11 +180,8 @@ async def login(req: Request) -> Response:
             msg=f'A user tried logging in with the username "{login_info[0]}", but the user doesn\'t exist.',
         )
 
-    if services.osu_settings.server_maintenance.value:
-        if (
-            not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN
-            or user_info["id"] == 3275
-        ):
+    if services.osu_settings.server_maintenance.value and user_info["id"] != 3275:
+        if not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN:
             return failed_login(
                 LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD,
                 extra=writer.notification("Server is currently under maintenance."),

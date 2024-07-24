@@ -149,14 +149,20 @@ async def save_beatmap_file(map_id: int) -> None | Response:
         headers={"user-agent": "osu!"},
     )
 
-    if not await response.text():
+    if response.status == status.HTTP_429_TOO_MANY_REQUESTS:
         services.logger.critical(
-            f"Couldn't fetch the .osu file of {map_id}. Maybe because api rate limit?"
+            f"Couldn't fetch .osu file for {map_id} as we've hit ratelimit. Using beatmap mirror."
+        )
+        return Response(content=b"")
+
+    if not (decoded := await response.text()):
+        services.logger.critical(
+            f"Could not parse .osu file (response status: {response.status})"
         )
         return Response(content=b"")
 
     async with aiofiles.open(f".data/beatmaps/{map_id}.osu", "w+") as osu:
-        await osu.write(await response.text())
+        await osu.write(decoded)
 
 
 # @osu.route("/web/bancho_connect.php")

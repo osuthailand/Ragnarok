@@ -20,8 +20,6 @@ REDIS_PORT = os.environ["REDIS_PORT"]
 
 OSU_API_KEY = os.environ["OSU_API_KEY"]
 
-MIRROR_CHIMU = os.environ["MIRROR_CHIMU"]
-MIRROR_KATSU = os.environ["MIRROR_KATSU"]
-MIRROR_NERINYAN = os.environ["MIRROR_NERINYAN"]
+MIRROR_MINO = os.environ["MIRROR_MINO"]
 
 RANK_ALL_MAPS = os.environ["RANK_ALL_MAPS"] == "true"

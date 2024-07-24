@@ -609,34 +609,10 @@ async def get_beatmap(ctx: Context) -> str | None:
     if not (match := ctx.author.match):
         return
 
-    # TODO: rewrite
-
-    mirrors = {
-        "chimu": settings.MIRROR_CHIMU,
-        "nerinyan": settings.MIRROR_NERINYAN,
-        "katsu": settings.MIRROR_KATSU,
-    }
-
-    if not ctx.args:
-        return f"Wrong usage: !mp get <{'|'.join(mirrors.keys())}>"
-
     if not match.map:
         return "The host has probably choosen a map that needs to be updated! Tell them to do so!"
 
-    if ctx.args[0] not in mirrors:
-        return "Mirror doesn't exist in our database"
-
-    url = mirrors[ctx.args[0]]
-
-    match ctx.args[0]:
-        case "chimu":
-            url += f"download/{match.map.set_id}"
-        case "katsu":
-            url += f"d/{match.map.set_id}"
-        case "nerinyan":
-            url += f"d/{match.map.set_id}"
-
-    return f"[{url} Download beatmap from {ctx.args[0]}]"
+    return f"[{settings.MIRROR_MINO}/d/{match.map.set_id} Download beatmap from Mino]"
 
 
 @register_mp_command("invite")

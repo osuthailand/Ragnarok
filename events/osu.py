@@ -182,7 +182,7 @@ async def save_beatmap_file(map_id: int) -> None | Response:
 
     with dot_osu.open("w+") as osu:
         for host in MIRROR_ORDER:
-            start_time = time.time_ns()
+            elapsed_start = time.time_ns()
 
             if host.ratelimit_pause and host.ratelimit_pause > datetime.now():
                 continue
@@ -250,10 +250,9 @@ async def save_beatmap_file(map_id: int) -> None | Response:
 
             osu.write(decoded)
 
-            end_time = time.time_ns()
-            elapsed = (end_time - start_time) // 1e6
+            elapsed = (time.time_ns() - elapsed_start) // 1e6
             services.logger.info(
-                f"Successfully saved {map_id}.osu through {host.name} (elapsed {elapsed}ms)"
+                f"Successfully saved {map_id}.osu through {host.name} - elapsed {elapsed}ms"
             )
             break
 

@@ -1,7 +1,11 @@
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import IntEnum, unique
 import os
 import math
 import copy
+from pathlib import Path
+import time
 import bcrypt
 import hashlib
 import aiofiles
@@ -139,30 +143,106 @@ async def registration(request: Request) -> Response:
 
     return Response(content=b"ok")
 
+@dataclass
+class DotOsuEndpoint:
+    name: str
+    endpoint: str
+    ratelimit_pause: datetime | None = None
+    corrected_files: int = 0
+
+BANCHO_OSU_ENDPOINT = DotOsuEndpoint(
+    name="bancho",
+    endpoint="https://osu.ppy.sh/web/osu-getosufile.php?q={map_id}",
+)
+MINO_OSU_ENDPOINT = DotOsuEndpoint(
+    name="mino",
+    endpoint="https://catboy.best/osu/{map_id}?raw=1",
+)
+MIRROR_ORDER = (BANCHO_OSU_ENDPOINT, MINO_OSU_ENDPOINT)
+
+BEATMAPS_DIRECTORY = Path(".data/beatmaps")
 
 async def save_beatmap_file(map_id: int) -> None | Response:
-    if os.path.exists(f".data/beatmaps/{map_id}.osu"):
+    """
+    `save_beatmap_file(map_id: int)` saves a beatmaps .osu file to the beatmaps directory
+    in .data. It priorities to use bancho's .osu endpoint, as it's the most accurate and 
+    up to date, but sometimes we hit ratelimit and therefore we should use other mirrors.
+    Currently the only other mirror is Mino.
+    """
+    dot_osu = BEATMAPS_DIRECTORY / f"{map_id}.osu"
+
+    if dot_osu.exists():
         return
+    
+    if all(host.ratelimit_pause is not None for host in MIRROR_ORDER):
+        services.logger.critical("Both bancho and mino has hit ratelimit.")
 
-    response = await services.http_client_session.get(
-        f"https://osu.ppy.sh/web/osu-getosufile.php?q={map_id}",
-        headers={"user-agent": "osu!"},
-    )
+    with dot_osu.open("w+") as osu:
+        for host in MIRROR_ORDER:
+            start_time = time.time_ns()
+            
+            if host.ratelimit_pause and host.ratelimit_pause > datetime.now():
+                continue
 
-    if response.status == status.HTTP_429_TOO_MANY_REQUESTS:
-        services.logger.critical(
-            f"Couldn't fetch .osu file for {map_id} as we've hit ratelimit. Using beatmap mirror."
-        )
-        return Response(content=b"")
+            if host.ratelimit_pause and host.ratelimit_pause < datetime.now():
+                services.logger.info(f"{host.name}: ratelimited reset")
+                host.ratelimit_pause = None
 
-    if not (decoded := await response.text()):
-        services.logger.critical(
-            f"Could not parse .osu file (response status: {response.status})"
-        )
-        return Response(content=b"")
+            response = await services.http_client_session.get(host.endpoint.format(map_id=map_id))
 
-    async with aiofiles.open(f".data/beatmaps/{map_id}.osu", "w+") as osu:
-        await osu.write(decoded)
+            # if the response is 459, it should start ratelimit pause and use the next endpoint
+            if response.status == 459:
+                if host.name == "bancho":
+                    host.ratelimit_pause = datetime.now() + timedelta(minutes=5)
+                else:
+                    host.ratelimit_pause = datetime.now() + timedelta(minutes=1, seconds=30)
+
+                services.logger.info(
+                    f"{host.name}: reached ratelimit and will continue to the other mirror."
+                )
+                continue
+
+            # even if the map doesn't exist on bancho, it'll still return 200
+            # therefore we need to check if the response text is empty.
+            if host.name == "bancho" and response.status == 200:
+                decoded = await response.text()
+                if decoded == "":
+                    services.logger.warning(
+                        f"{host.name}: beatmap {map_id} doesn't exist on the official server, checking mirror."
+                    )
+                    continue
+
+            if host.name == "mino":
+                # mino does handle it correctly and returns 404 if the beatmap doesn't exist.
+                # but we'll also want to check for other statuses.
+                if response.status != 200:
+                    decoded = await response.json()
+                    services.logger.warning(
+                        f"{host.name}: beatmap {map_id}.osu returned error: {decoded["error"]}"
+                    )
+                    continue
+
+                # use x-ratelimit-remaining to start ratelimit before 459 and save
+                # our ip from getting automatically banned.
+                ratelimit_remaining = response.headers["x-ratelimit-remaining"]
+
+                if ratelimit_remaining == 1:
+                    host.ratelimit_pause = datetime.now() + timedelta(minutes=1, seconds=30)
+                    continue
+
+            decoded = await response.text()
+
+            if "nginx" in decoded:
+                services.logger.error(f"Unhandled .osu response through {host.name}: (code {response.status})")
+                services.logger.error(decoded)
+                continue
+
+            osu.write(decoded)
+            
+            end_time = time.time_ns()
+            elapsed = (end_time - start_time) // 1e6
+            services.logger.info(f"Successfully saved {map_id}.osu through {host.name} (elapsed {elapsed}ms)")
+            break
 
 
 # @osu.route("/web/bancho_connect.php")

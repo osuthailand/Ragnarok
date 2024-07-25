@@ -248,6 +248,12 @@ async def save_beatmap_file(map_id: int) -> None | Response:
                 services.logger.error(decoded)
                 continue
 
+            if decoded == "":
+                services.logger.error(
+                    f"response from {host.name} was empty and therefore will not be saved"
+                )
+                return
+
             osu.write(decoded)
 
             elapsed = (time.time_ns() - elapsed_start) // 1e6

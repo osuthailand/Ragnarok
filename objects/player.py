@@ -390,7 +390,7 @@ class Player:
 
         # remove friend
         if await services.database.fetch_one(
-            "SELECT 1 FROM friends WHERE user_id1 = :user_id1 AND user_id2 = :user_id2",
+            "SELECT 1 FROM friends WHERE user_id1 = :user_id AND user_id2 = :user_id2",
             {"user_id": self.id, "user_id2": user_id},
         ):
             await services.database.execute(
@@ -406,7 +406,7 @@ class Player:
 
         # add friend
         await services.database.execute(
-            "INSERT INTO friends (user_id1, user_id2) " "VALUES (:user_id1, :user_id2)",
+            "INSERT INTO friends (user_id1, user_id2) " "VALUES (:user_id, :user_id2)",
             {"user_id": self.id, "user_id2": user_id},
         )
         self.friends.add(user_id)

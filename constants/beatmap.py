@@ -24,6 +24,7 @@ class Approved(IntEnum):
     def to_osu(self) -> int:
         return {
             self.GRAVEYARD: 0,
+            self.WIP: 0,
             self.PENDING: 0,
             self.UPDATE: 1,
             self.RANKED: 2,

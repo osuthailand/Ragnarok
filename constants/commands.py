@@ -367,7 +367,7 @@ async def request_beatmap_ranking(ctx: Context) -> str:
 
     if not map:
         return "You haven't /np'd a map yet."
-    
+
     if map.approved == Approved.RANKED:
         return "Map is already the highest approved status!"
 
@@ -376,19 +376,19 @@ async def request_beatmap_ranking(ctx: Context) -> str:
         SELECT
             1
         FROM map_requests
-        WHERE user_id = :user_id AND map_id = :map_id
+        WHERE user_id = :user_id AND set_id = :set_id
         AND status = 0
         """,
-        {"user_id": ctx.author.id, "map_id": map.map_id},
+        {"user_id": ctx.author.id, "set_id": map.set_id},
     ):
         return "You have already requested this map! You can try again, when the beatmap has been checked."
 
     await services.database.execute(
         """
-        INSERT INTO map_requests (map_id, user_id)
-        VALUES (:map_id, :user_id)
+        INSERT INTO map_requests (set_id, user_id)
+        VALUES (:set_id, :user_id)
         """,
-        {"map_id": map.map_id, "user_id": ctx.author.id},
+        {"set_id": map.set_id, "user_id": ctx.author.id},
     )
 
     return "Sent!"

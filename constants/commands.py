@@ -4,6 +4,7 @@ import signal
 import sys
 import random
 import traceback
+from constants.beatmap import Approved
 import settings
 
 from objects.achievement import UserAchievement
@@ -358,6 +359,39 @@ async def last_score(ctx: Context) -> str:
         response += f" [{score.status.name} | {int(score.playtime)/int(map.hit_length)*100:.2f}%]"
 
     return response
+
+
+@register_command("request", category="General")
+async def request_beatmap_ranking(ctx: Context) -> str:
+    map = ctx.author.last_np
+
+    if not map:
+        return "You haven't /np'd a map yet."
+    
+    if map.approved == Approved.RANKED:
+        return "Map is already the highest approved status!"
+
+    if await services.database.fetch_one(
+        """
+        SELECT
+            1
+        FROM map_requests
+        WHERE user_id = :user_id AND map_id = :map_id
+        AND status = 0
+        """,
+        {"user_id": ctx.author.id, "map_id": map.map_id},
+    ):
+        return "You have already requested this map! You can try again, when the beatmap has been checked."
+
+    await services.database.execute(
+        """
+        INSERT INTO map_requests (map_id, user_id)
+        VALUES (:map_id, :user_id)
+        """,
+        {"map_id": map.map_id, "user_id": ctx.author.id},
+    )
+
+    return "Sent!"
 
 
 #

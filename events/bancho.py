@@ -906,7 +906,7 @@ async def mp_complete(player: Player, sr: Reader) -> None:
     ]
 
     for slot in match.slots:
-        if slot.player in players_played:
+        if slot.player is not None and slot.player in players_played:
             slot.status = SlotStatus.NOTREADY
 
     match.in_progress = False

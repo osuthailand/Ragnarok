@@ -110,8 +110,9 @@ class Player:
 
     @property
     def is_restricted(self) -> bool:
+        # Fixed operator precedence bug
         return not (self.privileges & Privileges.VERIFIED) and (
-            not self.privileges & Privileges.PENDING
+            not (self.privileges & Privileges.PENDING)
         )
 
     @property

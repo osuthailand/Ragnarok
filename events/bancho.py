@@ -181,7 +181,8 @@ async def login(req: Request) -> Response:
         )
 
     if services.osu_settings.server_maintenance.value and user_info["id"] != 3275:
-        if not user_info["privileges"] & Privileges.DEVELOPER | Privileges.ADMIN:
+        # Check if user has DEVELOPER or ADMIN privileges (fixed operator precedence bug)
+        if not (user_info["privileges"] & (Privileges.DEVELOPER | Privileges.ADMIN)):
             return failed_login(
                 LoginResponse.UNAUTHORIZED_CUTTING_EDGE_BUILD,
                 extra=writer.notification("Server is currently under maintenance."),
@@ -220,8 +221,8 @@ async def login(req: Request) -> Response:
             extra=writer.notification(ALREADY_ONLINE),
         )
 
-    # check if user is restricted
-    if not user_info["privileges"] & Privileges.VERIFIED | Privileges.PENDING:
+    # check if user is restricted (fixed operator precedence bug)
+    if not (user_info["privileges"] & (Privileges.VERIFIED | Privileges.PENDING)):
         response += writer.notification(RESTRICTED_MSG)
 
     # [1:] removes the little b infront of the version

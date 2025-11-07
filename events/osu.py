@@ -16,6 +16,8 @@ from packets import writer
 
 
 from utils import general
+from utils.safe_eval import safe_eval
+from utils.validation import get_required_param, get_optional_param, ValidationError
 from functools import wraps
 from objects import services
 from collections import defaultdict
@@ -82,11 +84,42 @@ osu = Router()
 @osu.route("/users", methods=["POST"])
 async def registration(request: Request) -> Response:
     form = await request.form()
-    username = str(form["user[username]"])
-    email = str(form["user[user_email]"])
-    password = str(form["user[password]"])
+
+    # Validate required form fields
+    try:
+        username = get_required_param(form, "user[username]", str)
+        email = get_required_param(form, "user[user_email]", str)
+        password = get_required_param(form, "user[password]", str)
+    except ValidationError as e:
+        return general.ORJSONResponse(
+            status_code=400,
+            content={"form_error": {"user": {"error": [str(e)]}}}
+        )
 
     error_response = defaultdict(list)
+
+    # Validate username length and characters
+    if len(username) < 2 or len(username) > 15:
+        error_response["username"].append(
+            "Username must be between 2 and 15 characters."
+        )
+
+    # Validate email format (basic check)
+    if "@" not in email or "." not in email.split("@")[-1]:
+        error_response["user_email"].append(
+            "Please provide a valid email address."
+        )
+
+    # Validate password length
+    if len(password) < 8:
+        error_response["password"].append(
+            "Password must be at least 8 characters long."
+        )
+
+    if error_response:
+        return general.ORJSONResponse(
+            status_code=400, content={"form_error": {"user": error_response}}
+        )
 
     if await services.database.fetch_one(
         "SELECT 1 FROM users WHERE username = :username", {"username": username}
@@ -117,7 +150,10 @@ async def registration(request: Request) -> Response:
             },
         )
 
-    if form["check"] == "0":
+    # Validate check parameter (defaults to "1" if not provided)
+    check_value = get_optional_param(form, "check", "1", str)
+
+    if check_value == "0":
         password_md5 = hashlib.md5(password.encode()).hexdigest().encode()
         password_hash = bcrypt.hashpw(password_md5, bcrypt.gensalt())
 
@@ -293,9 +329,14 @@ class LeaderboardType(IntEnum):
 async def get_scores(request: Request, player: Player) -> Response:
     await player.update_latest_activity()
 
-    map_md5 = request.query_params["c"]
-    filename = request.query_params["f"]
-    set_id = int(request.query_params["i"])
+    # Validate required parameters
+    try:
+        map_md5 = get_required_param(request.query_params, "c", str)
+        filename = get_required_param(request.query_params, "f", str)
+        set_id = get_required_param(request.query_params, "i", int)
+    except ValidationError as e:
+        services.logger.warning(f"Invalid parameters in get_scores: {e}")
+        return Response(content=b"-1|false")
 
     if not (map := await services.beatmaps.get(map_md5)):
         map_set = await Beatmap.get_from_osu_api(set_id=set_id)
@@ -478,7 +519,8 @@ async def score_submission(request: Request) -> Response:
 
     await score.player.update_latest_activity()
 
-    if not score.player.privileges & Privileges.VERIFIED:
+    # Fixed operator precedence bug
+    if not (score.player.privileges & Privileges.VERIFIED):
         return Response(content=b"error: verify")
 
     if score.mods & Mods.DISABLED:
@@ -667,7 +709,20 @@ async def score_submission(request: Request) -> Response:
         # if the achievement condition matches
         # with the score, it should be unlocked.
         try:
-            if eval(achievement.condition):
+            # Use safe_eval instead of eval() to prevent code injection
+            # Provide score, stats, Mode, and Gamemode to the evaluation context
+            condition_result = safe_eval(
+                achievement.condition,
+                {
+                    "score": score,
+                    "stats": stats,
+                    "Mode": Mode,
+                    "Gamemode": Gamemode,
+                    "Mods": Mods,
+                }
+            )
+
+            if condition_result:
                 services.logger.info(
                     f"{stats.username} unlocked {achievement.name} that has condition: {achievement.condition}"
                 )
@@ -684,8 +739,11 @@ async def score_submission(request: Request) -> Response:
 
                 stats.achievements.append(user_achievement)
                 awarded_achievements.append(achievement)
-        except:
-            # usually "failed" conditions are due to `Player.last_score` is none
+        except (ValueError, SyntaxError, AttributeError, TypeError, KeyError) as e:
+            # Log condition evaluation failures (usually due to missing attributes or invalid conditions)
+            services.logger.debug(
+                f"Achievement condition evaluation failed for {achievement.name}: {e}"
+            )
             continue
 
     achievements = "/".join(str(achievement) for achievement in awarded_achievements)

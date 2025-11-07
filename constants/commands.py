@@ -410,9 +410,10 @@ def ensure_match(host: bool):
                 if not ctx.reciever.is_multiplayer:
                     return "This command can only be performed in a multiplayer match"
 
+                # Fixed operator precedence bug
                 if (
                     host and ctx.author.match.host != ctx.author.id
-                ) and not ctx.author.privileges & Privileges.MODERATOR:
+                ) and not (ctx.author.privileges & Privileges.MODERATOR):
                     return "Only the host can perform this command."
 
                 return await cb(ctx, *args, **kwargs)

@@ -796,6 +796,8 @@ async def mp_change_settings(player: Player, sr: Reader) -> None:
 
     if updated_match.scoring_type != match.scoring_type:
         match.scoring_type = updated_match.scoring_type
+        # Reset PP winning condition when scoring type is changed via client
+        match.pp_win_condition = False
 
     if updated_match.team_type != match.team_type:
         match.team_type = updated_match.team_type

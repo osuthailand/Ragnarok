@@ -47,6 +47,22 @@ async def check_for_osu_settings_update() -> None:
     await services.osu_settings.initialize_from_db()
 
 
+@register_task(delay=60)
+async def cleanup_idle_matches() -> None:
+    """Remove matches that have been idle for more than 30 minutes."""
+    idle_matches = []
+
+    for match in services.matches:
+        if match.is_idle and len(match.connected) == 0:
+            idle_matches.append(match)
+
+    for match in idle_matches:
+        services.logger.info(
+            f"Disbanding idle match {match.name} (ID: {match.id}) - idle for 30+ minutes"
+        )
+        services.matches.remove(match)
+
+
 async def run_all_tasks() -> None:
     while True:
         for task in tasks:

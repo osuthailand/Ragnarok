@@ -286,6 +286,9 @@ class Player:
 
         self.enqueue(writer.match_join(self.match))
 
+        # Update last action time for idle detection
+        match.last_action_time = time.time()
+
         services.logger.info(f"{self.username} joined {match}")
         self.match.enqueue_state(lobby=True)
 
@@ -299,6 +302,9 @@ class Player:
         match.chat.disconnect(self)
         match.connected.remove(self)
         slot.reset()
+
+        # Update last action time for idle detection
+        match.last_action_time = time.time()
 
         services.logger.info(f"{self.username} left {match}")
 
@@ -345,7 +351,8 @@ class Player:
             self.username_with_tag = self.username
             return
 
-        self.username_with_tag = f"[{clan_tag["tag"]}] {self.username}"
+        tag = clan_tag["tag"]
+        self.username_with_tag = f"[{tag}] {self.username}"
 
     async def get_achievements(self) -> None:
         achievements = await services.database.fetch_all(
@@ -544,10 +551,19 @@ class Player:
     async def get_stats(
         self, gamemode: Gamemode = Gamemode.VANILLA, mode: Mode = Mode.OSU
     ) -> dict[str, Any] | None:
+        ranked_score = mode.to_db("ranked_score")
+        total_score = mode.to_db("total_score")
+        accuracy = mode.to_db("accuracy")
+        playcount = mode.to_db("playcount")
+        pp = mode.to_db("pp")
+        level = mode.to_db("level")
+        total_hits = mode.to_db("total_hits")
+        max_combo = mode.to_db("max_combo")
+
         _stats = await services.database.fetch_one(
-            f"SELECT {mode.to_db("ranked_score")}, {mode.to_db("total_score")}, "
-            f"{mode.to_db("accuracy")}, {mode.to_db("playcount")}, {mode.to_db("pp")}, "
-            f"{mode.to_db("level")}, {mode.to_db("total_hits")}, {mode.to_db("max_combo")} "
+            f"SELECT {ranked_score}, {total_score}, "
+            f"{accuracy}, {playcount}, {pp}, "
+            f"{level}, {total_hits}, {max_combo} "
             f"FROM {gamemode.to_db} WHERE id = :user_id",
             {"user_id": self.id},
         )

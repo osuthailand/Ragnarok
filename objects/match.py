@@ -6,9 +6,12 @@ from constants.mods import Mods
 from packets import writer
 from objects import services
 from typing import TYPE_CHECKING, Union
+import asyncio
+import time
 
 if TYPE_CHECKING:
     from objects.player import Player
+    from objects.match_timer import MatchStartTimer
 
 
 class Slot:
@@ -67,6 +70,15 @@ class Match:
 
         self.is_locked: bool = False
 
+        # Thread safety lock
+        self.lock: asyncio.Lock = asyncio.Lock()
+
+        # Action timestamp tracking for idle detection
+        self.last_action_time: float = time.time()
+
+        # Match countdown timer
+        self.start_timer: "MatchStartTimer | None" = None
+
         self.chat: Channel = Channel(
             **{
                 "raw": f"#multi_{self.id}",
@@ -83,6 +95,11 @@ class Match:
     @property
     def embed(self) -> str:
         return f"[osump://{self.id}/{self.password.replace(' ', '_')} {self.name}]"
+
+    @property
+    def is_idle(self) -> bool:
+        """Check if match has been idle for more than 30 minutes."""
+        return (time.time() - self.last_action_time) > 1800  # 30 minutes
 
     def get_free_slot(self) -> int | None:
         for id, slot in enumerate(self.slots):
@@ -135,3 +152,16 @@ class Match:
                 return
 
             channel.enqueue(data)
+
+    async def start_countdown(self, duration: float = 10.0):
+        """Start a countdown timer that automatically starts the match."""
+        if self.start_timer is None:
+            from objects.match_timer import MatchStartTimer
+            self.start_timer = MatchStartTimer(self)
+
+        await self.start_timer.start(duration)
+
+    async def stop_countdown(self):
+        """Stop the countdown timer if running."""
+        if self.start_timer and self.start_timer.running:
+            await self.start_timer.stop()

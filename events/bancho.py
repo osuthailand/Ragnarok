@@ -297,7 +297,8 @@ async def login(req: Request) -> Response:
             mismatched_ids.append("`disk_id`")
 
         if mismatched_ids:
-            msg = f"{user_info['username']} ({user_info['id']}) has mismatched hardware ids. Mismatched IDs are {", ".join(mismatched_ids)}"
+            mismatched_str = ", ".join(mismatched_ids)
+            msg = f"{user_info['username']} ({user_info['id']}) has mismatched hardware ids. Mismatched IDs are {mismatched_str}"
 
             services.logger.warning(msg)
             await services.bot.log(msg, type=LoggingType.HWID_CHECKS)
@@ -724,6 +725,13 @@ async def mp_ready_up(player: Player, sr: Reader) -> None:
 
     slot.status = SlotStatus.READY
 
+    # Check if all players are ready
+    ready_count = sum(1 for s in match.slots if s.status == SlotStatus.READY and s.player)
+    used_count = sum(1 for s in match.slots if s.player is not None)
+
+    if ready_count == used_count and used_count > 0:
+        match.enqueue(writer.notification("All players are ready!"))
+
     match.enqueue_state()
 
 
@@ -736,6 +744,13 @@ async def mp_lock_slot(player: Player, sr: Reader) -> None:
     if not match or match.in_progress:
         return
 
+    # Host verification - only host can lock/unlock slots
+    if match.host != player.id:
+        services.logger.warn(
+            f"{player.username} tried to lock slot but is not host."
+        )
+        return
+
     slot = match.find_slot(slot_id)
 
     if not slot:
@@ -744,10 +759,34 @@ async def mp_lock_slot(player: Player, sr: Reader) -> None:
         )
         return
 
+    # Can't lock own slot
+    if slot.player is not None and slot.player == player:
+        services.logger.warn(
+            f"{player.username} tried to lock their own slot."
+        )
+        return
+
+    # If slot has a player and we're locking it, eject the player
+    if slot.player is not None and slot.status != SlotStatus.LOCKED:
+        ejected_player = slot.player
+        ejected_player.leave_match()
+        ejected_player.enqueue(writer.match_part())
+        services.logger.info(
+            f"{player.username} ejected {ejected_player.username} by locking their slot."
+        )
+
     if slot.status == SlotStatus.LOCKED:
         slot.status = SlotStatus.OPEN
     else:
-        slot.status = SlotStatus.LOCKED
+        # Keep minimum 2 open slots
+        open_count = sum(1 for s in match.slots if s.status == SlotStatus.OPEN)
+        if open_count > 2:
+            slot.status = SlotStatus.LOCKED
+        else:
+            services.logger.warn(
+                f"{player.username} tried to lock slot but minimum open slots reached."
+            )
+            return
 
     match.enqueue_state()
 
@@ -763,6 +802,9 @@ async def mp_change_settings(player: Player, sr: Reader) -> None:
             "but they're not in a match or the match is already in progress."
         )
         return
+
+    # Update last action time for idle detection
+    match.last_action_time = time.time()
 
     updated_match = await sr.read_match()
 
@@ -814,6 +856,9 @@ async def mp_start(player: Player, sr: Reader) -> None:
             "but they're not in a match or the match is already in progress."
         )
         return
+
+    # Update last action time for idle detection
+    match.last_action_time = time.time()
 
     if player.id != match.host:
         services.logger.warn(
@@ -898,6 +943,9 @@ async def mp_complete(player: Player, sr: Reader) -> None:
             "but they're not in a match or the match is not in progress."
         )
         return
+
+    # Update last action time for idle detection
+    match.last_action_time = time.time()
 
     players_played = [
         slot.player
@@ -1237,6 +1285,13 @@ async def change_pass(player: Player, sr: Reader) -> None:
         services.logger.critical(
             f"{player.username} requested MATCH_CHANGE_PASSWORD packet, "
             "but they're not in a match or the match is already in progress."
+        )
+        return
+
+    # Host verification - only host can change password
+    if match.host != player.id:
+        services.logger.warn(
+            f"{player.username} tried to change password but is not host."
         )
         return
 

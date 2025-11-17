@@ -693,6 +693,36 @@ async def change_host(ctx: Context) -> str | None:
     match.transfer_host(target)
 
 
+@register_mp_command("timer")
+@ensure_match(host=True)
+async def match_timer(ctx: Context) -> str | None:
+    if not (match := ctx.author.match):
+        return
+
+    if not ctx.args:
+        return "Usage: !mp timer <seconds> or !mp timer stop"
+
+    if ctx.args[0].lower() == "stop":
+        if match.start_timer and match.start_timer.running:
+            await match.stop_countdown()
+            return "Countdown stopped."
+        return "No countdown is running."
+
+    try:
+        duration = int(ctx.args[0])
+    except ValueError:
+        return "Invalid duration. Usage: !mp timer <seconds>"
+
+    if duration < 1 or duration > 300:
+        return "Duration must be between 1 and 300 seconds."
+
+    if match.in_progress:
+        return "Cannot start timer while match is in progress."
+
+    await match.start_countdown(duration)
+    return f"Starting {duration} second countdown..."
+
+
 #
 # Staff commands
 #

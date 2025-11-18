@@ -33,6 +33,8 @@ REQUIRED_DIRECTORIES = (
     ".data/beatmaps",
     ".data/ss",
     ".data/osz2",
+    ".data/osz",
+    ".data/custom_beatmaps",
 )
 
 

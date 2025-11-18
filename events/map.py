@@ -165,6 +165,13 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
     metadata = osz2_data.metadata
 
     for child_map in maps:
+        # Validate that raw_data is not empty (could happen if decryption fails)
+        if not child_map.raw_data:
+            services.logger.error(
+                f"Empty raw_data for beatmap file {child_map.name}, skipping..."
+            )
+            continue
+
         # TODO: .osu parser specifically made for this, instead of using external libraries
         attributes = BMap(bytes=child_map.raw_data)
         difficulty = Performance().calculate(attributes).difficulty

@@ -205,12 +205,12 @@ class OSZ2:
         return files
 
     @classmethod
-    def parse(cls, raw: bytes, file_type: int = 1) -> Union["OSZ2", None]:
+    def parse(cls, raw: bytes, file_type: int = 1, set_id: int = None) -> Union["OSZ2", None]:
         match file_type:
             case 1:
                 return cls().parse_full_submit(raw)
             case 2:
-                return cls().parse_patch(raw)
+                return cls().parse_patch(raw, set_id)
             case _:
                 # TODO: maybe read the header and determine from there? or maybe that'd be useless
                 services.logger.warn(
@@ -229,7 +229,7 @@ class OSZ2:
 
         return x
 
-    def parse_patch(self, raw: bytes) -> Union["OSZ2", None]:
+    def parse_patch(self, raw: bytes, set_id: int = None) -> Union["OSZ2", None]:
         data = raw
         reader = Reader(data)
 
@@ -257,9 +257,19 @@ class OSZ2:
             fileobj=io.BytesIO(bytes(reader.data))
         )  # what the fuck?
 
-        old_file_bytes = open(
-            f".data/osz2/100000001.osz2", "rb"
-        ).read()  # PLACEHOLDDDDDDDDEEEEEEEEEEEEEEEEEERRRR!!!!!!!!!!!!!!!!!
+        # Load the old osz2 file for this set_id
+        if set_id is None:
+            services.logger.critical("patch submission requires set_id")
+            return
+
+        old_file_path = f".data/osz2/{set_id}.osz2"
+        if not os.path.exists(old_file_path):
+            services.logger.critical(
+                f"Cannot apply patch: old osz2 file not found at {old_file_path}"
+            )
+            return
+
+        old_file_bytes = open(old_file_path, "rb").read()
         new_file_bytes = bytearray(new_size)
 
         old_size = len(old_file_bytes)
@@ -321,7 +331,10 @@ class OSZ2:
         gz_data.close()
         gz_extra_data.close()
 
-        services.logger.info("OK!")
+        services.logger.info("Patch applied successfully, parsing result as full submission")
+
+        # Parse the patched bytes as a full osz2 submission
+        return self.parse_full_submit(bytes(new_file_bytes))
 
     def parse_full_submit(self, raw: bytes) -> Union["OSZ2", None]:
         data = raw

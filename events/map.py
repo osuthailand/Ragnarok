@@ -157,10 +157,8 @@ async def beatmap_submission(req: Request, p: Player) -> Response:
     with open(f".data/osz2/{"PATCHED_" if patch else ""}{set_id}.osz2", "wb+") as osz2:
         osz2.write(data)
 
-    if not (osz2_data := OSZ2.parse(raw=data, file_type=int(form["t"]))):  # type: ignore
+    if not (osz2_data := OSZ2.parse(raw=data, file_type=int(form["t"]), set_id=int(set_id))):  # type: ignore
         return Response(content=b"error while parsing osz2")
-
-    set_id = form["s"]
     maps = osz2_data.extract_osu_files()
     metadata = osz2_data.metadata
 
